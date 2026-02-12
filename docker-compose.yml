@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: quantlab_db
+    restart: always
+    environment:
+      POSTGRES_USER: quantlab
+      POSTGRES_PASSWORD: quantlab
+      POSTGRES_DB: quantlab
+    ports:
+      - "5432:5432"
