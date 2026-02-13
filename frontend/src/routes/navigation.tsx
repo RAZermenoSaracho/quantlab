@@ -5,7 +5,7 @@ import NotFound from "../pages/NotFound";
 
 export const nav = [
     { path: "/login", element: <Login />, isPrivate: false },
-    { path: "/", element: <Dashboard />, isPrivate: true },
+    { path: "/dashboard", element: <Dashboard />, isPrivate: true },
     { path: "/backtest/:id", element: <BacktestDetail />, isPrivate: true },
     { path: "*", element: <NotFound />, isPrivate: false },
 ];

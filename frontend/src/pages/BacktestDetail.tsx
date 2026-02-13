@@ -5,7 +5,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "rec
 export default function BacktestDetail() {
     const [data, setData] = useState<any>(null);
 
-    const runId = "0445449f-86ce-451c-8999-2200ba99c9d3"; // temporal hardcode
+    const runId = "6a61e724-a6e6-4035-9afb-4e801b8decf0"; // temporal hardcode
 
     useEffect(() => {
         const fetchData = async () => {

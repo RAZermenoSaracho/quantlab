@@ -1,11 +1,11 @@
 import { Router } from "express";
-import { createBacktest } from "../controllers/backtest.controller";
+import { createBacktest, getAllBacktests, getBacktestById } from "../controllers/backtest.controller";
 import { requireAuth } from "../middleware/auth.middleware";
-import { getBacktestById } from "../controllers/backtest.controller";
 
 const router = Router();
 
-router.post("/", requireAuth, createBacktest);
+router.get("/", requireAuth, getAllBacktests);
 router.get("/:id", requireAuth, getBacktestById);
+router.post("/create", requireAuth, createBacktest);
 
 export default router;

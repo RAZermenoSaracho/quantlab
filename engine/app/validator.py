@@ -3,62 +3,111 @@ from typing import Dict, Any
 
 ALLOWED_RETURN_VALUES = {"BUY", "SELL", "HOLD"}
 
+
 class AlgorithmValidationError(Exception):
     pass
 
 
+# ==============================
+# AST SECURITY CHECKS
+# ==============================
+
 def _check_forbidden_imports(tree: ast.AST):
     for node in ast.walk(tree):
-        if isinstance(node, ast.Import) or isinstance(node, ast.ImportFrom):
-            raise AlgorithmValidationError("Imports are not allowed in the algorithm.")
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            raise AlgorithmValidationError(
+                "Imports are not allowed in the algorithm."
+            )
 
 
 def _check_no_infinite_loops(tree: ast.AST):
     for node in ast.walk(tree):
         if isinstance(node, ast.While):
-            raise AlgorithmValidationError("While loops are not allowed.")
+            raise AlgorithmValidationError(
+                "While loops are not allowed."
+            )
 
+
+def _check_forbidden_calls(tree: ast.AST):
+    forbidden_calls = {"exec", "eval", "open", "__import__", "compile", "input"}
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name):
+                if node.func.id in forbidden_calls:
+                    raise AlgorithmValidationError(
+                        f"Use of '{node.func.id}' is not allowed."
+                    )
+
+
+# ==============================
+# SAFE EXECUTION ENVIRONMENT
+# ==============================
+SAFE_GLOBALS = {
+    "__builtins__": {
+        "abs": abs,
+        "min": min,
+        "max": max,
+        "sum": sum,
+        "len": len,
+        "range": range,
+        "float": float,
+        "int": int,
+    },
+    # helper functions available to strategies
+    "mean": lambda values: sum(values) / len(values) if values else 0,
+}
+# ==============================
+# MAIN VALIDATOR
+# ==============================
 
 def validate_algorithm(code: str) -> Dict[str, Any]:
     """
-    Validates user algorithm code.
+    Validates user algorithm code safely.
     """
 
+    # 1️⃣ Parse AST
     try:
         tree = ast.parse(code)
     except SyntaxError as e:
         raise AlgorithmValidationError(f"Syntax error: {str(e)}")
 
-    # Security checks
+    # 2️⃣ Security checks
     _check_forbidden_imports(tree)
     _check_no_infinite_loops(tree)
+    _check_forbidden_calls(tree)
 
-    # Execute in restricted namespace
-    local_env = {}
+    # 3️⃣ Create isolated execution environment
+    execution_env = SAFE_GLOBALS.copy()
 
     try:
-        exec(code, {}, local_env)
+        exec(code, execution_env, execution_env)
     except Exception as e:
         raise AlgorithmValidationError(f"Execution error: {str(e)}")
 
-    if "generate_signal" not in local_env:
-        raise AlgorithmValidationError("Function 'generate_signal' not found.")
+    # 4️⃣ Validate function existence
+    if "generate_signal" not in execution_env:
+        raise AlgorithmValidationError(
+            "Function 'generate_signal' not found."
+        )
 
-    if not callable(local_env["generate_signal"]):
-        raise AlgorithmValidationError("'generate_signal' is not callable.")
+    if not callable(execution_env["generate_signal"]):
+        raise AlgorithmValidationError(
+            "'generate_signal' is not callable."
+        )
 
-    # Test call with dummy candle
+    # 5️⃣ Test execution
     test_candle = {
         "open": 100.0,
         "high": 105.0,
         "low": 95.0,
         "close": 102.0,
         "volume": 1000.0,
-        "timestamp": 1234567890
+        "timestamp": 1234567890,
     }
 
     try:
-        result = local_env["generate_signal"](test_candle)
+        result = execution_env["generate_signal"](test_candle)
     except Exception as e:
         raise AlgorithmValidationError(
             f"Error when calling generate_signal: {str(e)}"

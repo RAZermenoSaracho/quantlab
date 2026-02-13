@@ -2,9 +2,15 @@ import requests
 from datetime import datetime
 from typing import Dict, Any, List
 
+from .validator import SAFE_GLOBALS
+
 BINANCE_BASE_URL = "https://api.binance.com"
 FEE_RATE = 0.001  # 0.1%
 
+
+# ==========================================
+# BINANCE DATA FETCH
+# ==========================================
 
 def fetch_candles(symbol: str, interval: str, start_date: str, end_date: str):
     start_ts = int(datetime.fromisoformat(start_date).timestamp() * 1000)
@@ -26,6 +32,10 @@ def fetch_candles(symbol: str, interval: str, start_date: str, end_date: str):
     return response.json()
 
 
+# ==========================================
+# MAIN BACKTEST
+# ==========================================
+
 def run_backtest(
     code: str,
     symbol: str,
@@ -35,9 +45,15 @@ def run_backtest(
     end_date: str
 ) -> Dict[str, Any]:
 
-    local_env = {}
-    exec(code, {}, local_env)
-    generate_signal = local_env["generate_signal"]
+    # 🔐 SAFE EXECUTION ENVIRONMENT
+    execution_env = SAFE_GLOBALS.copy()
+
+    exec(code, execution_env, execution_env)
+
+    if "generate_signal" not in execution_env:
+        raise Exception("generate_signal not defined")
+
+    generate_signal = execution_env["generate_signal"]
 
     candles_raw = fetch_candles(symbol, timeframe, start_date, end_date)
 
@@ -47,12 +63,13 @@ def run_backtest(
     equity_curve: List[float] = [initial_balance]
 
     peak_equity = initial_balance
-    max_drawdown = 0
+    max_drawdown = 0.0
 
     wins = []
     losses = []
 
     for candle in candles_raw:
+
         candle_data = {
             "open": float(candle[1]),
             "high": float(candle[2]),
@@ -64,16 +81,22 @@ def run_backtest(
 
         signal = generate_signal(candle_data)
 
+        # ------------------------------
+        # BUY
+        # ------------------------------
         if signal == "BUY" and position is None:
             position = candle_data["close"]
 
+        # ------------------------------
+        # SELL
+        # ------------------------------
         elif signal == "SELL" and position is not None:
             entry_price = position
             exit_price = candle_data["close"]
 
             gross_pnl = exit_price - entry_price
 
-            # Apply fees (entry + exit)
+            # Fees (entry + exit)
             fee = (entry_price + exit_price) * FEE_RATE
             net_pnl = gross_pnl - fee
 
@@ -93,20 +116,27 @@ def run_backtest(
 
             position = None
 
-            equity_curve.append(balance)
+        # ------------------------------
+        # EQUITY TRACKING (EVERY CANDLE)
+        # ------------------------------
+        equity_curve.append(balance)
 
-            # Update drawdown
-            if balance > peak_equity:
-                peak_equity = balance
+        if balance > peak_equity:
+            peak_equity = balance
 
-            drawdown = (peak_equity - balance) / peak_equity
-            if drawdown > max_drawdown:
-                max_drawdown = drawdown
+        drawdown = (peak_equity - balance) / peak_equity
+        if drawdown > max_drawdown:
+            max_drawdown = drawdown
+
+    # ==========================================
+    # METRICS
+    # ==========================================
 
     total_return = balance - initial_balance
     total_return_pct = (total_return / initial_balance) * 100
 
-    win_rate = (len(wins) / len(trades) * 100) if trades else 0
+    total_trades = len(trades)
+    win_rate = (len(wins) / total_trades * 100) if total_trades else 0
 
     avg_win = sum(wins) / len(wins) if wins else 0
     avg_loss = sum(losses) / len(losses) if losses else 0
@@ -120,7 +150,7 @@ def run_backtest(
         "final_balance": balance,
         "total_return": total_return,
         "total_return_pct": total_return_pct,
-        "total_trades": len(trades),
+        "total_trades": total_trades,
         "win_rate_pct": win_rate,
         "avg_win": avg_win,
         "avg_loss": avg_loss,

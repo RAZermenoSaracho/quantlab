@@ -151,3 +151,33 @@ export async function getBacktestById(
         next(err);
     }
 }
+
+export async function getAllBacktests(req: AuthRequest, res: Response) {
+  try {
+    const userId = req.user?.id;
+
+    const result = await pool.query(
+      `
+      SELECT 
+        r.id,
+        r.symbol,
+        r.timeframe,
+        r.status,
+        r.created_at,
+        m.total_return_percent,
+        m.win_rate_percent,
+        m.profit_factor
+      FROM backtest_runs r
+      LEFT JOIN metrics m ON m.run_id = r.id
+      WHERE r.user_id = $1
+      ORDER BY r.created_at DESC
+      `,
+      [userId]
+    );
+
+    res.json({ backtests: result.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch backtests" });
+  }
+}
