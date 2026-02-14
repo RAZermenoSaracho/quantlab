@@ -1,0 +1,23 @@
+:root {
+  /* Backgrounds */
+  --color-bg-main: #0f172a;
+  --color-bg-panel: #111827;
+  --color-bg-elevated: #1e293b;
+
+  /* Borders */
+  --color-border: #1f2937;
+
+  /* Text */
+  --color-text-primary: #e5e7eb;
+  --color-text-secondary: #9ca3af;
+
+  /* Accent */
+  --color-accent: #3b82f6;
+
+  /* Trading colors */
+  --color-bull: #22c55e;
+  --color-bear: #ef4444;
+
+  /* Hover */
+  --color-hover: #1f2937;
+}

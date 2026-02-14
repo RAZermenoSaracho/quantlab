@@ -1,64 +1,44 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { getAllBacktests } from "../services/backtest.service";
-
-interface Backtest {
-  id: string;
-  symbol: string;
-  timeframe: string;
-  status: string;
-  total_return_percent: string;
-  win_rate_percent: string;
-  profit_factor: string;
-  created_at: string;
-}
+import BacktestsList from "./backtests/BacktestsList";
 
 export default function Dashboard() {
-  const [data, setData] = useState<Backtest[]>([]);
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    async function fetchData() {
-      const res = await getAllBacktests();
-      setData(res.backtests);
-    }
-    fetchData();
-  }, []);
-
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-6">Backtests</h1>
+    <div className="p-6 space-y-10">
+      <h1 className="text-3xl font-bold text-white">
+        Dashboard
+      </h1>
 
-      <div className="overflow-x-auto">
-        <table className="w-full border">
-          <thead className="bg-gray-100">
-            <tr>
-              <th className="p-3 text-left">Symbol</th>
-              <th className="p-3 text-left">TF</th>
-              <th className="p-3 text-left">Return %</th>
-              <th className="p-3 text-left">Win Rate</th>
-              <th className="p-3 text-left">PF</th>
-              <th className="p-3 text-left">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.map((run) => (
-              <tr
-                key={run.id}
-                onClick={() => navigate(`/backtest/${run.id}`)}
-                className="cursor-pointer hover:bg-gray-50 border-t"
-              >
-                <td className="p-3">{run.symbol}</td>
-                <td className="p-3">{run.timeframe}</td>
-                <td className="p-3">{run.total_return_percent}</td>
-                <td className="p-3">{run.win_rate_percent}</td>
-                <td className="p-3">{run.profit_factor}</td>
-                <td className="p-3">{run.status}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {/* Aquí luego meteremos KPIs */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="bg-slate-800 border border-slate-700 rounded-lg p-6">
+          <p className="text-slate-400 text-sm">
+            Total Backtests
+          </p>
+          <p className="text-2xl font-bold text-white mt-2">
+            —
+          </p>
+        </div>
+
+        <div className="bg-slate-800 border border-slate-700 rounded-lg p-6">
+          <p className="text-slate-400 text-sm">
+            Avg Return
+          </p>
+          <p className="text-2xl font-bold text-white mt-2">
+            —
+          </p>
+        </div>
+
+        <div className="bg-slate-800 border border-slate-700 rounded-lg p-6">
+          <p className="text-slate-400 text-sm">
+            Win Rate
+          </p>
+          <p className="text-2xl font-bold text-white mt-2">
+            —
+          </p>
+        </div>
       </div>
+
+      {/* Recent Backtests */}
+      <BacktestsList limit={5} showTitle />
     </div>
   );
 }

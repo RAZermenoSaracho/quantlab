@@ -1,19 +1,19 @@
+import Sidebar from "./Sidebar";
+import Navbar from "./Navbar";
 import { Outlet } from "react-router-dom";
-import { useAuth } from "../../context/AuthProvider";
 
 export default function Layout() {
-    const { logout } = useAuth();
+  return (
+    <div className="flex bg-slate-900 text-white min-h-screen">
+      <Sidebar />
 
-    return (
-        <div>
-            <nav className="p-4 bg-gray-900 text-white flex justify-between">
-                <span className="font-bold">QuantLab</span>
-                <button onClick={logout}>Logout</button>
-            </nav>
+      <div className="flex-1 flex flex-col">
+        <Navbar />
 
-            <div className="p-6">
-                <Outlet />
-            </div>
-        </div>
-    );
+        <main className="flex-1 p-6 overflow-y-auto">
+          <Outlet />
+        </main>
+      </div>
+    </div>
+  );
 }
