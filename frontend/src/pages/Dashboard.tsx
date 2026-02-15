@@ -1,44 +1,96 @@
+import { useEffect, useState } from "react";
 import BacktestsList from "./backtests/BacktestsList";
+import { getAllBacktests } from "../services/backtest.service";
+import KpiCard from "../components/ui/KpiCard";
+
+type Backtest = {
+  id: string;
+  symbol: string;
+  timeframe: string;
+  initial_balance: string;
+  total_return_usdt: string;
+  total_return_percent: string;
+  total_trades: number;
+  win_rate_percent: string;
+  status: string;
+  created_at: string;
+};
 
 export default function Dashboard() {
+  const [backtests, setBacktests] = useState<Backtest[]>([]);
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const response = await getAllBacktests();
+
+        // 👇 adaptado al service actual
+        const runs = response.backtests || [];
+        setBacktests(runs);
+      } catch (err) {
+        console.error(err);
+        setBacktests([]);
+      }
+    }
+
+    load();
+  }, []);
+
+  // =========================
+  // KPI CALCULATIONS
+  // =========================
+
+  const totalPnL = backtests.reduce(
+    (acc, bt) => acc + Number(bt.total_return_usdt || 0),
+    0
+  );
+
+  const totalTrades = backtests.reduce(
+    (acc, bt) => acc + Number(bt.total_trades || 0),
+    0
+  );
+
+  const avgWinRate =
+    backtests.length > 0
+      ? backtests.reduce(
+          (acc, bt) => acc + Number(bt.win_rate_percent || 0),
+          0
+        ) / backtests.length
+      : 0;
+
+  const activeRuns = backtests.filter(
+    (bt) => bt.status === "RUNNING"
+  ).length;
+
   return (
-    <div className="p-6 space-y-10">
-      <h1 className="text-3xl font-bold text-white">
-        Dashboard
-      </h1>
+    <div className="space-y-8">
+      {/* KPI GRID */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+        <KpiCard
+          title="Total PnL"
+          value={`${totalPnL.toFixed(2)} USDT`}
+          positive={totalPnL >= 0}
+        />
 
-      {/* Aquí luego meteremos KPIs */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-slate-800 border border-slate-700 rounded-lg p-6">
-          <p className="text-slate-400 text-sm">
-            Total Backtests
-          </p>
-          <p className="text-2xl font-bold text-white mt-2">
-            —
-          </p>
-        </div>
+        <KpiCard
+          title="Average Win Rate"
+          value={`${avgWinRate.toFixed(2)}%`}
+          positive={avgWinRate >= 50}
+        />
 
-        <div className="bg-slate-800 border border-slate-700 rounded-lg p-6">
-          <p className="text-slate-400 text-sm">
-            Avg Return
-          </p>
-          <p className="text-2xl font-bold text-white mt-2">
-            —
-          </p>
-        </div>
+        <KpiCard
+          title="Total Trades"
+          value={totalTrades.toString()}
+        />
 
-        <div className="bg-slate-800 border border-slate-700 rounded-lg p-6">
-          <p className="text-slate-400 text-sm">
-            Win Rate
-          </p>
-          <p className="text-2xl font-bold text-white mt-2">
-            —
-          </p>
-        </div>
+        <KpiCard
+          title="Active Runs"
+          value={activeRuns.toString()}
+        />
       </div>
 
-      {/* Recent Backtests */}
-      <BacktestsList limit={5} showTitle />
+      {/* TABLE */}
+      <BacktestsList />
     </div>
   );
 }
