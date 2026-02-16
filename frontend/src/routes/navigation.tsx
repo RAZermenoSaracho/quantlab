@@ -2,7 +2,6 @@ import Login from "../pages/Login";
 import Register from "../pages/Register";
 import OAuthSuccess from "../pages/OAuthSuccess";
 import Dashboard from "../pages/Dashboard";
-import BacktestDetail from "../pages/BacktestDetail";
 import NotFound from "../pages/NotFound";
 
 // Algorithms
@@ -13,6 +12,7 @@ import AlgorithmDetail from "../pages/algorithms/AlgorithmDetail";
 // Backtests
 import BacktestsList from "../pages/backtests/BacktestsList";
 import CreateBacktest from "../pages/backtests/CreateBacktest";
+import BacktestDetail from "../pages/backtests/BacktestDetail";
 
 // Paper Trading
 import PaperRunsList from "../pages/paper/PaperRunsList";
