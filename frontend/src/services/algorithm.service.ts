@@ -14,7 +14,6 @@ export async function getAlgorithms() {
   });
 
   if (!res.ok) throw new Error("Failed to fetch algorithms");
-
   return res.json();
 }
 
@@ -23,9 +22,9 @@ export async function getAlgorithmById(id: string) {
     headers: getAuthHeaders(),
   });
 
-  if (!res.ok) throw new Error("Algorithm not found");
-
-  return res.json();
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Algorithm not found");
+  return data;
 }
 
 export async function createAlgorithm(payload: {
@@ -41,12 +40,34 @@ export async function createAlgorithm(payload: {
   });
 
   const data = await res.json();
-
-  if (!res.ok) {
-    throw new Error(data.error || "Failed to create algorithm");
-  }
-
+  if (!res.ok) throw new Error(data.error || "Failed to create algorithm");
   return data;
+}
+
+export async function updateAlgorithm(
+  id: string,
+  payload: { name: string; description?: string; code: string }
+) {
+  const res = await fetch(`${API}/algorithms/${id}`, {
+    method: "PUT",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(payload),
+  });
+
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to update algorithm");
+  return data;
+}
+
+export async function refreshAlgorithmFromGithub(id: string) {
+  const res = await fetch(`${API}/algorithms/${id}/refresh`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+  });
+
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to refresh algorithm");
+  return data; // ✅ now returns updated algorithm row
 }
 
 export async function deleteAlgorithm(id: string) {
@@ -55,7 +76,7 @@ export async function deleteAlgorithm(id: string) {
     headers: getAuthHeaders(),
   });
 
-  if (!res.ok) throw new Error("Failed to delete algorithm");
-
-  return res.json();
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to delete algorithm");
+  return data;
 }

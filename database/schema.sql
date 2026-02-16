@@ -4,7 +4,6 @@
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
-
 -- ==============================
 -- USERS
 -- ==============================
@@ -19,7 +18,6 @@ CREATE TABLE users (
 
 CREATE INDEX idx_users_email ON users(email);
 
-
 -- ==============================
 -- ALGORITHMS
 -- ==============================
@@ -30,12 +28,12 @@ CREATE TABLE algorithms (
     name VARCHAR(255) NOT NULL,
     description TEXT,
     code TEXT NOT NULL,
+    github_url TEXT,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
 CREATE INDEX idx_algorithms_user_id ON algorithms(user_id);
-
 
 -- ==============================
 -- ENUMS
@@ -64,7 +62,6 @@ CREATE TYPE trade_type AS ENUM (
     'PAPER'
 );
 
-
 -- ==============================
 -- BACKTEST RUNS
 -- ==============================
@@ -90,7 +87,6 @@ CREATE TABLE backtest_runs (
 CREATE INDEX idx_backtest_user ON backtest_runs(user_id);
 CREATE INDEX idx_backtest_algorithm ON backtest_runs(algorithm_id);
 
-
 -- ==============================
 -- PAPER RUNS
 -- ==============================
@@ -113,7 +109,6 @@ CREATE TABLE paper_runs (
 
 CREATE INDEX idx_paper_user ON paper_runs(user_id);
 CREATE INDEX idx_paper_algorithm ON paper_runs(algorithm_id);
-
 
 -- ==============================
 -- TRADES
@@ -138,12 +133,18 @@ CREATE TABLE trades (
     opened_at TIMESTAMP NOT NULL,
     closed_at TIMESTAMP,
 
-    created_at TIMESTAMP DEFAULT NOW()
+    created_at TIMESTAMP DEFAULT NOW(),
+
+    -- 🔥 Proper Foreign Key (composite style via check)
+    CONSTRAINT fk_trades_backtest
+        FOREIGN KEY (run_id)
+        REFERENCES backtest_runs(id)
+        ON DELETE CASCADE
+        DEFERRABLE INITIALLY DEFERRED
 );
 
 CREATE INDEX idx_trades_run ON trades(run_id);
 CREATE INDEX idx_trades_type ON trades(run_type);
-
 
 -- ==============================
 -- METRICS
@@ -165,7 +166,16 @@ CREATE TABLE metrics (
 
     total_trades INTEGER,
 
-    created_at TIMESTAMP DEFAULT NOW()
+    -- 🔥 NEW: Equity curve stored as JSON
+    equity_curve JSONB,
+
+    created_at TIMESTAMP DEFAULT NOW(),
+
+    CONSTRAINT fk_metrics_backtest
+        FOREIGN KEY (run_id)
+        REFERENCES backtest_runs(id)
+        ON DELETE CASCADE
+        DEFERRABLE INITIALLY DEFERRED
 );
 
 CREATE INDEX idx_metrics_run ON metrics(run_id);
