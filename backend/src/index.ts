@@ -6,11 +6,26 @@ import { errorMiddleware } from "./middleware/error.middleware";
 import authRoutes from "./routes/auth.routes";
 import algorithmsRoutes from "./routes/algorithms.routes";
 import backtestRoutes from "./routes/backtest.routes";
+import session from "express-session";
+import passport from "passport";
+import "./config/passport";
+
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.use(
+  session({
+    secret: env.SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+  })
+);
+
+app.use(passport.initialize());
+app.use(passport.session());
+
 
 // Health check
 app.get("/health", async (_req, res) => {

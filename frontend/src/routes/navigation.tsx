@@ -1,5 +1,6 @@
 import Login from "../pages/Login";
 import Register from "../pages/Register";
+import OAuthSuccess from "../pages/OAuthSuccess";
 import Dashboard from "../pages/Dashboard";
 import BacktestDetail from "../pages/BacktestDetail";
 import NotFound from "../pages/NotFound";
@@ -22,6 +23,7 @@ export const nav = [
   // PUBLIC
   { path: "/login", element: <Login />, isPrivate: false },
   { path: "/register", element: <Register />, isPrivate: false },
+  { path: "/oauth-success", element: <OAuthSuccess />, isPrivate: false },
 
   // DASHBOARD
   { path: "/dashboard", element: <Dashboard />, isPrivate: true },
