@@ -81,6 +81,7 @@ CREATE TABLE backtest_runs (
     status run_status DEFAULT 'PENDING',
 
     equity_curve JSONB,
+    analysis JSONB,
 
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()

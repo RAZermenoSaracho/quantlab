@@ -2,14 +2,50 @@ import { Request, Response, NextFunction } from "express";
 import { pool } from "../config/db";
 import { runBacktestOnEngine } from "../services/backtestEngine.service";
 
+type DbTradeSide = "BUY" | "SELL";
+
+function normalizeTradeSide(trade: any): DbTradeSide {
+  const raw = String(trade?.side ?? "").toUpperCase().trim();
+
+  // Engine might send LONG/SHORT or BUY/SELL
+  if (raw === "LONG" || raw === "BUY") return "BUY";
+  if (raw === "SHORT" || raw === "SELL") return "SELL";
+
+  // fallback heuristic
+  const entry = Number(trade?.entry_price ?? 0);
+  const exit = Number(trade?.exit_price ?? 0);
+
+  if (Number.isFinite(entry) && Number.isFinite(exit)) {
+    return entry < exit ? "BUY" : "SELL";
+  }
+
+  // safest default
+  return "BUY";
+}
+
+function toDateFromEngineTs(ts: any): Date {
+  // Engine can send ms epoch, seconds epoch, or ISO string
+  if (ts == null) return new Date();
+
+  if (typeof ts === "number") {
+    // heuristic: ms epoch usually > 10_000_000_000
+    return ts > 10_000_000_000 ? new Date(ts) : new Date(ts * 1000);
+  }
+
+  const asNum = Number(ts);
+  if (Number.isFinite(asNum)) {
+    return asNum > 10_000_000_000 ? new Date(asNum) : new Date(asNum * 1000);
+  }
+
+  return new Date(String(ts));
+}
+
 /* ==============================
    CREATE
 ============================== */
-export async function createBacktest(
-  req: Request,
-  res: Response,
-  next: NextFunction
-) {
+export async function createBacktest(req: Request, res: Response, next: NextFunction) {
+  let runId: string | null = null;
+
   try {
     const {
       algorithm_id,
@@ -17,16 +53,18 @@ export async function createBacktest(
       timeframe,
       initial_balance,
       start_date,
-      end_date
+      end_date,
     } = req.body;
 
-    if (!algorithm_id || !symbol || !timeframe) {
+    if (!algorithm_id || !symbol || !timeframe || !initial_balance || !start_date || !end_date) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
     const userId = req.user!.id;
 
-    // 🔎 Get algorithm
+    /* ==============================
+       GET ALGORITHM
+    ============================== */
     const algoResult = await pool.query(
       `SELECT code FROM algorithms WHERE id = $1 AND user_id = $2`,
       [algorithm_id, userId]
@@ -38,7 +76,9 @@ export async function createBacktest(
 
     const code = algoResult.rows[0].code;
 
-    // 🟡 Create run as RUNNING
+    /* ==============================
+       CREATE RUN (RUNNING)
+    ============================== */
     const runInsert = await pool.query(
       `INSERT INTO backtest_runs
        (user_id, algorithm_id, symbol, timeframe, initial_balance, start_date, end_date, status)
@@ -47,19 +87,23 @@ export async function createBacktest(
       [userId, algorithm_id, symbol, timeframe, initial_balance, start_date, end_date]
     );
 
-    const runId = runInsert.rows[0].id;
+    runId = runInsert.rows[0].id;
 
-    // 🚀 Call engine
+    /* ==============================
+       CALL PYTHON ENGINE
+    ============================== */
     const engineResult = await runBacktestOnEngine({
       code,
       symbol,
       timeframe,
       initial_balance,
       start_date,
-      end_date
+      end_date,
     });
 
-    /* METRICS */
+    /* ==============================
+       INSERT METRICS (LEGACY TABLE)
+    ============================== */
     await pool.query(
       `INSERT INTO metrics
        (run_id, run_type, total_return_percent, total_return_usdt,
@@ -67,44 +111,95 @@ export async function createBacktest(
        VALUES ($1,'BACKTEST',$2,$3,$4,$5,$6,$7)`,
       [
         runId,
-        engineResult.total_return_percent,
-        engineResult.total_return_usdt,
-        engineResult.max_drawdown_percent,
-        engineResult.win_rate_percent,
-        engineResult.profit_factor,
-        engineResult.total_trades
+        engineResult.total_return_percent ?? 0,
+        engineResult.total_return_usdt ?? 0,
+        engineResult.max_drawdown_percent ?? 0,
+        engineResult.win_rate_percent ?? 0,
+        engineResult.profit_factor ?? 0,
+        engineResult.total_trades ?? 0,
       ]
     );
 
-    /* TRADES */
-    for (const trade of engineResult.trades) {
+    /* ==============================
+       INSERT TRADES
+       - Fix: trade_side enum only accepts BUY/SELL
+       - Use opened_at/closed_at if engine provides
+    ============================== */
+    for (const trade of engineResult.trades ?? []) {
+      const dbSide = normalizeTradeSide(trade);
+
+      const entryPrice = Number(trade.entry_price ?? 0);
+      const exitPrice = trade.exit_price == null ? null : Number(trade.exit_price);
+
+      const quantity = Number(trade.quantity ?? 1);
+      const pnl = Number(trade.pnl ?? trade.net_pnl ?? 0);
+
+      // If engine doesn't provide pnl_percent, compute (simple) percent vs entry notional
+      // (This is a placeholder until you compute it properly based on position sizing)
+      const computedPnlPercent =
+        trade.pnl_percent != null
+          ? Number(trade.pnl_percent)
+          : (entryPrice ? (pnl / entryPrice) * 100 : 0);
+
+      const openedAt = trade.opened_at ? toDateFromEngineTs(trade.opened_at) : new Date();
+      const closedAt = trade.closed_at ? toDateFromEngineTs(trade.closed_at) : new Date();
+
       await pool.query(
         `INSERT INTO trades
-         (run_id, run_type, side, entry_price, exit_price, quantity, pnl, opened_at, closed_at)
-         VALUES ($1,'BACKTEST',$2,$3,$4,1,$5,NOW(),NOW())`,
+         (run_id, run_type, side, entry_price, exit_price, quantity, pnl, pnl_percent, opened_at, closed_at)
+         VALUES ($1,'BACKTEST',$2,$3,$4,$5,$6,$7,$8,$9)`,
         [
           runId,
-          trade.entry_price < trade.exit_price ? "BUY" : "SELL",
-          trade.entry_price,
-          trade.exit_price,
-          trade.net_pnl
+          dbSide, // ✅ BUY/SELL only
+          entryPrice,
+          exitPrice,
+          quantity,
+          pnl,
+          computedPnlPercent,
+          openedAt,
+          closedAt,
         ]
       );
     }
 
-    /* EQUITY + COMPLETE */
+    /* ==============================
+       UPDATE RUN WITH EQUITY + ANALYSIS
+       ⚠️ DO NOT JSON.stringify
+    ============================== */
     await pool.query(
       `UPDATE backtest_runs
-       SET equity_curve = $1,
-           status = 'COMPLETED',
-           updated_at = NOW()
-       WHERE id = $2`,
-      [engineResult.equity_curve, runId]
+      SET equity_curve = $1::jsonb,
+          analysis = $2::jsonb,
+          status = 'COMPLETED',
+          updated_at = NOW()
+      WHERE id = $3`,
+      [
+        JSON.stringify(engineResult.equity_curve ?? []),
+        JSON.stringify(engineResult.analysis ?? null),
+        runId
+      ]
     );
 
     return res.status(201).json({ run_id: runId });
 
   } catch (err) {
+    console.error("Backtest creation error:", err);
+
+    // Mark run as FAILED if it was created
+    try {
+      if (runId) {
+        await pool.query(
+          `UPDATE backtest_runs
+           SET status = 'FAILED',
+               updated_at = NOW()
+           WHERE id = $1`,
+          [runId]
+        );
+      }
+    } catch (_) {
+      // ignore
+    }
+
     next(err);
   }
 }
@@ -112,11 +207,7 @@ export async function createBacktest(
 /* ==============================
    GET ONE
 ============================== */
-export async function getBacktestById(
-  req: Request,
-  res: Response,
-  next: NextFunction
-) {
+export async function getBacktestById(req: Request, res: Response, next: NextFunction) {
   try {
     const { id } = req.params;
     const userId = req.user!.id;
@@ -152,6 +243,7 @@ export async function getBacktestById(
     return res.json({
       run,
       metrics: metricsResult.rows[0] || null,
+      analysis: run.analysis || null,
       trades: tradesResult.rows,
       equity_curve: run.equity_curve || [],
     });
@@ -162,13 +254,9 @@ export async function getBacktestById(
 }
 
 /* ==============================
-   GET ALL  🔥 (THIS WAS MISSING)
+   GET ALL
 ============================== */
-export async function getAllBacktests(
-  req: Request,
-  res: Response,
-  next: NextFunction
-) {
+export async function getAllBacktests(req: Request, res: Response, next: NextFunction) {
   try {
     const userId = req.user!.id;
 
@@ -180,6 +268,7 @@ export async function getAllBacktests(
         r.timeframe,
         r.status,
         r.created_at,
+        r.analysis,
         m.total_return_percent,
         m.total_return_usdt,
         m.win_rate_percent,
@@ -203,11 +292,7 @@ export async function getAllBacktests(
 /* ==============================
    DELETE
 ============================== */
-export async function deleteBacktest(
-  req: Request,
-  res: Response,
-  next: NextFunction
-) {
+export async function deleteBacktest(req: Request, res: Response, next: NextFunction) {
   try {
     const { id } = req.params;
     const userId = req.user!.id;

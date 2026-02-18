@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import BacktestsList from "./backtests/BacktestsList";
 import { getAllBacktests } from "../services/backtest.service";
 import KpiCard from "../components/ui/KpiCard";
@@ -7,89 +7,175 @@ type Backtest = {
   id: string;
   symbol: string;
   timeframe: string;
-  initial_balance: string;
-  total_return_usdt: string;
-  total_return_percent: string;
-  total_trades: number;
-  win_rate_percent: string;
+  total_return_usdt?: string;
+  total_return_percent?: string;
+  total_trades?: number;
+  win_rate_percent?: string;
+  profit_factor?: string;
   status: string;
   created_at: string;
 };
 
 export default function Dashboard() {
   const [backtests, setBacktests] = useState<Backtest[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
       try {
         const response = await getAllBacktests();
-
-        // 👇 adaptado al service actual
         const runs = response.backtests || [];
         setBacktests(runs);
       } catch (err) {
         console.error(err);
         setBacktests([]);
+      } finally {
+        setLoading(false);
       }
     }
 
     load();
   }, []);
 
-  // =========================
-  // KPI CALCULATIONS
-  // =========================
+  // =====================================================
+  // FILTER COMPLETED ONLY (real performance stats)
+  // =====================================================
 
-  const totalPnL = backtests.reduce(
-    (acc, bt) => acc + Number(bt.total_return_usdt || 0),
-    0
+  const completed = useMemo(
+    () => backtests.filter((bt) => bt.status === "COMPLETED"),
+    [backtests]
   );
 
-  const totalTrades = backtests.reduce(
-    (acc, bt) => acc + Number(bt.total_trades || 0),
-    0
+  const running = useMemo(
+    () => backtests.filter((bt) => bt.status === "RUNNING").length,
+    [backtests]
   );
 
-  const avgWinRate =
-    backtests.length > 0
-      ? backtests.reduce(
-          (acc, bt) => acc + Number(bt.win_rate_percent || 0),
-          0
-        ) / backtests.length
-      : 0;
+  // =====================================================
+  // AGGREGATE METRICS
+  // =====================================================
 
-  const activeRuns = backtests.filter(
-    (bt) => bt.status === "RUNNING"
-  ).length;
+  const stats = useMemo(() => {
+    if (!completed.length) {
+      return {
+        totalPnL: 0,
+        avgReturn: 0,
+        totalTrades: 0,
+        avgWinRate: 0,
+        avgProfitFactor: 0,
+      };
+    }
+
+    const totalPnL = completed.reduce(
+      (acc, bt) => acc + Number(bt.total_return_usdt || 0),
+      0
+    );
+
+    const avgReturn =
+      completed.reduce(
+        (acc, bt) => acc + Number(bt.total_return_percent || 0),
+        0
+      ) / completed.length;
+
+    const totalTrades = completed.reduce(
+      (acc, bt) => acc + Number(bt.total_trades || 0),
+      0
+    );
+
+    const avgWinRate =
+      completed.reduce(
+        (acc, bt) => acc + Number(bt.win_rate_percent || 0),
+        0
+      ) / completed.length;
+
+    const avgProfitFactor =
+      completed.reduce(
+        (acc, bt) => acc + Number(bt.profit_factor || 0),
+        0
+      ) / completed.length;
+
+    return {
+      totalPnL,
+      avgReturn,
+      totalTrades,
+      avgWinRate,
+      avgProfitFactor,
+    };
+  }, [completed]);
+
+  // =====================================================
+  // UI
+  // =====================================================
+
+  if (loading) {
+    return (
+      <div className="p-6 text-slate-400">
+        Loading dashboard...
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
-      {/* KPI GRID */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+      {/* ================= KPI GRID ================= */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+
         <KpiCard
-          title="Total PnL"
-          value={`${totalPnL.toFixed(2)} USDT`}
-          positive={totalPnL >= 0}
+          title="Total Net PnL"
+          value={`${stats.totalPnL.toFixed(2)} USDT`}
+          positive={stats.totalPnL >= 0}
         />
 
         <KpiCard
-          title="Average Win Rate"
-          value={`${avgWinRate.toFixed(2)}%`}
-          positive={avgWinRate >= 50}
+          title="Average Return"
+          value={`${stats.avgReturn.toFixed(2)}%`}
+          positive={stats.avgReturn >= 0}
         />
 
         <KpiCard
           title="Total Trades"
-          value={totalTrades.toString()}
+          value={stats.totalTrades.toString()}
         />
 
         <KpiCard
-          title="Active Runs"
-          value={activeRuns.toString()}
+          title="Avg Win Rate"
+          value={`${stats.avgWinRate.toFixed(2)}%`}
+          positive={stats.avgWinRate >= 50}
         />
+
+        <KpiCard
+          title="Avg Profit Factor"
+          value={stats.avgProfitFactor.toFixed(2)}
+          positive={stats.avgProfitFactor >= 1}
+        />
+
       </div>
 
-      {/* TABLE */}
+      {/* ================= SECONDARY STATS ================= */}
+      <div className="flex justify-between items-center text-sm text-slate-400">
+        <div>
+          Total Backtests:{" "}
+          <span className="text-slate-200 font-medium">
+            {backtests.length}
+          </span>
+        </div>
+
+        <div>
+          Running:{" "}
+          <span className="text-yellow-400 font-medium">
+            {running}
+          </span>
+        </div>
+
+        <div>
+          Completed:{" "}
+          <span className="text-green-400 font-medium">
+            {completed.length}
+          </span>
+        </div>
+      </div>
+
+      {/* ================= TABLE ================= */}
       <BacktestsList />
     </div>
   );

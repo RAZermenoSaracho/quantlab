@@ -1,7 +1,9 @@
 from .validator import SAFE_GLOBALS
 from .data import fetch_candles
+from .metrics import calculate_metrics
 
 FEE_RATE = 0.001  # 0.1% per trade
+
 
 def run_backtest(
     code: str,
@@ -10,9 +12,11 @@ def run_backtest(
     initial_balance: float,
     start_date: str,
     end_date: str
-) -> dict[str, any]:
+) -> dict:
 
-    # 🔐 SAFE EXECUTION ENVIRONMENT
+    # ============================
+    # SAFE EXECUTION ENVIRONMENT
+    # ============================
     execution_env = SAFE_GLOBALS.copy()
     exec(code, execution_env, execution_env)
 
@@ -25,9 +29,10 @@ def run_backtest(
 
     balance = float(initial_balance)
     position = None
+    entry_timestamp = None
 
     trades: list[dict] = []
-    equity_curve: list[float] = []
+    equity_curve: list[dict] = []  # NOW includes timestamp
 
     peak_equity = balance
     max_drawdown = 0.0
@@ -35,6 +40,9 @@ def run_backtest(
     wins: list[float] = []
     losses: list[float] = []
 
+    # ============================
+    # MAIN LOOP
+    # ============================
     for candle in candles_raw:
 
         candle_data = {
@@ -43,7 +51,7 @@ def run_backtest(
             "low": float(candle[3]),
             "close": float(candle[4]),
             "volume": float(candle[5]),
-            "timestamp": candle[0]
+            "timestamp": candle[0]  # ms epoch
         }
 
         signal = generate_signal(candle_data)
@@ -53,6 +61,7 @@ def run_backtest(
         # ============================
         if signal == "BUY" and position is None:
             position = candle_data["close"]
+            entry_timestamp = candle_data["timestamp"]
 
         # ============================
         # EXIT
@@ -68,11 +77,28 @@ def run_backtest(
 
             balance += net_pnl
 
-            trades.append({
+            trade = {
+                # keep legacy-compatible keys
                 "entry_price": entry_price,
                 "exit_price": exit_price,
-                "net_pnl": net_pnl
-            })
+                "net_pnl": net_pnl,
+
+                # 🔥 new detailed fields
+                "pnl": net_pnl,
+                "gross_pnl": gross_pnl,
+                "fee": fee,
+                "side": "LONG",
+                "quantity": 1,  # simple model (1 unit)
+                "opened_at": entry_timestamp,
+                "closed_at": candle_data["timestamp"],
+                "duration_ms": (
+                    candle_data["timestamp"] - entry_timestamp
+                    if entry_timestamp
+                    else None
+                ),
+            }
+
+            trades.append(trade)
 
             if net_pnl > 0:
                 wins.append(net_pnl)
@@ -80,18 +106,22 @@ def run_backtest(
                 losses.append(net_pnl)
 
             position = None
+            entry_timestamp = None
 
         # ============================
         # MARK TO MARKET EQUITY
         # ============================
         if position is not None:
-            # unrealized PnL
             unrealized = candle_data["close"] - position
             current_equity = balance + unrealized
         else:
             current_equity = balance
 
-        equity_curve.append(current_equity)
+        # 🔥 store timestamped equity
+        equity_curve.append({
+            "timestamp": candle_data["timestamp"],
+            "equity": current_equity
+        })
 
         # ============================
         # DRAWDOWN
@@ -103,30 +133,53 @@ def run_backtest(
         max_drawdown = max(max_drawdown, drawdown)
 
     # ============================
-    # METRICS
+    # LEGACY METRICS (KEEPING COMPATIBILITY)
     # ============================
 
     total_return_usdt = balance - initial_balance
-    total_return_percent = (total_return_usdt / initial_balance) * 100
+    total_return_percent = (
+        (total_return_usdt / initial_balance) * 100
+        if initial_balance
+        else 0
+    )
 
     total_trades = len(trades)
-    win_rate_percent = (len(wins) / total_trades * 100) if total_trades else 0
-
-    avg_win = sum(wins) / len(wins) if wins else 0
-    avg_loss = sum(losses) / len(losses) if losses else 0
+    win_rate_percent = (
+        (len(wins) / total_trades * 100)
+        if total_trades
+        else 0
+    )
 
     total_wins = sum(wins)
     total_losses = abs(sum(losses)) if losses else 0
 
     profit_factor = (
-        (total_wins / total_losses) if total_losses > 0 else 0
+        (total_wins / total_losses)
+        if total_losses > 0
+        else 0
     )
+
+    # ============================
+    # 🔥 ADVANCED METRICS (NEW)
+    # ============================
+
+    analysis = calculate_metrics(
+        equity_curve=equity_curve,
+        trades=trades,
+        initial_balance=float(initial_balance),
+        timeframe=timeframe,
+        risk_free_rate=0.0
+    )
+
+    # ============================
+    # RETURN STRUCTURE
+    # ============================
 
     return {
         "initial_balance": initial_balance,
         "final_balance": balance,
 
-        # 🔥 DB-compatible names
+        # 🔥 DB-compatible names (DO NOT REMOVE)
         "total_return_usdt": total_return_usdt,
         "total_return_percent": total_return_percent,
         "max_drawdown_percent": max_drawdown * 100,
@@ -134,6 +187,10 @@ def run_backtest(
         "profit_factor": profit_factor,
         "total_trades": total_trades,
 
+        # raw data
         "equity_curve": equity_curve,
-        "trades": trades
+        "trades": trades,
+
+        # 🔥 new analytics block
+        "analysis": analysis
     }
