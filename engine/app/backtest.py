@@ -2,6 +2,7 @@ from .validator import SAFE_GLOBALS
 from .data import fetch_candles
 from .metrics import calculate_metrics
 from .clients import get_exchange_client
+from .spec import load_config_from_env
 
 
 def run_backtest(
@@ -25,6 +26,15 @@ def run_backtest(
 
     generate_signal = execution_env["generate_signal"]
 
+    # ============================
+    # LOAD + VALIDATE CONFIG (optional)
+    # ============================
+    # Backward compatible: if CONFIG doesn't exist, defaults apply.
+    config, config_used = load_config_from_env(execution_env)
+
+    # ============================
+    # EXCHANGE CLIENT + FEE
+    # ============================
     client = get_exchange_client(exchange)
     fee_rate = client.get_default_fee_rate()
 
@@ -41,7 +51,7 @@ def run_backtest(
     entry_timestamp = None
 
     trades: list[dict] = []
-    equity_curve: list[dict] = []  # NOW includes timestamp
+    equity_curve: list[dict] = []
 
     peak_equity = balance
     max_drawdown = 0.0
@@ -60,7 +70,7 @@ def run_backtest(
             "low": float(candle[3]),
             "close": float(candle[4]),
             "volume": float(candle[5]),
-            "timestamp": candle[0]  # ms epoch
+            "timestamp": candle[0]
         }
 
         signal = generate_signal(candle_data)
@@ -81,9 +91,12 @@ def run_backtest(
             exit_price = candle_data["close"]
 
             gross_pnl = exit_price - entry_price
-            fee = (entry_price * fee_rate) + (exit_price * fee_rate)
-            net_pnl = gross_pnl - fee
 
+            # NOTE: quantity is still 1 in the current model.
+            # Next commit will apply sizing using config.batch_size.
+            fee = (entry_price * fee_rate) + (exit_price * fee_rate)
+
+            net_pnl = gross_pnl - fee
             balance += net_pnl
 
             trade = {
@@ -92,12 +105,12 @@ def run_backtest(
                 "exit_price": exit_price,
                 "net_pnl": net_pnl,
 
-                # 🔥 new detailed fields
+                # detailed fields
                 "pnl": net_pnl,
                 "gross_pnl": gross_pnl,
                 "fee": fee,
                 "side": "LONG",
-                "quantity": 1,  # simple model (1 unit)
+                "quantity": 1,
                 "opened_at": entry_timestamp,
                 "closed_at": candle_data["timestamp"],
                 "duration_ms": (
@@ -126,7 +139,6 @@ def run_backtest(
         else:
             current_equity = balance
 
-        # 🔥 store timestamped equity
         equity_curve.append({
             "timestamp": candle_data["timestamp"],
             "equity": current_equity
@@ -144,7 +156,6 @@ def run_backtest(
     # ============================
     # LEGACY METRICS (KEEPING COMPATIBILITY)
     # ============================
-
     total_return_usdt = balance - initial_balance
     total_return_percent = (
         (total_return_usdt / initial_balance) * 100
@@ -169,9 +180,8 @@ def run_backtest(
     )
 
     # ============================
-    # 🔥 ADVANCED METRICS (NEW)
+    # ADVANCED METRICS
     # ============================
-
     analysis = calculate_metrics(
         equity_curve=equity_curve,
         trades=trades,
@@ -183,15 +193,17 @@ def run_backtest(
     # ============================
     # RETURN STRUCTURE
     # ============================
-
     return {
         "exchange": exchange,
         "fee_rate": fee_rate,
 
+        # NEW: config info (useful for DB + UI)
+        "config_used": config_used,
+
         "initial_balance": initial_balance,
         "final_balance": balance,
 
-        # 🔥 DB-compatible names (DO NOT REMOVE)
+        # DB-compatible names
         "total_return_usdt": total_return_usdt,
         "total_return_percent": total_return_percent,
         "max_drawdown_percent": max_drawdown * 100,
@@ -199,10 +211,7 @@ def run_backtest(
         "profit_factor": profit_factor,
         "total_trades": total_trades,
 
-        # raw data
         "equity_curve": equity_curve,
         "trades": trades,
-
-        # 🔥 new analytics block
         "analysis": analysis
     }
