@@ -1,13 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getAlgorithms } from "../../services/algorithm.service";
-
-type Algorithm = {
-  id: string;
-  name: string;
-  description: string;
-  created_at: string;
-};
+import type { Algorithm } from "../../types/models";
 
 export default function AlgorithmsList() {
   const [algorithms, setAlgorithms] = useState<Algorithm[]>([]);
@@ -63,7 +57,12 @@ export default function AlgorithmsList() {
                 </td>
 
                 <td className="px-4 py-3 text-slate-400">
-                  {algo.description || "-"}
+                  <div
+                    className="prose prose-invert max-w-none text-slate-300"
+                    dangerouslySetInnerHTML={{
+                      __html: algo.notes_html || "",
+                    }}
+                  />
                 </td>
 
                 <td className="px-4 py-3 text-slate-500">

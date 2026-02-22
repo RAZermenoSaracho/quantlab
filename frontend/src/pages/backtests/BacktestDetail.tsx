@@ -1,4 +1,3 @@
-// frontend/src/pages/backtests/BacktestDetail.tsx
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
@@ -33,15 +32,12 @@ function fmtPct(x: number, decimals = 2) {
 }
 
 function parseEquitySeries(equityCurve: any[]): number[] {
-  if (!Array.isArray(equityCurve)) return [];
-  if (!equityCurve.length) return [];
+  if (!Array.isArray(equityCurve) || !equityCurve.length) return [];
 
-  // legacy number[]
   if (typeof equityCurve[0] === "number") {
     return equityCurve.map((n) => Number(n) || 0);
   }
 
-  // object series [{timestamp, equity}]
   return equityCurve.map((p: any) => Number(p?.equity ?? 0) || 0);
 }
 
@@ -67,20 +63,18 @@ function computeReturns(equity: number[]) {
 }
 
 function computeDrawdown(equity: number[]) {
-  if (!equity.length) return { series: [] as number[], maxDD: 0 };
+  if (!equity.length) return { maxDD: 0 };
 
   let peak = equity[0] || 0;
   let maxDD = 0;
-  const series: number[] = [];
 
   for (const e of equity) {
     if (e > peak) peak = e;
-    const dd = peak ? (e - peak) / peak : 0; // <= 0
-    series.push(dd);
+    const dd = peak ? (e - peak) / peak : 0;
     maxDD = Math.max(maxDD, -dd);
   }
 
-  return { series: series.map((d) => d * 100), maxDD: maxDD * 100 };
+  return { maxDD: maxDD * 100 };
 }
 
 /* ===========================
@@ -88,7 +82,7 @@ function computeDrawdown(equity: number[]) {
 =========================== */
 
 export default function BacktestDetail() {
-  const { id } = useParams();
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
   const [allIds, setAllIds] = useState<string[]>([]);
@@ -107,7 +101,7 @@ export default function BacktestDetail() {
       setData(detail);
 
       const list = await getAllBacktests();
-      const ids = (list.backtests || list).map((b: any) => b.id);
+      const ids = list.backtests.map((b) => b.id);
       setAllIds(ids);
     }
 
@@ -118,7 +112,7 @@ export default function BacktestDetail() {
   }, [id]);
 
   /* ---------------------------
-     SAFE FALLBACKS (no hooks here)
+     SAFE FALLBACKS
   --------------------------- */
   const run = data?.run ?? {};
   const metrics = data?.metrics ?? {};
@@ -127,13 +121,18 @@ export default function BacktestDetail() {
   const equityRaw = data?.equity_curve ?? [];
 
   /* ---------------------------
-     DERIVED VALUES (hooks MUST run always)
+     HOOKS (ALWAYS EXECUTE)
   --------------------------- */
+
   const equity = useMemo(() => parseEquitySeries(equityRaw), [equityRaw]);
 
   const derived = useMemo(() => {
-    const initial = Number(run.initial_balance ?? metrics.initial_balance ?? 0) || 0;
-    const final = equity.length ? equity[equity.length - 1] : Number(metrics.final_balance ?? initial) || initial;
+    const initial =
+      Number(run.initial_balance ?? metrics.initial_balance ?? 0) || 0;
+
+    const final = equity.length
+      ? equity[equity.length - 1]
+      : Number(metrics.final_balance ?? initial) || initial;
 
     const netProfit = final - initial;
     const retPct = initial ? (netProfit / initial) * 100 : 0;
@@ -152,9 +151,14 @@ export default function BacktestDetail() {
       sharpe,
       volatility: vol,
       maxDD: dd.maxDD,
-      ddSeries: dd.series,
     };
   }, [run, metrics, equity]);
+
+  /* ---------------------------
+     EARLY RETURNS (AFTER HOOKS)
+  --------------------------- */
+  if (error) return <div className="p-6 text-red-400">{error}</div>;
+  if (!data) return <div className="p-6 text-slate-400">Loading...</div>;
 
   /* ---------------------------
      DELETE
@@ -162,8 +166,7 @@ export default function BacktestDetail() {
   async function handleDelete() {
     if (!id) return;
 
-    const confirmDelete = confirm("Are you sure you want to delete this backtest?");
-    if (!confirmDelete) return;
+    if (!confirm("Are you sure you want to delete this backtest?")) return;
 
     setLoadingDelete(true);
     try {
@@ -182,18 +185,34 @@ export default function BacktestDetail() {
     }
   }
 
-  /* ---------------------------
-     NOW safe to conditional render
-  --------------------------- */
-  if (error) return <div className="p-6 text-red-400">{error}</div>;
-  if (!data) return <div className="p-6 text-slate-400">Loading...</div>;
+  const netProfit = Number(
+    analysis?.summary?.net_profit ??
+      derived.netProfit ??
+      metrics.total_return_usdt ??
+      0
+  );
 
-  // Prefer backend analysis if present
-  const netProfit = Number(analysis?.summary?.net_profit ?? derived.netProfit ?? metrics.total_return_usdt ?? 0);
-  const retPct = Number(analysis?.summary?.return_pct ?? derived.retPct ?? metrics.total_return_percent ?? 0);
-  const sharpe = Number(analysis?.risk?.sharpe ?? derived.sharpe ?? 0);
-  const volatility = Number(analysis?.risk?.volatility ?? derived.volatility ?? 0);
-  const maxDD = Number(analysis?.risk?.max_drawdown_pct ?? derived.maxDD ?? metrics.max_drawdown_percent ?? 0);
+  const retPct = Number(
+    analysis?.summary?.return_pct ??
+      derived.retPct ??
+      metrics.total_return_percent ??
+      0
+  );
+
+  const sharpe = Number(
+    analysis?.risk?.sharpe ?? derived.sharpe ?? 0
+  );
+
+  const volatility = Number(
+    analysis?.risk?.volatility ?? derived.volatility ?? 0
+  );
+
+  const maxDD = Number(
+    analysis?.risk?.max_drawdown_pct ??
+      derived.maxDD ??
+      metrics.max_drawdown_percent ??
+      0
+  );
 
   return (
     <div className="space-y-8">
@@ -207,30 +226,7 @@ export default function BacktestDetail() {
           <p className="text-slate-400 text-sm mt-1">
             {run.start_date?.slice(0, 10)} → {run.end_date?.slice(0, 10)}
           </p>
-
-          <div className="mt-3 space-y-1 text-xs">
-            <p className="text-slate-500">
-              Initial balance:{" "}
-              <span className="text-slate-300 font-medium">
-                {fmtMoney(Number(run.initial_balance || 0), 2)} USDT
-              </span>
-            </p>
-
-            <p className="text-slate-500">
-              Final balance:{" "}
-              <span
-                className={`font-semibold ${
-                  derived.final >= Number(run.initial_balance || 0)
-                    ? "text-green-400"
-                    : "text-red-400"
-                }`}
-              >
-                {fmtMoney(derived.final, 2)} USDT
-              </span>
-            </p>
-          </div>
         </div>
-
 
         <div className="flex items-center gap-4">
           <DetailNavigator ids={allIds} currentId={id!} basePath="/backtest" />
@@ -239,14 +235,14 @@ export default function BacktestDetail() {
           <button
             onClick={handleDelete}
             disabled={loadingDelete}
-            className="bg-red-600 hover:bg-red-700 transition-colors px-4 py-2 rounded-lg text-white text-sm disabled:opacity-50"
+            className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg text-white text-sm"
           >
             {loadingDelete ? "Deleting..." : "Delete"}
           </button>
         </div>
       </div>
 
-      {/* OVERVIEW */}
+      {/* METRICS */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <MetricCard title="Net Profit" value={`${fmtMoney(netProfit)} USDT`} positive={netProfit >= 0} />
         <MetricCard title="Return" value={fmtPct(retPct)} positive={retPct >= 0} />
@@ -280,48 +276,44 @@ export default function BacktestDetail() {
 
           <tbody>
             {trades.map((t: any, i: number) => {
-              const pnl = Number(t.pnl ?? t.net_pnl ?? 0) || 0;
-              const pnlPct = Number(t.pnl_percent ?? t.pnlPercent ?? 0) || 0;
-              const qty = Number(t.quantity ?? t.qty ?? 0) || 0;
-
-              const side = (t.side || "").toString().toUpperCase();
-              const openedAt = t.opened_at ? String(t.opened_at).slice(0, 19).replace("T", " ") : "-";
-              const closedAt = t.closed_at ? String(t.closed_at).slice(0, 19).replace("T", " ") : "-";
+              const pnl = Number(t.pnl ?? 0);
+              const pnlPct = Number(t.pnl_percent ?? 0);
+              const qty = Number(t.quantity ?? 0);
 
               return (
                 <tr key={t.id || i} className="border-t border-slate-700 hover:bg-slate-900">
                   <td className="px-4 py-3 text-slate-500">{i + 1}</td>
-                  <td
-                    className={`px-4 py-3 font-medium ${
-                      side === "BUY" || side === "LONG" ? "text-green-300" : "text-red-300"
-                    }`}
-                  >
-                    {side || "-"}
+                  <td className={`px-4 py-3 font-medium ${t.side === "BUY" ? "text-green-300" : "text-red-300"}`}>
+                    {t.side}
                   </td>
-                  <td className="px-4 py-3 text-slate-300">{qty ? qty.toFixed(4) : "-"}</td>
-                  <td className="px-4 py-3 text-slate-300">{Number(t.entry_price || 0).toFixed(2)}</td>
+                  <td className="px-4 py-3 text-slate-300">{qty.toFixed(4)}</td>
+                  <td className="px-4 py-3 text-slate-300">{Number(t.entry_price).toFixed(2)}</td>
                   <td className="px-4 py-3 text-slate-300">
                     {t.exit_price != null ? Number(t.exit_price).toFixed(2) : "-"}
                   </td>
-                  <td className="px-4 py-3 text-slate-400">{openedAt}</td>
-                  <td className="px-4 py-3 text-slate-400">{closedAt}</td>
+                  <td className="px-4 py-3 text-slate-400">
+                    {t.opened_at?.slice(0, 19).replace("T", " ")}
+                  </td>
+                  <td className="px-4 py-3 text-slate-400">
+                    {t.closed_at?.slice(0, 19).replace("T", " ")}
+                  </td>
                   <td className={`px-4 py-3 font-semibold ${pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
                     {pnl.toFixed(2)}
                   </td>
-                  <td className={`px-4 py-3 font-medium ${pnlPct >= 0 ? "text-green-300" : "text-red-300"}`}>
+                  <td className={`px-4 py-3 ${pnlPct >= 0 ? "text-green-300" : "text-red-300"}`}>
                     {pnlPct ? `${pnlPct.toFixed(2)}%` : "-"}
                   </td>
                 </tr>
               );
             })}
 
-            {trades.length === 0 ? (
+            {trades.length === 0 && (
               <tr>
-                <td className="px-4 py-6 text-slate-500" colSpan={9}>
+                <td colSpan={9} className="px-4 py-6 text-slate-500">
                   No trades available.
                 </td>
               </tr>
-            ) : null}
+            )}
           </tbody>
         </table>
       </div>
@@ -330,7 +322,7 @@ export default function BacktestDetail() {
 }
 
 /* ===========================
-   SMALL COMPONENTS
+   METRIC CARD
 =========================== */
 
 function MetricCard({

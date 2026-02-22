@@ -7,7 +7,7 @@ export interface CreateAlgorithmDto {
 
 export interface UpdateAlgorithmDto {
   name: string;
-  description?: string;
+  notes_html?: string;
   code: string;
 }
 

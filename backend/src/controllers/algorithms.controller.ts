@@ -12,9 +12,9 @@ export async function createAlgorithm(
   next: NextFunction
 ) {
   try {
-    const { name, description, code, githubUrl } = req.body as {
+    const { name, notes_html, code, githubUrl } = req.body as {
       name?: string;
-      description?: string;
+      notes_html?: string;
       code?: string;
       githubUrl?: string;
     };
@@ -39,10 +39,10 @@ export async function createAlgorithm(
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
     const result = await pool.query(
-      `INSERT INTO algorithms (user_id, name, description, code, github_url)
+      `INSERT INTO algorithms (user_id, name, notes_html, code, github_url)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
-      [userId, name, description || null, finalCode, githubUrl || null]
+      [userId, name, notes_html || null, finalCode, githubUrl || null]
     );
 
     return res.status(201).json(result.rows[0]);
@@ -52,8 +52,7 @@ export async function createAlgorithm(
 }
 
 /* ==============================
-   UPDATE (manual edit)
-   - If user edits manually, we "detach" from GitHub (github_url = NULL)
+   UPDATE
 ============================== */
 export async function updateAlgorithm(
   req: Request,
@@ -62,9 +61,9 @@ export async function updateAlgorithm(
 ) {
   try {
     const { id } = req.params;
-    const { name, description, code } = req.body as {
+    const { name, notes_html, code } = req.body as {
       name?: string;
-      description?: string;
+      notes_html?: string;
       code?: string;
     };
 
@@ -80,13 +79,13 @@ export async function updateAlgorithm(
     const result = await pool.query(
       `UPDATE algorithms
        SET name = $1,
-           description = $2,
+           notes_html = $2,
            code = $3,
            github_url = NULL,
            updated_at = NOW()
        WHERE id = $4 AND user_id = $5
        RETURNING *`,
-      [name, description || null, code, id, userId]
+      [name, notes_html || null, code, id, userId]
     );
 
     if (!result.rowCount) {
@@ -101,7 +100,6 @@ export async function updateAlgorithm(
 
 /* ==============================
    REFRESH FROM GITHUB
-   - MUST return updated algorithm row (not just a message)
 ============================== */
 export async function refreshAlgorithmFromGithub(
   req: Request,
@@ -144,10 +142,6 @@ export async function refreshAlgorithmFromGithub(
        RETURNING *`,
       [newCode, id, userId]
     );
-
-    if (!updated.rowCount) {
-      return res.status(404).json({ error: "Algorithm not found" });
-    }
 
     return res.json(updated.rows[0]);
   } catch (err) {
@@ -199,7 +193,7 @@ export async function getAlgorithms(
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
     const result = await pool.query(
-      `SELECT id, name, description, github_url, created_at, updated_at
+      `SELECT id, name, notes_html, github_url, created_at, updated_at
        FROM algorithms
        WHERE user_id = $1
        ORDER BY created_at DESC`,

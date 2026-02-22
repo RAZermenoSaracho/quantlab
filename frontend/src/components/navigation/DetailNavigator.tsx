@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 type Props = {
   ids: string[];
   currentId: string;
-  basePath: string; // e.g. "/backtest" or "/algorithms"
+  basePath: string;
 };
 
 export default function DetailNavigator({
@@ -14,36 +14,34 @@ export default function DetailNavigator({
 }: Props) {
   const navigate = useNavigate();
 
+  const total = ids.length;
   const currentIndex = ids.findIndex((id) => id === currentId);
 
-  if (currentIndex === -1 || ids.length <= 1) return null;
+  if (currentIndex === -1 || total <= 1) return null;
 
-  const hasPrev = currentIndex > 0;
-  const hasNext = currentIndex < ids.length - 1;
+  // 🔁 Circular logic
+  const prevIndex = (currentIndex - 1 + total) % total;
+  const nextIndex = (currentIndex + 1) % total;
 
   const goPrev = () => {
-    if (!hasPrev) return;
-    navigate(`${basePath}/${ids[currentIndex - 1]}`);
+    navigate(`${basePath}/${ids[prevIndex]}`);
   };
 
   const goNext = () => {
-    if (!hasNext) return;
-    navigate(`${basePath}/${ids[currentIndex + 1]}`);
+    navigate(`${basePath}/${ids[nextIndex]}`);
   };
 
   return (
     <div className="flex items-center gap-3">
-
       {/* Counter */}
       <span className="text-xs text-slate-400">
-        {currentIndex + 1} / {ids.length}
+        {currentIndex + 1} / {total}
       </span>
 
       {/* Previous */}
       <button
         onClick={goPrev}
-        disabled={!hasPrev}
-        className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-30 transition"
+        className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 transition"
       >
         <ChevronLeft size={18} className="text-slate-300" />
       </button>
@@ -51,8 +49,7 @@ export default function DetailNavigator({
       {/* Next */}
       <button
         onClick={goNext}
-        disabled={!hasNext}
-        className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-30 transition"
+        className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 transition"
       >
         <ChevronRight size={18} className="text-slate-300" />
       </button>
