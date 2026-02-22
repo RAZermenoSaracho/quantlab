@@ -1,15 +1,19 @@
-import type { NextFunction, Request, Response } from "express";
+import { Request, Response, NextFunction } from "express";
 
 export function errorMiddleware(
-    err: any,
-    _req: Request,
-    res: Response,
-    _next: NextFunction
+  err: any,
+  _req: Request,
+  res: Response,
+  _next: NextFunction
 ) {
-    // eslint-disable-next-line no-console
-    console.error(err);
+  console.error(err);
 
-    const status = err?.statusCode || 500;
-    const message = err?.message || "Internal server error";
-    res.status(status).json({ error: message });
+  const status = err.status || 500;
+
+  return res.status(status).json({
+    success: false,
+    error: {
+      message: err.message || "Internal server error",
+    },
+  });
 }

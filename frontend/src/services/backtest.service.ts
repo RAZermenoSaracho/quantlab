@@ -1,38 +1,24 @@
-import api from "./api";
+import api from "./api.service";
+import type { BacktestRun } from "../types/models";
+import type { CreateBacktestDto } from "../types/dto";
 
-/* ==============================
-   GET ONE
-============================== */
 export function getBacktest(id: string) {
-  return api.get(`/backtest/${id}`);
+  return api.get<any>(`/backtest/${id}`);
 }
 
-/* ==============================
-   GET ALL
-============================== */
 export function getAllBacktests() {
-  return api.get(`/backtest`);
+  return api.get<BacktestRun[]>("/backtest");
 }
 
-/* ==============================
-   CREATE
-============================== */
-export function createBacktest(payload: {
-  algorithm_id: string;
-  exchange: string;
-  symbol: string;
-  timeframe: string;
-  initial_balance: number;
-  start_date: string;
-  end_date: string;
-  fee_rate?: number;
-}) {
-  return api.post(`/backtest`, payload);
+export function createBacktest(payload: CreateBacktestDto) {
+  return api.post<{ run_id: string }>(
+    "/backtest",
+    payload
+  );
 }
 
-/* ==============================
-   DELETE
-============================== */
 export function deleteBacktest(id: string) {
-  return api.del(`/backtest/${id}`);
+  return api.del<{ message: string }>(
+    `/backtest/${id}`
+  );
 }
