@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from .validator import validate_algorithm, AlgorithmValidationError
 from .backtest import run_backtest
@@ -27,6 +27,7 @@ class BacktestRequest(BaseModel):
     initial_balance: float = Field(..., gt=0)
     start_date: str
     end_date: str
+    fee_rate: Optional[float] = Field(default=None, ge=0)
 
 
 # ======================================================
@@ -65,6 +66,7 @@ def backtest(request: BacktestRequest) -> Dict[str, Any]:
             initial_balance=request.initial_balance,
             start_date=request.start_date,
             end_date=request.end_date,
+            fee_rate=request.fee_rate
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

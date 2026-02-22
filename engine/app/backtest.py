@@ -12,7 +12,8 @@ def run_backtest(
     timeframe: str,
     initial_balance: float,
     start_date: str,
-    end_date: str
+    end_date: str,
+    fee_rate: float | None = None
 ) -> dict:
 
     # ============================
@@ -35,7 +36,10 @@ def run_backtest(
     # EXCHANGE
     # ============================
     client = get_exchange_client(exchange)
-    fee_rate = client.get_default_fee_rate()
+    if fee_rate is not None:
+        final_fee_rate = fee_rate
+    else:
+        final_fee_rate = client.get_default_fee_rate()
 
     candles_raw = fetch_candles(
         exchange=exchange,
@@ -149,8 +153,8 @@ def run_backtest(
             gross_pnl = (exit_price - entry_price) * quantity
 
             fee = (
-                (entry_price * quantity * fee_rate) +
-                (exit_price * quantity * fee_rate)
+                (entry_price * quantity * final_fee_rate) +
+                (exit_price * quantity * final_fee_rate)
             )
 
             net_pnl = gross_pnl - fee
@@ -252,7 +256,7 @@ def run_backtest(
 
     return {
         "exchange": exchange,
-        "fee_rate": fee_rate,
+        "fee_rate": final_fee_rate,
         "config_used": config_used,
 
         "initial_balance": initial_balance,
