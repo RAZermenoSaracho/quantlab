@@ -16,7 +16,7 @@ def run_backtest(
 ) -> dict:
 
     # ============================
-    # SAFE EXECUTION ENVIRONMENT
+    # SAFE EXECUTION
     # ============================
     execution_env = SAFE_GLOBALS.copy()
     exec(code, execution_env, execution_env)
@@ -27,13 +27,12 @@ def run_backtest(
     generate_signal = execution_env["generate_signal"]
 
     # ============================
-    # LOAD + VALIDATE CONFIG (optional)
+    # LOAD CONFIG
     # ============================
-    # Backward compatible: if CONFIG doesn't exist, defaults apply.
     config, config_used = load_config_from_env(execution_env)
 
     # ============================
-    # EXCHANGE CLIENT + FEE
+    # EXCHANGE
     # ============================
     client = get_exchange_client(exchange)
     fee_rate = client.get_default_fee_rate()
@@ -46,18 +45,25 @@ def run_backtest(
         end_date=end_date
     )
 
+    # ============================
+    # STATE VARIABLES
+    # ============================
     balance = float(initial_balance)
-    position = None
-    entry_timestamp = None
+    max_allowed_capital = initial_balance * (config.max_account_exposure_pct / 100)
 
-    trades: list[dict] = []
-    equity_curve: list[dict] = []
+    position = None
+    position_quantity = 0.0
+    entry_timestamp = None
+    last_exit_timestamp = None
+
+    trades = []
+    equity_curve = []
 
     peak_equity = balance
     max_drawdown = 0.0
 
-    wins: list[float] = []
-    losses: list[float] = []
+    wins = []
+    losses = []
 
     # ============================
     # MAIN LOOP
@@ -73,44 +79,93 @@ def run_backtest(
             "timestamp": candle[0]
         }
 
+        current_price = candle_data["close"]
         signal = generate_signal(candle_data)
 
         # ============================
-        # ENTRY
+        # AUTO EXIT: STOP LOSS / TAKE PROFIT
         # ============================
-        if signal == "BUY" and position is None:
-            position = candle_data["close"]
-            entry_timestamp = candle_data["timestamp"]
+        if position is not None:
+
+            pnl_pct = ((current_price - position) / position) * 100
+
+            sl_hit = (
+                config.stop_loss_pct is not None
+                and pnl_pct <= -config.stop_loss_pct
+            )
+
+            tp_hit = (
+                config.take_profit_pct is not None
+                and pnl_pct >= config.take_profit_pct
+            )
+
+            if sl_hit or tp_hit:
+                signal = "SELL"
 
         # ============================
-        # EXIT
+        # ENTRY LOGIC
+        # ============================
+        if signal == "BUY" and position is None:
+
+            # cooldown check
+            if (
+                config.cooldown_seconds > 0
+                and last_exit_timestamp is not None
+                and (candle_data["timestamp"] - last_exit_timestamp)
+                < config.cooldown_seconds * 1000
+            ):
+                pass  # skip entry due to cooldown
+
+            else:
+                # Determine quantity
+                if config.batch_size_type == "fixed":
+                    quantity = config.batch_size
+                else:
+                    # percent_balance
+                    capital_to_use = balance * (config.batch_size / 100)
+                    quantity = capital_to_use / current_price
+
+                # Exposure check
+                capital_required = quantity * current_price
+
+                if capital_required > balance:
+                    quantity = balance / current_price
+                    capital_required = quantity * current_price
+
+                if capital_required <= max_allowed_capital:
+                    position = current_price
+                    position_quantity = quantity
+                    entry_timestamp = candle_data["timestamp"]
+
+        # ============================
+        # EXIT LOGIC
         # ============================
         elif signal == "SELL" and position is not None:
 
             entry_price = position
-            exit_price = candle_data["close"]
+            exit_price = current_price
+            quantity = position_quantity
 
-            gross_pnl = exit_price - entry_price
+            gross_pnl = (exit_price - entry_price) * quantity
 
-            # NOTE: quantity is still 1 in the current model.
-            # Next commit will apply sizing using config.batch_size.
-            fee = (entry_price * fee_rate) + (exit_price * fee_rate)
+            fee = (
+                (entry_price * quantity * fee_rate) +
+                (exit_price * quantity * fee_rate)
+            )
 
             net_pnl = gross_pnl - fee
+
             balance += net_pnl
 
             trade = {
-                # keep legacy-compatible keys
                 "entry_price": entry_price,
                 "exit_price": exit_price,
                 "net_pnl": net_pnl,
-
-                # detailed fields
                 "pnl": net_pnl,
                 "gross_pnl": gross_pnl,
                 "fee": fee,
                 "side": "LONG",
-                "quantity": 1,
+                "quantity": quantity,
                 "opened_at": entry_timestamp,
                 "closed_at": candle_data["timestamp"],
                 "duration_ms": (
@@ -128,13 +183,17 @@ def run_backtest(
                 losses.append(net_pnl)
 
             position = None
+            position_quantity = 0.0
             entry_timestamp = None
+            last_exit_timestamp = candle_data["timestamp"]
 
         # ============================
-        # MARK TO MARKET EQUITY
+        # EQUITY CALCULATION
         # ============================
         if position is not None:
-            unrealized = candle_data["close"] - position
+            unrealized = (
+                (current_price - position) * position_quantity
+            )
             current_equity = balance + unrealized
         else:
             current_equity = balance
@@ -153,21 +212,26 @@ def run_backtest(
         drawdown = (peak_equity - current_equity) / peak_equity
         max_drawdown = max(max_drawdown, drawdown)
 
+        # Kill switch if configured
+        if (
+            config.max_drawdown_pct is not None
+            and drawdown * 100 >= config.max_drawdown_pct
+        ):
+            break
+
     # ============================
-    # LEGACY METRICS (KEEPING COMPATIBILITY)
+    # METRICS
     # ============================
     total_return_usdt = balance - initial_balance
     total_return_percent = (
         (total_return_usdt / initial_balance) * 100
-        if initial_balance
-        else 0
+        if initial_balance else 0
     )
 
     total_trades = len(trades)
     win_rate_percent = (
         (len(wins) / total_trades * 100)
-        if total_trades
-        else 0
+        if total_trades else 0
     )
 
     total_wins = sum(wins)
@@ -175,13 +239,9 @@ def run_backtest(
 
     profit_factor = (
         (total_wins / total_losses)
-        if total_losses > 0
-        else 0
+        if total_losses > 0 else 0
     )
 
-    # ============================
-    # ADVANCED METRICS
-    # ============================
     analysis = calculate_metrics(
         equity_curve=equity_curve,
         trades=trades,
@@ -190,20 +250,14 @@ def run_backtest(
         risk_free_rate=0.0
     )
 
-    # ============================
-    # RETURN STRUCTURE
-    # ============================
     return {
         "exchange": exchange,
         "fee_rate": fee_rate,
-
-        # NEW: config info (useful for DB + UI)
         "config_used": config_used,
 
         "initial_balance": initial_balance,
         "final_balance": balance,
 
-        # DB-compatible names
         "total_return_usdt": total_return_usdt,
         "total_return_percent": total_return_percent,
         "max_drawdown_percent": max_drawdown * 100,
