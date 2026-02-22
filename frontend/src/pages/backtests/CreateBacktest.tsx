@@ -2,23 +2,48 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getAlgorithms } from "../../services/algorithm.service";
 import { createBacktest } from "../../services/backtest.service";
+import {
+  getExchanges,
+  getSymbols,
+  getDefaultFeeRate,
+} from "../../services/market.service";
+
+type FormState = {
+  algorithm_id: string;
+  exchange: string;
+  symbol: string;
+  timeframe: string;
+  initial_balance: number;
+  start_date: string;
+  end_date: string;
+  fee_rate?: number;
+};
 
 export default function CreateBacktest() {
   const navigate = useNavigate();
 
   const [algorithms, setAlgorithms] = useState<any[]>([]);
-  const [form, setForm] = useState({
+  const [exchanges, setExchanges] = useState<any[]>([]);
+  const [symbols, setSymbols] = useState<any[]>([]);
+  const [symbolQuery, setSymbolQuery] = useState("");
+
+  const [form, setForm] = useState<FormState>({
     algorithm_id: "",
-    symbol: "BTCUSDT",
+    exchange: "binance",
+    symbol: "",
     timeframe: "1h",
     initial_balance: 1000,
     start_date: "",
     end_date: "",
+    fee_rate: undefined,
   });
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  /* =====================================
+     Load algorithms
+  ===================================== */
   useEffect(() => {
     async function load() {
       const data = await getAlgorithms();
@@ -27,16 +52,74 @@ export default function CreateBacktest() {
     load();
   }, []);
 
+  /* =====================================
+     Load exchanges
+  ===================================== */
+  useEffect(() => {
+    async function load() {
+      const data = await getExchanges();
+      setExchanges(data.exchanges || []);
+    }
+    load();
+  }, []);
+
+  /* =====================================
+     Load default fee when exchange changes
+  ===================================== */
+  useEffect(() => {
+    async function loadFee() {
+      if (!form.exchange) return;
+      const data = await getDefaultFeeRate(form.exchange);
+
+      setForm((prev) => ({
+        ...prev,
+        fee_rate: data.default_fee_rate,
+      }));
+    }
+
+    loadFee();
+  }, [form.exchange]);
+
+  /* =====================================
+     Symbol search (debounced)
+  ===================================== */
+  useEffect(() => {
+    if (!symbolQuery) return;
+
+    const timeout = setTimeout(async () => {
+      const data = await getSymbols(form.exchange, symbolQuery);
+      setSymbols(data.symbols || []);
+    }, 300);
+
+    return () => clearTimeout(timeout);
+  }, [symbolQuery, form.exchange]);
+
+  /* =====================================
+     Submit
+  ===================================== */
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setLoading(true);
     setError(null);
+
+    if (!form.algorithm_id) {
+      return setError("Please select an algorithm.");
+    }
+
+    if (!form.symbol) {
+      return setError("Please select a symbol.");
+    }
+
+    if (form.start_date >= form.end_date) {
+      return setError("Start date must be before end date.");
+    }
+
+    setLoading(true);
 
     try {
       const result = await createBacktest(form);
       navigate(`/backtest/${result.run_id}`);
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || "Failed to create backtest.");
     } finally {
       setLoading(false);
     }
@@ -51,8 +134,7 @@ export default function CreateBacktest() {
           Run Historical Backtest
         </h1>
         <p className="text-slate-400 max-w-2xl">
-          Simulate your trading algorithm using historical Binance market data
-          to evaluate profitability, drawdowns and trade performance.
+          Simulate your trading algorithm using historical market data.
         </p>
       </div>
 
@@ -67,7 +149,7 @@ export default function CreateBacktest() {
         {/* STRATEGY */}
         <Card
           title="Strategy Selection"
-          description="Choose the trading algorithm logic that will generate buy and sell signals."
+          description="Choose the algorithm that will generate trading signals."
         >
           <Field label="Trading Strategy">
             <select
@@ -85,35 +167,35 @@ export default function CreateBacktest() {
                 </option>
               ))}
             </select>
-
-            <Hint>
-              This determines the decision-making logic for the backtest.
-            </Hint>
           </Field>
         </Card>
 
-        {/* MARKET SETTINGS */}
+        {/* MARKET CONFIG */}
         <Card
           title="Market Configuration"
-          description="Define the asset and timeframe used for historical simulation."
+          description="Select exchange, symbol and timeframe."
         >
           <div className="grid md:grid-cols-2 gap-8">
 
-            <Field label="Market Symbol">
-              <input
-                value={form.symbol}
+            {/* Exchange */}
+            <Field label="Exchange">
+              <select
+                value={form.exchange}
                 onChange={(e) =>
-                  setForm({ ...form, symbol: e.target.value.toUpperCase() })
+                  setForm({ ...form, exchange: e.target.value })
                 }
                 className="form-input"
-                required
-              />
-              <Hint>
-                Example: BTCUSDT, ETHUSDT, SOLUSDT
-              </Hint>
+              >
+                {exchanges.map((ex) => (
+                  <option key={ex.id} value={ex.id}>
+                    {ex.name}
+                  </option>
+                ))}
+              </select>
             </Field>
 
-            <Field label="Candle Timeframe">
+            {/* Timeframe */}
+            <Field label="Timeframe">
               <select
                 value={form.timeframe}
                 onChange={(e) =>
@@ -121,28 +203,86 @@ export default function CreateBacktest() {
                 }
                 className="form-input"
               >
-                <option value="1m">1 Minute</option>
-                <option value="5m">5 Minutes</option>
-                <option value="15m">15 Minutes</option>
-                <option value="1h">1 Hour</option>
-                <option value="4h">4 Hours</option>
-                <option value="1d">1 Day</option>
+                <option value="1m">1m</option>
+                <option value="5m">5m</option>
+                <option value="15m">15m</option>
+                <option value="1h">1h</option>
+                <option value="4h">4h</option>
+                <option value="1d">1d</option>
               </select>
-              <Hint>
-                Determines how price data is aggregated.
-              </Hint>
             </Field>
 
+          </div>
+
+          {/* Symbol Search */}
+          <div className="mt-8">
+            <Field label="Market Symbol">
+              <input
+                value={symbolQuery}
+                onChange={(e) =>
+                  setSymbolQuery(e.target.value.toUpperCase())
+                }
+                placeholder="Search symbol (BTC, ETH...)"
+                className="form-input"
+              />
+
+              {symbols.length > 0 && (
+                <div className="bg-slate-900 border border-slate-700 rounded mt-2 max-h-48 overflow-y-auto">
+                  {symbols.map((s) => (
+                    <div
+                      key={s.symbol}
+                      onClick={() => {
+                        setForm({ ...form, symbol: s.symbol });
+                        setSymbolQuery(s.symbol);
+                        setSymbols([]);
+                      }}
+                      className="px-4 py-2 hover:bg-slate-800 cursor-pointer text-white"
+                    >
+                      {s.symbol}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {form.symbol && (
+                <Hint>
+                  Selected: <span className="text-sky-400">{form.symbol}</span>
+                </Hint>
+              )}
+            </Field>
+          </div>
+
+          {/* Fee */}
+          <div className="mt-8">
+            <Field label="Trading Fee Rate">
+              <input
+                type="number"
+                step="0.0001"
+                value={form.fee_rate ?? ""}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    fee_rate:
+                      e.target.value === ""
+                        ? undefined
+                        : Number(e.target.value),
+                  })
+                }
+                className="form-input"
+              />
+              <Hint>
+                Default exchange fee. Set to 0 to simulate no fees.
+              </Hint>
+            </Field>
           </div>
         </Card>
 
         {/* DATE RANGE */}
         <Card
           title="Backtest Period"
-          description="Choose the historical time range used for analysis."
+          description="Choose historical simulation window."
         >
           <div className="grid md:grid-cols-2 gap-8">
-
             <Field label="Start Date">
               <input
                 type="date"
@@ -153,9 +293,6 @@ export default function CreateBacktest() {
                 className="form-input"
                 required
               />
-              <Hint>
-                Beginning of the simulation period.
-              </Hint>
             </Field>
 
             <Field label="End Date">
@@ -168,32 +305,28 @@ export default function CreateBacktest() {
                 className="form-input"
                 required
               />
-              <Hint>
-                End of the simulation period.
-              </Hint>
             </Field>
-
           </div>
         </Card>
 
         {/* CAPITAL */}
         <Card
-          title="Capital Configuration"
-          description="Set the starting capital used during the backtest simulation."
+          title="Capital"
+          description="Initial capital used in the simulation."
         >
-          <Field label="Initial Capital (USDT)">
+          <Field label="Initial Balance (USDT)">
             <input
               type="number"
               value={form.initial_balance}
               onChange={(e) =>
-                setForm({ ...form, initial_balance: Number(e.target.value) })
+                setForm({
+                  ...form,
+                  initial_balance: Number(e.target.value),
+                })
               }
               className="form-input"
               required
             />
-            <Hint>
-              Starting balance used to calculate returns and drawdowns.
-            </Hint>
           </Field>
         </Card>
 
@@ -202,7 +335,7 @@ export default function CreateBacktest() {
           <button
             type="submit"
             disabled={loading}
-            className="bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 px-10 py-3 rounded-xl text-white font-semibold text-sm shadow-lg transition-all disabled:opacity-50"
+            className="bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 px-10 py-3 rounded-xl text-white font-semibold shadow-lg transition-all disabled:opacity-50"
           >
             {loading ? "Running Backtest..." : "Run Backtest"}
           </button>
@@ -221,12 +354,8 @@ function Card({ title, description, children }: any) {
   return (
     <div className="bg-slate-800/60 border border-slate-700 rounded-2xl p-8 space-y-6 shadow-sm">
       <div className="space-y-2">
-        <h2 className="text-lg font-semibold text-white">
-          {title}
-        </h2>
-        <p className="text-slate-400 text-sm">
-          {description}
-        </p>
+        <h2 className="text-lg font-semibold text-white">{title}</h2>
+        <p className="text-slate-400 text-sm">{description}</p>
       </div>
       {children}
     </div>
@@ -236,9 +365,7 @@ function Card({ title, description, children }: any) {
 function Field({ label, children }: any) {
   return (
     <div className="space-y-3">
-      <label className="text-sm font-medium text-slate-300">
-        {label}
-      </label>
+      <label className="text-sm font-medium text-slate-300">{label}</label>
       {children}
     </div>
   );
@@ -246,8 +373,6 @@ function Field({ label, children }: any) {
 
 function Hint({ children }: any) {
   return (
-    <p className="text-xs text-slate-500 mt-1">
-      {children}
-    </p>
+    <p className="text-xs text-slate-500 mt-1">{children}</p>
   );
 }

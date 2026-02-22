@@ -1,89 +1,38 @@
-const API = "http://localhost:5000/api";
-
-function getAuthHeaders() {
-  const token = localStorage.getItem("token");
-  if (!token) throw new Error("Not authenticated");
-
-  return {
-    Authorization: `Bearer ${token}`,
-    "Content-Type": "application/json",
-  };
-}
+import api from "./api";
 
 /* ==============================
    GET ONE
 ============================== */
-export async function getBacktest(id: string) {
-  const res = await fetch(`${API}/backtest/${id}`, {
-    headers: getAuthHeaders(),
-  });
-
-  const data = await res.json().catch(() => ({}));
-
-  if (!res.ok) {
-    throw new Error(data.error || "Failed to fetch backtest");
-  }
-
-  return data;
+export function getBacktest(id: string) {
+  return api.get(`/backtest/${id}`);
 }
 
 /* ==============================
    GET ALL
 ============================== */
-export async function getAllBacktests() {
-  const res = await fetch(`${API}/backtest`, {
-    headers: getAuthHeaders(),
-  });
-
-  const data = await res.json().catch(() => ({}));
-
-  if (!res.ok) {
-    throw new Error(data.error || "Failed to fetch backtests");
-  }
-
-  return data;
+export function getAllBacktests() {
+  return api.get(`/backtest`);
 }
 
 /* ==============================
    CREATE
 ============================== */
-export async function createBacktest(payload: {
+export function createBacktest(payload: {
   algorithm_id: string;
+  exchange: string;
   symbol: string;
   timeframe: string;
   initial_balance: number;
   start_date: string;
   end_date: string;
+  fee_rate?: number;
 }) {
-  const res = await fetch(`${API}/backtest`, {
-    method: "POST",
-    headers: getAuthHeaders(),
-    body: JSON.stringify(payload),
-  });
-
-  const data = await res.json().catch(() => ({}));
-
-  if (!res.ok) {
-    throw new Error(data.error || "Failed to create backtest");
-  }
-
-  return data;
+  return api.post(`/backtest`, payload);
 }
 
 /* ==============================
    DELETE
 ============================== */
-export async function deleteBacktest(id: string) {
-  const res = await fetch(`${API}/backtest/${id}`, {
-    method: "DELETE",
-    headers: getAuthHeaders(),
-  });
-
-  const data = await res.json().catch(() => ({}));
-
-  if (!res.ok) {
-    throw new Error(data.error || "Failed to delete backtest");
-  }
-
-  return data;
+export function deleteBacktest(id: string) {
+  return api.del(`/backtest/${id}`);
 }

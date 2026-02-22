@@ -1,82 +1,51 @@
-const API = "http://localhost:5000/api";
+import api from "./api";
 
-function getAuthHeaders() {
-  const token = localStorage.getItem("token");
-  return {
-    Authorization: `Bearer ${token}`,
-    "Content-Type": "application/json",
-  };
+/* ==============================
+   GET ALL
+============================== */
+export function getAlgorithms() {
+  return api.get("/algorithms");
 }
 
-export async function getAlgorithms() {
-  const res = await fetch(`${API}/algorithms`, {
-    headers: getAuthHeaders(),
-  });
-
-  if (!res.ok) throw new Error("Failed to fetch algorithms");
-  return res.json();
+/* ==============================
+   GET ONE
+============================== */
+export function getAlgorithmById(id: string) {
+  return api.get(`/algorithms/${id}`);
 }
 
-export async function getAlgorithmById(id: string) {
-  const res = await fetch(`${API}/algorithms/${id}`, {
-    headers: getAuthHeaders(),
-  });
-
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Algorithm not found");
-  return data;
-}
-
-export async function createAlgorithm(payload: {
+/* ==============================
+   CREATE
+============================== */
+export function createAlgorithm(payload: {
   name: string;
   description?: string;
   code?: string;
   githubUrl?: string;
 }) {
-  const res = await fetch(`${API}/algorithms`, {
-    method: "POST",
-    headers: getAuthHeaders(),
-    body: JSON.stringify(payload),
-  });
-
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Failed to create algorithm");
-  return data;
+  return api.post("/algorithms", payload);
 }
 
-export async function updateAlgorithm(
+/* ==============================
+   UPDATE
+============================== */
+export function updateAlgorithm(
   id: string,
   payload: { name: string; description?: string; code: string }
 ) {
-  const res = await fetch(`${API}/algorithms/${id}`, {
-    method: "PUT",
-    headers: getAuthHeaders(),
-    body: JSON.stringify(payload),
-  });
-
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Failed to update algorithm");
-  return data;
+  return api.post(`/algorithms/${id}`, payload);
 }
 
-export async function refreshAlgorithmFromGithub(id: string) {
-  const res = await fetch(`${API}/algorithms/${id}/refresh`, {
-    method: "POST",
-    headers: getAuthHeaders(),
-  });
-
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Failed to refresh algorithm");
-  return data; // ✅ now returns updated algorithm row
+/* ==============================
+   REFRESH FROM GITHUB
+============================== */
+export function refreshAlgorithmFromGithub(id: string) {
+  return api.post(`/algorithms/${id}/refresh`, {});
 }
 
-export async function deleteAlgorithm(id: string) {
-  const res = await fetch(`${API}/algorithms/${id}`, {
-    method: "DELETE",
-    headers: getAuthHeaders(),
-  });
-
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Failed to delete algorithm");
-  return data;
+/* ==============================
+   DELETE
+============================== */
+export function deleteAlgorithm(id: string) {
+  return api.del(`/algorithms/${id}`);
 }
