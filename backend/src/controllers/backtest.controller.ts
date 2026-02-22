@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { pool } from "../config/db";
 import { runBacktestOnEngine } from "../services/backtestEngine.service";
+import { getExchangeById } from "../services/exchangeCatalog.service";
 
 type DbTradeSide = "BUY" | "SELL";
 
@@ -43,29 +44,63 @@ function toDateFromEngineTs(ts: any): Date {
 /* ==============================
    CREATE
 ============================== */
-export async function createBacktest(req: Request, res: Response, next: NextFunction) {
+export async function createBacktest(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  const client = await pool.connect();
   let runId: string | null = null;
 
   try {
     const {
       algorithm_id,
+      exchange,
       symbol,
       timeframe,
       initial_balance,
       start_date,
       end_date,
+      fee_rate
     } = req.body;
 
-    if (!algorithm_id || !symbol || !timeframe || !initial_balance || !start_date || !end_date) {
+    if (
+      !algorithm_id ||
+      !exchange ||
+      !symbol ||
+      !timeframe ||
+      !initial_balance ||
+      !start_date ||
+      !end_date
+    ) {
       return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const parsedBalance = Number(initial_balance);
+    if (!Number.isFinite(parsedBalance) || parsedBalance <= 0) {
+      return res.status(400).json({ error: "Invalid initial_balance" });
     }
 
     const userId = req.user!.id;
 
     /* ==============================
+       VALIDATE EXCHANGE
+    ============================== */
+    const exchangeMeta = getExchangeById(exchange);
+
+    if (!exchangeMeta) {
+      return res.status(400).json({ error: "Unsupported exchange" });
+    }
+
+    const finalFeeRate =
+      typeof fee_rate === "number"
+        ? fee_rate
+        : exchangeMeta.default_fee_rate;
+
+    /* ==============================
        GET ALGORITHM
     ============================== */
-    const algoResult = await pool.query(
+    const algoResult = await client.query(
       `SELECT code FROM algorithms WHERE id = $1 AND user_id = $2`,
       [algorithm_id, userId]
     );
@@ -77,34 +112,52 @@ export async function createBacktest(req: Request, res: Response, next: NextFunc
     const code = algoResult.rows[0].code;
 
     /* ==============================
+       BEGIN TRANSACTION
+    ============================== */
+    await client.query("BEGIN");
+
+    /* ==============================
        CREATE RUN (RUNNING)
     ============================== */
-    const runInsert = await pool.query(
+    const runInsert = await client.query(
       `INSERT INTO backtest_runs
-       (user_id, algorithm_id, symbol, timeframe, initial_balance, start_date, end_date, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'RUNNING')
+       (user_id, algorithm_id, exchange, fee_rate, symbol, timeframe,
+        initial_balance, start_date, end_date, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'RUNNING')
        RETURNING id`,
-      [userId, algorithm_id, symbol, timeframe, initial_balance, start_date, end_date]
+      [
+        userId,
+        algorithm_id,
+        exchange,
+        finalFeeRate,
+        symbol,
+        timeframe,
+        parsedBalance,
+        start_date,
+        end_date
+      ]
     );
 
     runId = runInsert.rows[0].id;
 
     /* ==============================
-       CALL PYTHON ENGINE
+       CALL ENGINE
     ============================== */
     const engineResult = await runBacktestOnEngine({
       code,
+      exchange,
       symbol,
       timeframe,
-      initial_balance,
+      initial_balance: parsedBalance,
       start_date,
       end_date,
+      fee_rate: finalFeeRate
     });
 
     /* ==============================
-       INSERT METRICS (LEGACY TABLE)
+       INSERT METRICS
     ============================== */
-    await pool.query(
+    await client.query(
       `INSERT INTO metrics
        (run_id, run_type, total_return_percent, total_return_usdt,
         max_drawdown_percent, win_rate_percent, profit_factor, total_trades)
@@ -116,63 +169,66 @@ export async function createBacktest(req: Request, res: Response, next: NextFunc
         engineResult.max_drawdown_percent ?? 0,
         engineResult.win_rate_percent ?? 0,
         engineResult.profit_factor ?? 0,
-        engineResult.total_trades ?? 0,
+        engineResult.total_trades ?? 0
       ]
     );
 
     /* ==============================
        INSERT TRADES
-       - Fix: trade_side enum only accepts BUY/SELL
-       - Use opened_at/closed_at if engine provides
     ============================== */
     for (const trade of engineResult.trades ?? []) {
       const dbSide = normalizeTradeSide(trade);
 
       const entryPrice = Number(trade.entry_price ?? 0);
-      const exitPrice = trade.exit_price == null ? null : Number(trade.exit_price);
-
+      const exitPrice =
+        trade.exit_price == null ? null : Number(trade.exit_price);
       const quantity = Number(trade.quantity ?? 1);
       const pnl = Number(trade.pnl ?? trade.net_pnl ?? 0);
 
-      // If engine doesn't provide pnl_percent, compute (simple) percent vs entry notional
-      // (This is a placeholder until you compute it properly based on position sizing)
       const computedPnlPercent =
         trade.pnl_percent != null
           ? Number(trade.pnl_percent)
-          : (entryPrice ? (pnl / entryPrice) * 100 : 0);
+          : entryPrice
+          ? (pnl / (entryPrice * quantity)) * 100
+          : 0;
 
-      const openedAt = trade.opened_at ? toDateFromEngineTs(trade.opened_at) : new Date();
-      const closedAt = trade.closed_at ? toDateFromEngineTs(trade.closed_at) : new Date();
+      const openedAt = trade.opened_at
+        ? toDateFromEngineTs(trade.opened_at)
+        : new Date();
 
-      await pool.query(
+      const closedAt = trade.closed_at
+        ? toDateFromEngineTs(trade.closed_at)
+        : new Date();
+
+      await client.query(
         `INSERT INTO trades
-         (run_id, run_type, side, entry_price, exit_price, quantity, pnl, pnl_percent, opened_at, closed_at)
+         (run_id, run_type, side, entry_price, exit_price,
+          quantity, pnl, pnl_percent, opened_at, closed_at)
          VALUES ($1,'BACKTEST',$2,$3,$4,$5,$6,$7,$8,$9)`,
         [
           runId,
-          dbSide, // ✅ BUY/SELL only
+          dbSide,
           entryPrice,
           exitPrice,
           quantity,
           pnl,
           computedPnlPercent,
           openedAt,
-          closedAt,
+          closedAt
         ]
       );
     }
 
     /* ==============================
-       UPDATE RUN WITH EQUITY + ANALYSIS
-       ⚠️ DO NOT JSON.stringify
+       UPDATE RUN FINAL DATA
     ============================== */
-    await pool.query(
+    await client.query(
       `UPDATE backtest_runs
-      SET equity_curve = $1::jsonb,
-          analysis = $2::jsonb,
-          status = 'COMPLETED',
-          updated_at = NOW()
-      WHERE id = $3`,
+       SET equity_curve = $1::jsonb,
+           analysis = $2::jsonb,
+           status = 'COMPLETED',
+           updated_at = NOW()
+       WHERE id = $3`,
       [
         JSON.stringify(engineResult.equity_curve ?? []),
         JSON.stringify(engineResult.analysis ?? null),
@@ -180,27 +236,26 @@ export async function createBacktest(req: Request, res: Response, next: NextFunc
       ]
     );
 
+    await client.query("COMMIT");
+
     return res.status(201).json({ run_id: runId });
 
   } catch (err) {
-    console.error("Backtest creation error:", err);
-
-    // Mark run as FAILED if it was created
-    try {
-      if (runId) {
-        await pool.query(
-          `UPDATE backtest_runs
-           SET status = 'FAILED',
-               updated_at = NOW()
-           WHERE id = $1`,
-          [runId]
-        );
-      }
-    } catch (_) {
-      // ignore
+    if (runId) {
+      await client.query(
+        `UPDATE backtest_runs
+         SET status = 'FAILED',
+             updated_at = NOW()
+         WHERE id = $1`,
+        [runId]
+      );
     }
 
+    await client.query("ROLLBACK");
+
     next(err);
+  } finally {
+    client.release();
   }
 }
 
