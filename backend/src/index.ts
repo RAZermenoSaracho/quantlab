@@ -11,6 +11,7 @@ import authRoutes from "./routes/auth.routes";
 import algorithmsRoutes from "./routes/algorithms.routes";
 import backtestRoutes from "./routes/backtest.routes";
 import exchangeRoutes from "./routes/exchange.routes";
+import marketRoutes from "./routes/market.routes";
 
 import "./config/passport";
 
@@ -66,6 +67,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/algorithms", algorithmsRoutes);
 app.use("/api/backtests", backtestRoutes);
 app.use("/api/exchanges", exchangeRoutes);
+app.use("/api/market", marketRoutes);
 
 /* =====================================================
    ERROR HANDLER
