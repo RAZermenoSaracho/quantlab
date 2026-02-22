@@ -1,19 +1,29 @@
 import ast
-from typing import Dict, Any
+from typing import Dict, Any, Set
 
-from .spec import load_config_from_env
-
+from .spec import AlgorithmConfig, load_config_from_env
 
 ALLOWED_RETURN_VALUES = {"BUY", "SELL", "HOLD"}
+
+ALLOWED_CONFIG_FIELDS: Set[str] = {
+    "max_account_exposure_pct",
+    "max_open_positions",
+    "batch_size",
+    "batch_size_type",
+    "stop_loss_pct",
+    "take_profit_pct",
+    "cooldown_seconds",
+    "max_drawdown_pct",
+}
 
 
 class AlgorithmValidationError(Exception):
     pass
 
 
-# ==============================
+# =========================================================
 # AST SECURITY CHECKS
-# ==============================
+# =========================================================
 
 def _check_forbidden_imports(tree: ast.AST):
     for node in ast.walk(tree):
@@ -34,15 +44,58 @@ def _check_forbidden_calls(tree: ast.AST):
         if isinstance(node, ast.Call):
             if isinstance(node.func, ast.Name):
                 if node.func.id in forbidden_calls:
-                    raise AlgorithmValidationError(f"Use of '{node.func.id}' is not allowed.")
+                    raise AlgorithmValidationError(
+                        f"Use of '{node.func.id}' is not allowed."
+                    )
 
 
-# ==============================
+# =========================================================
+# CONFIG AST VALIDATION (NEW)
+# =========================================================
+
+def _validate_config_ast(tree: ast.AST):
+    """
+    Validate CONFIG structure using AST before execution.
+    Only allow dict literal with allowed keys.
+    """
+
+    for node in ast.walk(tree):
+
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == "CONFIG":
+
+                    if not isinstance(node.value, ast.Dict):
+                        raise AlgorithmValidationError(
+                            "CONFIG must be defined as a dictionary literal."
+                        )
+
+                    # Validate keys
+                    for key in node.value.keys:
+                        if not isinstance(key, ast.Constant):
+                            raise AlgorithmValidationError(
+                                "CONFIG keys must be string literals."
+                            )
+
+                        if key.value not in ALLOWED_CONFIG_FIELDS:
+                            raise AlgorithmValidationError(
+                                f"Invalid CONFIG field: '{key.value}'"
+                            )
+
+                    # Validate values are simple literals
+                    for value in node.value.values:
+                        if not isinstance(value, (ast.Constant, ast.UnaryOp)):
+                            raise AlgorithmValidationError(
+                                "CONFIG values must be simple literals (numbers, strings, None)."
+                            )
+
+
+# =========================================================
 # SAFE EXECUTION ENVIRONMENT
-# ==============================
+# =========================================================
+
 SAFE_GLOBALS = {
     "__builtins__": {
-        # numeric + iteration
         "abs": abs,
         "min": min,
         "max": max,
@@ -50,8 +103,6 @@ SAFE_GLOBALS = {
         "len": len,
         "range": range,
         "round": round,
-
-        # basic types
         "float": float,
         "int": int,
         "bool": bool,
@@ -61,35 +112,38 @@ SAFE_GLOBALS = {
         "set": set,
         "tuple": tuple,
     },
-    # helper functions available to strategies
     "mean": lambda values: sum(values) / len(values) if values else 0,
 }
 
-# ==============================
+
+# =========================================================
 # MAIN VALIDATOR
-# ==============================
+# =========================================================
 
 def validate_algorithm(code: str) -> Dict[str, Any]:
     """
     Validates user algorithm code safely.
     - Security AST checks
-    - Can execute with SAFE_GLOBALS
-    - Ensures generate_signal exists and returns valid values
-    - If CONFIG exists, validates it and returns it for UX
+    - CONFIG AST validation
+    - Execution test
+    - CONFIG semantic validation
     """
 
-    # 1) Parse AST
+    # 1️⃣ Parse AST
     try:
         tree = ast.parse(code)
     except SyntaxError as e:
         raise AlgorithmValidationError(f"Syntax error: {str(e)}")
 
-    # 2) Security checks
+    # 2️⃣ Security checks
     _check_forbidden_imports(tree)
     _check_no_infinite_loops(tree)
     _check_forbidden_calls(tree)
 
-    # 3) Create isolated execution environment
+    # 3️⃣ CONFIG AST validation
+    _validate_config_ast(tree)
+
+    # 4️⃣ Execute safely
     execution_env = SAFE_GLOBALS.copy()
 
     try:
@@ -97,23 +151,24 @@ def validate_algorithm(code: str) -> Dict[str, Any]:
     except Exception as e:
         raise AlgorithmValidationError(f"Execution error: {str(e)}")
 
-    # 4) Validate function existence
+    # 5️⃣ Validate generate_signal
     if "generate_signal" not in execution_env:
         raise AlgorithmValidationError("Function 'generate_signal' not found.")
 
     if not callable(execution_env["generate_signal"]):
         raise AlgorithmValidationError("'generate_signal' is not callable.")
 
-    # 5) Validate CONFIG if present (optional)
+    # 6️⃣ Validate CONFIG semantically
     config_used: Dict[str, Any] = {}
+
     if "CONFIG" in execution_env:
         try:
-            _cfg, raw = load_config_from_env(execution_env)
+            cfg, raw = load_config_from_env(execution_env)
             config_used = raw
         except Exception as e:
             raise AlgorithmValidationError(f"Invalid CONFIG: {str(e)}")
 
-    # 6) Test execution
+    # 7️⃣ Test execution
     test_candle = {
         "open": 100.0,
         "high": 105.0,
@@ -126,13 +181,17 @@ def validate_algorithm(code: str) -> Dict[str, Any]:
     try:
         result = execution_env["generate_signal"](test_candle)
     except Exception as e:
-        raise AlgorithmValidationError(f"Error when calling generate_signal: {str(e)}")
+        raise AlgorithmValidationError(
+            f"Error when calling generate_signal: {str(e)}"
+        )
 
     if result not in ALLOWED_RETURN_VALUES:
-        raise AlgorithmValidationError(f"generate_signal must return one of {ALLOWED_RETURN_VALUES}")
+        raise AlgorithmValidationError(
+            f"generate_signal must return one of {ALLOWED_RETURN_VALUES}"
+        )
 
     return {
         "valid": True,
         "message": "Algorithm is valid.",
-        "config": config_used,  # helpful for UI docs + preview
+        "config": config_used,
     }
