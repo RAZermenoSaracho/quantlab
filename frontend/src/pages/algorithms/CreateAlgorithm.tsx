@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createAlgorithm } from "../../services/algorithm.service";
 import CodeEditor from "../../components/ui/CodeEditor";
+import ConfigDocumentation from "../../components/algorithms/ConfigDocumentation";
 
 export default function CreateAlgorithm() {
   const navigate = useNavigate();
@@ -13,92 +14,130 @@ export default function CreateAlgorithm() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const isSubmitDisabled =
+    loading || (!code.trim() && !githubUrl.trim());
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+
+    if (!code.trim() && !githubUrl.trim()) {
+      setError("Provide strategy code or a GitHub URL.");
+      return;
+    }
+
     setLoading(true);
 
     try {
       const algo = await createAlgorithm({
         name,
-        description,
+        description: description || undefined,
         code: code || undefined,
         githubUrl: githubUrl || undefined,
       });
 
       navigate(`/algorithms/${algo.id}`);
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || "Failed to create algorithm.");
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="max-w-5xl mx-auto space-y-8">
+    <div className="max-w-7xl mx-auto px-6 py-8 space-y-8">
 
+      {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-white">
+        <h1 className="text-3xl font-bold text-white">
           Create Algorithm
         </h1>
-        <p className="text-slate-400 text-sm">
-          Write your strategy or import it from GitHub.
+        <p className="text-slate-400 text-sm mt-2">
+          Define your strategy logic and optional risk configuration.
         </p>
       </div>
 
       {error && (
-        <div className="bg-red-900/30 text-red-400 p-3 rounded-lg">
+        <div className="bg-red-900/30 border border-red-800 text-red-400 p-4 rounded-lg">
           {error}
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-3 gap-8">
 
-        <input
-          placeholder="Algorithm name"
-          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          required
-        />
+        {/* LEFT SIDE – FORM + EDITOR */}
+        <div className="lg:col-span-2 space-y-6">
 
-        <textarea
-          placeholder="Description (optional)"
-          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-        />
+          <div className="space-y-4">
 
-        <div>
-          <label className="text-slate-400 text-sm">
-            Python Strategy Code
-          </label>
+            <input
+              placeholder="Algorithm name"
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-sky-600"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+            />
 
-          <CodeEditor
-            value={code}
-            onChange={setCode}
-            height="h-[500px]"
+            <textarea
+              placeholder="Description (optional)"
+              rows={3}
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-sky-600"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+
+          </div>
+
+          {/* Code Editor */}
+          <div>
+            <label className="text-slate-400 text-sm mb-2 block">
+              Python Strategy Code
+            </label>
+
+            <CodeEditor
+              value={code}
+              onChange={setCode}
+              height="h-[500px]"
+            />
+          </div>
+
+          {/* Divider */}
+          <div className="text-center text-slate-500 text-sm">
+            — OR —
+          </div>
+
+          <input
+            placeholder="GitHub file URL"
+            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-sky-600"
+            value={githubUrl}
+            onChange={(e) => setGithubUrl(e.target.value)}
           />
+
+          {/* Submit */}
+          <button
+            type="submit"
+            disabled={isSubmitDisabled}
+            className="
+              bg-sky-600 hover:bg-sky-700 
+              transition 
+              px-6 py-3 
+              rounded-lg 
+              text-white 
+              font-medium
+              disabled:opacity-50 
+              disabled:cursor-not-allowed
+            "
+          >
+            {loading ? "Creating Algorithm..." : "Create Algorithm"}
+          </button>
+
         </div>
 
-        <div className="text-center text-slate-500 text-sm">
-          — OR —
+        {/* RIGHT SIDE – CONFIG DOCUMENTATION */}
+        <div className="lg:col-span-1">
+          <ConfigDocumentation />
         </div>
 
-        <input
-          placeholder="GitHub file URL"
-          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white"
-          value={githubUrl}
-          onChange={(e) => setGithubUrl(e.target.value)}
-        />
-
-        <button
-          type="submit"
-          disabled={loading}
-          className="bg-sky-600 hover:bg-sky-700 px-6 py-2 rounded-lg text-white disabled:opacity-50"
-        >
-          {loading ? "Creating..." : "Create Algorithm"}
-        </button>
       </form>
     </div>
   );
