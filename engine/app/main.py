@@ -21,6 +21,7 @@ class AlgorithmRequest(BaseModel):
 
 class BacktestRequest(BaseModel):
     code: str
+    exchange: str = Field(default="binance")
     symbol: str = Field(..., example="BTCUSDT")
     timeframe: str = Field(..., example="1h")
     initial_balance: float = Field(..., gt=0)
@@ -58,6 +59,7 @@ def backtest(request: BacktestRequest) -> Dict[str, Any]:
     try:
         return run_backtest(
             code=request.code,
+            exchange=request.exchange,
             symbol=request.symbol,
             timeframe=request.timeframe,
             initial_balance=request.initial_balance,

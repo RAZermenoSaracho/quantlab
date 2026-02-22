@@ -71,6 +71,9 @@ CREATE TABLE backtest_runs (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     algorithm_id UUID NOT NULL REFERENCES algorithms(id) ON DELETE CASCADE,
 
+    exchange VARCHAR(50) NOT NULL DEFAULT 'binance',
+    fee_rate NUMERIC(10,8) NOT NULL,
+
     symbol VARCHAR(20) NOT NULL,
     timeframe VARCHAR(10) NOT NULL,
     initial_balance NUMERIC(18,8) NOT NULL,

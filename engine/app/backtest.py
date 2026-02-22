@@ -1,12 +1,12 @@
 from .validator import SAFE_GLOBALS
 from .data import fetch_candles
 from .metrics import calculate_metrics
-
-FEE_RATE = 0.001  # 0.1% per trade
+from .clients import get_exchange_client
 
 
 def run_backtest(
     code: str,
+    exchange: str,
     symbol: str,
     timeframe: str,
     initial_balance: float,
@@ -25,7 +25,16 @@ def run_backtest(
 
     generate_signal = execution_env["generate_signal"]
 
-    candles_raw = fetch_candles(symbol, timeframe, start_date, end_date)
+    client = get_exchange_client(exchange)
+    fee_rate = client.get_default_fee_rate()
+
+    candles_raw = fetch_candles(
+        exchange=exchange,
+        symbol=symbol,
+        timeframe=timeframe,
+        start_date=start_date,
+        end_date=end_date
+    )
 
     balance = float(initial_balance)
     position = None
@@ -72,7 +81,7 @@ def run_backtest(
             exit_price = candle_data["close"]
 
             gross_pnl = exit_price - entry_price
-            fee = (entry_price + exit_price) * FEE_RATE
+            fee = (entry_price * fee_rate) + (exit_price * fee_rate)
             net_pnl = gross_pnl - fee
 
             balance += net_pnl
@@ -176,6 +185,9 @@ def run_backtest(
     # ============================
 
     return {
+        "exchange": exchange,
+        "fee_rate": fee_rate,
+
         "initial_balance": initial_balance,
         "final_balance": balance,
 
