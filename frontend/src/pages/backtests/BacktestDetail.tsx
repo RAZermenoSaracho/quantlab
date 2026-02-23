@@ -5,9 +5,12 @@ import {
   deleteBacktest,
   getAllBacktests,
 } from "../../services/backtest.service";
+
 import EquityCurveChart from "../../components/charts/EquityCurveChart";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import DetailNavigator from "../../components/navigation/DetailNavigator";
+import KpiCard from "../../components/ui/KpiCard";
+import MetricCard from "../../components/ui/MetricCard";
 
 type BacktestDetailPayload = {
   run: any;
@@ -17,55 +20,47 @@ type BacktestDetailPayload = {
   equity_curve: any[];
 };
 
-/* ===========================
-   UTILITIES
-=========================== */
+/* ================= UTILITIES ================= */
 
-function fmtMoney(x: number, decimals = 2) {
+function fmtMoney(x: number, d = 2) {
   if (!Number.isFinite(x)) return "0.00";
-  return x.toFixed(decimals);
+  return x.toFixed(d);
 }
 
-function fmtPct(x: number, decimals = 2) {
+function fmtPct(x: number, d = 2) {
   if (!Number.isFinite(x)) return "0.00%";
-  return `${x.toFixed(decimals)}%`;
-}
-
-function parseEquitySeries(equityCurve: any[]): number[] {
-  if (!Array.isArray(equityCurve) || !equityCurve.length) return [];
-
-  if (typeof equityCurve[0] === "number") {
-    return equityCurve.map((n) => Number(n) || 0);
-  }
-
-  return equityCurve.map((p: any) => Number(p?.equity ?? 0) || 0);
+  return `${x.toFixed(d)}%`;
 }
 
 function mean(arr: number[]) {
-  if (!arr.length) return 0;
-  return arr.reduce((a, b) => a + b, 0) / arr.length;
+  return arr.length
+    ? arr.reduce((a, b) => a + b, 0) / arr.length
+    : 0;
 }
 
 function std(arr: number[]) {
   if (arr.length < 2) return 0;
   const m = mean(arr);
-  return Math.sqrt(arr.reduce((a, x) => a + (x - m) ** 2, 0) / arr.length);
+  return Math.sqrt(
+    arr.reduce((a, x) => a + (x - m) ** 2, 0) / arr.length
+  );
 }
 
 function computeReturns(equity: number[]) {
   const out: number[] = [];
   for (let i = 1; i < equity.length; i++) {
-    const prev = equity[i - 1];
-    const cur = equity[i];
-    out.push(prev ? cur / prev - 1 : 0);
+    out.push(
+      equity[i - 1]
+        ? equity[i] / equity[i - 1] - 1
+        : 0
+    );
   }
   return out;
 }
 
 function computeDrawdown(equity: number[]) {
-  if (!equity.length) return { maxDD: 0 };
-
-  let peak = equity[0] || 0;
+  if (!equity.length) return 0;
+  let peak = equity[0];
   let maxDD = 0;
 
   for (const e of equity) {
@@ -74,25 +69,81 @@ function computeDrawdown(equity: number[]) {
     maxDD = Math.max(maxDD, -dd);
   }
 
-  return { maxDD: maxDD * 100 };
+  return maxDD * 100;
 }
 
-/* ===========================
-   COMPONENT
-=========================== */
+function groupReturns(
+  equityRaw: any[],
+  period: "yearly" | "monthly" | "weekly" | "daily"
+) {
+  const grouped: Record<string, number[]> = {};
+
+  for (const p of equityRaw) {
+    if (!p.timestamp) continue;
+
+    const date = new Date(p.timestamp);
+    let key = "";
+
+    if (period === "yearly") key = `${date.getFullYear()}`;
+
+    if (period === "monthly")
+      key = `${date.getFullYear()}-${String(
+        date.getMonth() + 1
+      ).padStart(2, "0")}`;
+
+    if (period === "weekly") {
+      const d = new Date(date);
+      d.setDate(date.getDate() - date.getDay());
+      key = d.toISOString().slice(0, 10);
+    }
+
+    if (period === "daily")
+      key = date.toISOString().slice(0, 10);
+
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(Number(p.equity ?? 0));
+  }
+
+  return Object.entries(grouped)
+    .map(([k, values]) => {
+      if (values.length < 2) return null;
+      const first = values[0];
+      const last = values[values.length - 1];
+      const ret = first
+        ? ((last - first) / first) * 100
+        : 0;
+      return { period: k, returnPct: ret };
+    })
+    .filter(Boolean) as {
+    period: string;
+    returnPct: number;
+  }[];
+}
+
+/* ================= COMPONENT ================= */
 
 export default function BacktestDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
+  const [data, setData] =
+    useState<BacktestDetailPayload | null>(null);
   const [allIds, setAllIds] = useState<string[]>([]);
-  const [data, setData] = useState<BacktestDetailPayload | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loadingDelete, setLoadingDelete] = useState(false);
+  const [error, setError] =
+    useState<string | null>(null);
+  const [loadingDelete, setLoadingDelete] =
+    useState(false);
 
-  /* ---------------------------
-     LOAD DATA
-  --------------------------- */
+  const [returnPeriod, setReturnPeriod] =
+    useState<
+      "yearly" | "monthly" | "weekly" | "daily"
+    >("yearly");
+
+  const [selectedPeriod, setSelectedPeriod] =
+    useState<string | null>(null);
+
+  /* ================= LOAD DATA ================= */
+
   useEffect(() => {
     async function load() {
       if (!id) return;
@@ -101,163 +152,287 @@ export default function BacktestDetail() {
       setData(detail);
 
       const list = await getAllBacktests();
-      const ids = list.backtests.map((b) => b.id);
-      setAllIds(ids);
+      setAllIds(
+        list.backtests.map((b: any) => b.id)
+      );
     }
 
-    load().catch((err) => {
-      console.error(err);
-      setError("Failed to load backtest");
-    });
+    load().catch(() =>
+      setError("Failed to load backtest")
+    );
   }, [id]);
 
-  /* ---------------------------
-     SAFE FALLBACKS
-  --------------------------- */
+  /* ================= SAFE FALLBACK DATA ================= */
+
   const run = data?.run ?? {};
   const metrics = data?.metrics ?? {};
   const analysis = data?.analysis ?? {};
   const trades = data?.trades ?? [];
-  const equityRaw = data?.equity_curve ?? [];
+  const equity_curve = data?.equity_curve ?? [];
 
-  /* ---------------------------
-     HOOKS (ALWAYS EXECUTE)
-  --------------------------- */
+  /* ================= DERIVED DATA ================= */
 
-  const equity = useMemo(() => parseEquitySeries(equityRaw), [equityRaw]);
+  const equity = useMemo(
+    () =>
+      equity_curve.map((p: any) =>
+        Number(p.equity ?? 0)
+      ),
+    [equity_curve]
+  );
+
+  const returns = useMemo(
+    () => computeReturns(equity),
+    [equity]
+  );
 
   const derived = useMemo(() => {
     const initial =
-      Number(run.initial_balance ?? metrics.initial_balance ?? 0) || 0;
-
-    const final = equity.length
-      ? equity[equity.length - 1]
-      : Number(metrics.final_balance ?? initial) || initial;
+      Number(run.initial_balance ?? 0);
+    const final =
+      equity[equity.length - 1] ?? initial;
 
     const netProfit = final - initial;
-    const retPct = initial ? (netProfit / initial) * 100 : 0;
+    const retPct = initial
+      ? (netProfit / initial) * 100
+      : 0;
 
-    const returns = computeReturns(equity);
     const vol = std(returns);
-    const sharpe = vol ? mean(returns) / vol : 0;
-
-    const dd = computeDrawdown(equity);
+    const sharpe = vol
+      ? mean(returns) / vol
+      : 0;
 
     return {
-      initial,
-      final,
       netProfit,
       retPct,
       sharpe,
       volatility: vol,
-      maxDD: dd.maxDD,
+      maxDD: computeDrawdown(equity),
     };
-  }, [run, metrics, equity]);
+  }, [equity, returns, run.initial_balance]);
 
-  /* ---------------------------
-     EARLY RETURNS (AFTER HOOKS)
-  --------------------------- */
-  if (error) return <div className="p-6 text-red-400">{error}</div>;
-  if (!data) return <div className="p-6 text-slate-400">Loading...</div>;
+  const netProfit =
+    analysis?.summary?.net_profit ??
+    metrics?.total_return_usdt ??
+    derived.netProfit;
 
-  /* ---------------------------
-     DELETE
-  --------------------------- */
+  const retPct =
+    analysis?.summary?.return_pct ??
+    metrics?.total_return_percent ??
+    derived.retPct;
+
+  const sharpe =
+    analysis?.risk?.sharpe ??
+    metrics?.sharpe ??
+    derived.sharpe;
+
+  const volatility =
+    analysis?.risk?.volatility ??
+    metrics?.volatility ??
+    derived.volatility;
+
+  const maxDD =
+    analysis?.risk?.max_drawdown_pct ??
+    metrics?.max_drawdown_percent ??
+    derived.maxDD;
+
+  const periodReturns = useMemo(
+    () =>
+      groupReturns(
+        equity_curve,
+        returnPeriod
+      ),
+    [equity_curve, returnPeriod]
+  );
+
+  const avgPeriodReturn = mean(
+    periodReturns.map(
+      (p) => p.returnPct
+    )
+  );
+
+  const specificReturn =
+    selectedPeriod
+      ? periodReturns.find(
+          (p) =>
+            p.period === selectedPeriod
+        )?.returnPct ?? null
+      : null;
+
+  /* ================= ACTIONS ================= */
+
   async function handleDelete() {
-    if (!id) return;
-
-    if (!confirm("Are you sure you want to delete this backtest?")) return;
+    if (!confirm("Delete backtest?"))
+      return;
 
     setLoadingDelete(true);
-    try {
-      await deleteBacktest(id);
-
-      const index = allIds.indexOf(id);
-      const nextId = allIds[index + 1] || allIds[index - 1] || null;
-
-      if (nextId) navigate(`/backtest/${nextId}`);
-      else navigate("/backtests");
-    } catch (err: any) {
-      console.error(err);
-      setError(err?.message || "Failed to delete backtest");
-    } finally {
-      setLoadingDelete(false);
-    }
+    await deleteBacktest(id!);
+    navigate("/backtests");
   }
 
-  const netProfit = Number(
-    analysis?.summary?.net_profit ??
-      derived.netProfit ??
-      metrics.total_return_usdt ??
-      0
-  );
+  /* ================= CONDITIONAL UI ================= */
 
-  const retPct = Number(
-    analysis?.summary?.return_pct ??
-      derived.retPct ??
-      metrics.total_return_percent ??
-      0
-  );
+  if (error) {
+    return (
+      <div className="p-6 text-red-400">
+        {error}
+      </div>
+    );
+  }
 
-  const sharpe = Number(
-    analysis?.risk?.sharpe ?? derived.sharpe ?? 0
-  );
+  if (!data) {
+    return (
+      <div className="p-6 text-slate-400">
+        Loading...
+      </div>
+    );
+  }
 
-  const volatility = Number(
-    analysis?.risk?.volatility ?? derived.volatility ?? 0
-  );
-
-  const maxDD = Number(
-    analysis?.risk?.max_drawdown_pct ??
-      derived.maxDD ??
-      metrics.max_drawdown_percent ??
-      0
-  );
+  /* ================= UI ================= */
 
   return (
     <div className="space-y-8">
       {/* HEADER */}
-      <div className="flex justify-between items-start gap-6">
+      <div className="flex justify-between items-start">
         <div>
           <h1 className="text-2xl font-bold text-white">
             {run.symbol} — {run.timeframe}
           </h1>
-
-          <p className="text-slate-400 text-sm mt-1">
-            {run.start_date?.slice(0, 10)} → {run.end_date?.slice(0, 10)}
+          <p className="text-slate-400 text-sm">
+            {run.start_date?.slice(0, 10)} →{" "}
+            {run.end_date?.slice(0, 10)}
           </p>
         </div>
 
-        <div className="flex items-center gap-4">
-          <DetailNavigator ids={allIds} currentId={id!} basePath="/backtest" />
+        <div className="flex gap-4 items-center">
+          <DetailNavigator
+            ids={allIds}
+            currentId={id!}
+            basePath="/backtest"
+          />
           <StatusBadge status={run.status} />
-
           <button
             onClick={handleDelete}
-            disabled={loadingDelete}
-            className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg text-white text-sm"
+            className="bg-red-600 px-4 py-2 rounded text-white"
           >
-            {loadingDelete ? "Deleting..." : "Delete"}
+            {loadingDelete
+              ? "Deleting..."
+              : "Delete"}
           </button>
         </div>
       </div>
 
-      {/* METRICS */}
+      {/* CORE METRICS */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <MetricCard title="Net Profit" value={`${fmtMoney(netProfit)} USDT`} positive={netProfit >= 0} />
-        <MetricCard title="Return" value={fmtPct(retPct)} positive={retPct >= 0} />
-        <MetricCard title="Sharpe" value={fmtMoney(sharpe, 2)} />
-        <MetricCard title="Volatility" value={fmtPct(volatility * 100)} />
-        <MetricCard title="Max Drawdown" value={fmtPct(maxDD)} />
+        <KpiCard
+          title="Net Profit"
+          value={`${fmtMoney(netProfit)} USDT`}
+          positive={netProfit >= 0}
+        />
+        <KpiCard
+          title="Return"
+          value={fmtPct(retPct)}
+          positive={retPct >= 0}
+        />
+        <KpiCard
+          title="Sharpe"
+          value={fmtMoney(sharpe, 2)}
+        />
+        <KpiCard
+          title="Volatility"
+          value={fmtPct(volatility * 100)}
+        />
+        <KpiCard
+          title="Max Drawdown"
+          value={fmtPct(maxDD)}
+        />
       </div>
 
-      {/* EQUITY */}
-      <div className="bg-slate-800 border border-slate-700 rounded-xl p-6">
-        <h3 className="text-white font-semibold mb-4">Equity Curve</h3>
-        <EquityCurveChart equity={equityRaw} />
+      {/* PERIOD ANALYSIS */}
+      <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 space-y-4">
+        <div className="flex justify-between">
+          <h3 className="text-white font-semibold">
+            Period Analysis
+          </h3>
+
+          <select
+            value={returnPeriod}
+            onChange={(e) =>
+              setReturnPeriod(
+                e.target.value as any
+              )
+            }
+            className="bg-slate-900 text-white px-3 py-1 rounded"
+          >
+            <option value="yearly">
+              Yearly
+            </option>
+            <option value="monthly">
+              Monthly
+            </option>
+            <option value="weekly">
+              Weekly
+            </option>
+            <option value="daily">
+              Daily
+            </option>
+          </select>
+        </div>
+
+        <MetricCard
+          title={`Average ${returnPeriod} Return`}
+          value={fmtPct(avgPeriodReturn)}
+          positive={
+            avgPeriodReturn >= 0
+          }
+        />
+
+        <select
+          value={selectedPeriod ?? ""}
+          onChange={(e) =>
+            setSelectedPeriod(
+              e.target.value
+            )
+          }
+          className="bg-slate-900 text-white px-3 py-1 rounded"
+        >
+          <option value="">
+            Select specific period
+          </option>
+
+          {periodReturns.map((p) => (
+            <option
+              key={p.period}
+              value={p.period}
+            >
+              {p.period}
+            </option>
+          ))}
+        </select>
+
+        {specificReturn != null && (
+          <MetricCard
+            title="Selected Period Return"
+            value={fmtPct(
+              specificReturn
+            )}
+            positive={
+              specificReturn >= 0
+            }
+          />
+        )}
       </div>
 
-      {/* TRADES */}
+      {/* EQUITY CHART */}
+      <div className="bg-slate-800 p-6 rounded-xl border border-slate-700">
+        <h3 className="text-white font-semibold mb-4">
+          Equity Curve
+        </h3>
+        <EquityCurveChart
+          equity={equity_curve}
+        />
+      </div>
+
+      {/* TRADES TABLE */}
       <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-slate-900 text-slate-400 uppercase text-xs">
@@ -278,72 +453,65 @@ export default function BacktestDetail() {
             {trades.map((t: any, i: number) => {
               const pnl = Number(t.pnl ?? 0);
               const pnlPct = Number(t.pnl_percent ?? 0);
-              const qty = Number(t.quantity ?? 0);
 
               return (
-                <tr key={t.id || i} className="border-t border-slate-700 hover:bg-slate-900">
-                  <td className="px-4 py-3 text-slate-500">{i + 1}</td>
-                  <td className={`px-4 py-3 font-medium ${t.side === "BUY" ? "text-green-300" : "text-red-300"}`}>
+                <tr
+                  key={i}
+                  className="border-t border-slate-700 hover:bg-slate-900"
+                >
+                  <td className="px-4 py-3 text-slate-500">
+                    {i + 1}
+                  </td>
+                  <td className="px-4 py-3">
                     {t.side}
                   </td>
-                  <td className="px-4 py-3 text-slate-300">{qty.toFixed(4)}</td>
-                  <td className="px-4 py-3 text-slate-300">{Number(t.entry_price).toFixed(2)}</td>
-                  <td className="px-4 py-3 text-slate-300">
-                    {t.exit_price != null ? Number(t.exit_price).toFixed(2) : "-"}
+                  <td className="px-4 py-3">
+                    {Number(t.quantity).toFixed(4)}
+                  </td>
+                  <td className="px-4 py-3">
+                    {Number(t.entry_price).toFixed(2)}
+                  </td>
+                  <td className="px-4 py-3">
+                    {t.exit_price
+                      ? Number(t.exit_price).toFixed(2)
+                      : "-"}
                   </td>
                   <td className="px-4 py-3 text-slate-400">
-                    {t.opened_at?.slice(0, 19).replace("T", " ")}
+                    {t.opened_at
+                      ?.slice(0, 19)
+                      .replace("T", " ")}
                   </td>
                   <td className="px-4 py-3 text-slate-400">
-                    {t.closed_at?.slice(0, 19).replace("T", " ")}
+                    {t.closed_at
+                      ?.slice(0, 19)
+                      .replace("T", " ")}
                   </td>
-                  <td className={`px-4 py-3 font-semibold ${pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+                  <td
+                    className={`px-4 py-3 font-semibold ${
+                      pnl >= 0
+                        ? "text-green-400"
+                        : "text-red-400"
+                    }`}
+                  >
                     {pnl.toFixed(2)}
                   </td>
-                  <td className={`px-4 py-3 ${pnlPct >= 0 ? "text-green-300" : "text-red-300"}`}>
-                    {pnlPct ? `${pnlPct.toFixed(2)}%` : "-"}
+                  <td
+                    className={`px-4 py-3 ${
+                      pnlPct >= 0
+                        ? "text-green-300"
+                        : "text-red-300"
+                    }`}
+                  >
+                    {pnlPct
+                      ? `${pnlPct.toFixed(2)}%`
+                      : "-"}
                   </td>
                 </tr>
               );
             })}
-
-            {trades.length === 0 && (
-              <tr>
-                <td colSpan={9} className="px-4 py-6 text-slate-500">
-                  No trades available.
-                </td>
-              </tr>
-            )}
           </tbody>
         </table>
       </div>
-    </div>
-  );
-}
-
-/* ===========================
-   METRIC CARD
-=========================== */
-
-function MetricCard({
-  title,
-  value,
-  positive,
-}: {
-  title: string;
-  value: string;
-  positive?: boolean;
-}) {
-  return (
-    <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
-      <p className="text-slate-400 text-xs uppercase">{title}</p>
-      <p
-        className={`mt-2 text-lg font-semibold ${
-          positive === undefined ? "text-white" : positive ? "text-green-400" : "text-red-400"
-        }`}
-      >
-        {value}
-      </p>
     </div>
   );
 }
