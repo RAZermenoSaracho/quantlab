@@ -1,8 +1,8 @@
 from .validator import SAFE_GLOBALS
-from .data import fetch_candles
 from .metrics import calculate_metrics
-from .clients import get_exchange_client
+from .clients import ExchangeFactory
 from .spec import load_config_from_env
+from typing import Optional
 
 
 def run_backtest(
@@ -13,7 +13,10 @@ def run_backtest(
     initial_balance: float,
     start_date: str,
     end_date: str,
-    fee_rate: float | None = None
+    fee_rate: Optional[float] = None,
+    api_key: Optional[str] = None,
+    api_secret: Optional[str] = None,
+    testnet: bool = False
 ) -> dict:
 
     # ============================
@@ -33,22 +36,28 @@ def run_backtest(
     config, config_used = load_config_from_env(execution_env)
 
     # ============================
-    # EXCHANGE
+    # EXCHANGE CLIENT
     # ============================
-    client = get_exchange_client(exchange)
-    if fee_rate is not None:
-        final_fee_rate = fee_rate
-    else:
-        final_fee_rate = client.get_default_fee_rate()
-
-    candles_raw = fetch_candles(
+    client = ExchangeFactory.create(
         exchange=exchange,
+        api_key=api_key,
+        api_secret=api_secret,
+        testnet=testnet
+    )
+
+    final_fee_rate = (
+        fee_rate if fee_rate is not None
+        else client.get_default_fee_rate()
+    )
+
+    candles_raw = client.fetch_candles(
         symbol=symbol,
         timeframe=timeframe,
         start_date=start_date,
         end_date=end_date
     )
-
+    print("Candles received:", len(candles_raw))
+    
     # ============================
     # STATE VARIABLES
     # ============================
@@ -87,7 +96,7 @@ def run_backtest(
         signal = generate_signal(candle_data)
 
         # ============================
-        # AUTO EXIT: STOP LOSS / TAKE PROFIT
+        # AUTO EXIT: SL / TP
         # ============================
         if position is not None:
 
@@ -107,29 +116,25 @@ def run_backtest(
                 signal = "SELL"
 
         # ============================
-        # ENTRY LOGIC
+        # ENTRY
         # ============================
         if signal == "BUY" and position is None:
 
-            # cooldown check
             if (
                 config.cooldown_seconds > 0
                 and last_exit_timestamp is not None
                 and (candle_data["timestamp"] - last_exit_timestamp)
                 < config.cooldown_seconds * 1000
             ):
-                pass  # skip entry due to cooldown
+                pass
 
             else:
-                # Determine quantity
                 if config.batch_size_type == "fixed":
                     quantity = config.batch_size
                 else:
-                    # percent_balance
                     capital_to_use = balance * (config.batch_size / 100)
                     quantity = capital_to_use / current_price
 
-                # Exposure check
                 capital_required = quantity * current_price
 
                 if capital_required > balance:
@@ -142,7 +147,7 @@ def run_backtest(
                     entry_timestamp = candle_data["timestamp"]
 
         # ============================
-        # EXIT LOGIC
+        # EXIT
         # ============================
         elif signal == "SELL" and position is not None:
 
@@ -158,15 +163,13 @@ def run_backtest(
             )
 
             net_pnl = gross_pnl - fee
-
             balance += net_pnl
 
             trade = {
                 "entry_price": entry_price,
                 "exit_price": exit_price,
-                "net_pnl": net_pnl,
-                "pnl": net_pnl,
                 "gross_pnl": gross_pnl,
+                "net_pnl": net_pnl,
                 "fee": fee,
                 "side": "LONG",
                 "quantity": quantity,
@@ -174,8 +177,7 @@ def run_backtest(
                 "closed_at": candle_data["timestamp"],
                 "duration_ms": (
                     candle_data["timestamp"] - entry_timestamp
-                    if entry_timestamp
-                    else None
+                    if entry_timestamp else None
                 ),
             }
 
@@ -192,7 +194,7 @@ def run_backtest(
             last_exit_timestamp = candle_data["timestamp"]
 
         # ============================
-        # EQUITY CALCULATION
+        # EQUITY
         # ============================
         if position is not None:
             unrealized = (
@@ -216,7 +218,6 @@ def run_backtest(
         drawdown = (peak_equity - current_equity) / peak_equity
         max_drawdown = max(max_drawdown, drawdown)
 
-        # Kill switch if configured
         if (
             config.max_drawdown_pct is not None
             and drawdown * 100 >= config.max_drawdown_pct
@@ -224,7 +225,7 @@ def run_backtest(
             break
 
     # ============================
-    # METRICS
+    # FINAL METRICS
     # ============================
     total_return_usdt = balance - initial_balance
     total_return_percent = (
@@ -258,17 +259,14 @@ def run_backtest(
         "exchange": exchange,
         "fee_rate": final_fee_rate,
         "config_used": config_used,
-
         "initial_balance": initial_balance,
         "final_balance": balance,
-
         "total_return_usdt": total_return_usdt,
         "total_return_percent": total_return_percent,
         "max_drawdown_percent": max_drawdown * 100,
         "win_rate_percent": win_rate_percent,
         "profit_factor": profit_factor,
         "total_trades": total_trades,
-
         "equity_curve": equity_curve,
         "trades": trades,
         "analysis": analysis

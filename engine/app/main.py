@@ -1,15 +1,24 @@
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Any, Dict, Optional
+from datetime import datetime
+import logging
 
 from .validator import validate_algorithm, AlgorithmValidationError
 from .backtest import run_backtest
 
 
+# ======================================================
+# =================== APP INIT =========================
+# ======================================================
+
 app = FastAPI(
     title="QuantLab Engine",
-    version="0.1.0"
+    version="0.2.0"
 )
+
+logger = logging.getLogger("quantlab.engine")
+
 
 # ======================================================
 # ===================== Schemas ========================
@@ -29,13 +38,31 @@ class BacktestRequest(BaseModel):
     end_date: str
     fee_rate: Optional[float] = Field(default=None, ge=0)
 
+    # 🔥 Optional live/testnet credentials
+    api_key: Optional[str] = None
+    api_secret: Optional[str] = None
+    testnet: bool = False
+
+    # ============================
+    # DATE VALIDATION
+    # ============================
+
+    @field_validator("start_date", "end_date")
+    @classmethod
+    def validate_iso_date(cls, v: str) -> str:
+        try:
+            datetime.fromisoformat(v)
+        except ValueError:
+            raise ValueError("Dates must be ISO format (YYYY-MM-DDTHH:MM:SS)")
+        return v
+
 
 # ======================================================
 # ===================== Health =========================
 # ======================================================
 
 @app.get("/health")
-def health() -> Dict[str, str]:
+async def health() -> Dict[str, str]:
     return {"status": "engine running"}
 
 
@@ -44,11 +71,14 @@ def health() -> Dict[str, str]:
 # ======================================================
 
 @app.post("/validate")
-def validate(request: AlgorithmRequest) -> Dict[str, Any]:
+async def validate(request: AlgorithmRequest) -> Dict[str, Any]:
     try:
         return validate_algorithm(request.code)
     except AlgorithmValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("Unexpected validation error")
+        raise HTTPException(status_code=500, detail="Internal validation error")
 
 
 # ======================================================
@@ -56,9 +86,9 @@ def validate(request: AlgorithmRequest) -> Dict[str, Any]:
 # ======================================================
 
 @app.post("/backtest")
-def backtest(request: BacktestRequest) -> Dict[str, Any]:
+async def backtest(request: BacktestRequest) -> Dict[str, Any]:
     try:
-        return run_backtest(
+        result = run_backtest(
             code=request.code,
             exchange=request.exchange,
             symbol=request.symbol,
@@ -66,7 +96,23 @@ def backtest(request: BacktestRequest) -> Dict[str, Any]:
             initial_balance=request.initial_balance,
             start_date=request.start_date,
             end_date=request.end_date,
-            fee_rate=request.fee_rate
+            fee_rate=request.fee_rate,
+            api_key=request.api_key,
+            api_secret=request.api_secret,
+            testnet=request.testnet
         )
-    except Exception as e:
+
+        return {
+            "success": True,
+            "data": result
+        }
+
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+    except Exception as e:
+        logger.exception("Backtest failed")
+        raise HTTPException(
+            status_code=500,
+            detail="Backtest execution failed"
+        )

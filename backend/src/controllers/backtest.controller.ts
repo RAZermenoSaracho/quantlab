@@ -153,7 +153,6 @@ export async function createBacktest(
       end_date,
       fee_rate: finalFeeRate
     });
-
     /* ==============================
        INSERT METRICS
     ============================== */
