@@ -11,6 +11,7 @@ import CodeEditor from "../../components/ui/CodeEditor";
 import type { Algorithm } from "../../types/models";
 import RichTextEditor from "../../components/ui/RichTextEditor";
 import DetailNavigator from "../../components/navigation/DetailNavigator";
+import DocumentationPanel from "../../components/algorithms/DocumentationPanel";
 
 export default function AlgorithmDetail() {
   const { id } = useParams<{ id: string }>();
@@ -147,28 +148,30 @@ export default function AlgorithmDetail() {
   =========================== */
 
   return (
-    <div className="max-w-6xl mx-auto space-y-8">
+    <div className="max-w-[1600px] mx-auto px-8 py-10 space-y-10">
 
       {/* HEADER */}
-      <div className="flex justify-between items-start gap-6">
+      <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center gap-8">
 
-        {/* Left side (Title) */}
         <div>
           {!editing ? (
-            <h1 className="text-2xl font-bold text-white">
+            <h1 className="text-4xl font-bold text-white tracking-tight">
               {algorithm.name}
             </h1>
           ) : (
             <input
-              className="text-2xl font-bold bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white w-full"
+              className="text-4xl font-bold bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white w-full focus:ring-2 focus:ring-sky-600 outline-none"
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
           )}
+
+          <p className="text-xs text-slate-500 mt-3">
+            Last updated: {new Date(algorithm.updated_at).toLocaleString()}
+          </p>
         </div>
 
-        {/* Right side (Navigator + Buttons) */}
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-4">
 
           <DetailNavigator
             ids={allIds}
@@ -180,7 +183,7 @@ export default function AlgorithmDetail() {
             <button
               onClick={handleRefresh}
               disabled={saving}
-              className="bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded-lg text-white"
+              className="bg-amber-600 hover:bg-amber-700 transition px-5 py-3 rounded-xl text-white font-medium"
             >
               {saving ? "Refreshing..." : "Refresh"}
             </button>
@@ -189,7 +192,16 @@ export default function AlgorithmDetail() {
           {!editing ? (
             <button
               onClick={() => setEditing(true)}
-              className="bg-sky-600 hover:bg-sky-700 px-4 py-2 rounded-lg text-white"
+              className="
+                bg-gradient-to-r from-sky-600 to-indigo-600
+                hover:opacity-90
+                transition
+                px-5 py-3
+                rounded-xl
+                text-white
+                font-medium
+                shadow-md
+              "
             >
               Edit
             </button>
@@ -197,7 +209,7 @@ export default function AlgorithmDetail() {
             <button
               onClick={handleSave}
               disabled={saving}
-              className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg text-white"
+              className="bg-green-600 hover:bg-green-700 transition px-5 py-3 rounded-xl text-white font-medium shadow-md"
             >
               {saving ? "Saving..." : "Save"}
             </button>
@@ -205,21 +217,22 @@ export default function AlgorithmDetail() {
 
           <button
             onClick={handleDelete}
-            className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg text-white"
+            className="bg-red-600 hover:bg-red-700 transition px-5 py-3 rounded-xl text-white font-medium"
           >
             Delete
           </button>
+
         </div>
       </div>
 
       {error && (
-        <div className="bg-red-900/30 text-red-400 p-3 rounded-lg">
+        <div className="bg-red-900/30 border border-red-800 text-red-400 p-4 rounded-xl">
           {error}
         </div>
       )}
 
       {/* NOTES */}
-      <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-6 space-y-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-lg space-y-6">
         <h2 className="text-lg font-semibold text-white">
           Strategy Notes
         </h2>
@@ -239,17 +252,51 @@ export default function AlgorithmDetail() {
         )}
       </div>
 
-      {/* CODE */}
-      <CodeEditor
-        value={code}
-        onChange={setCode}
-        disabled={!editing || isGithub}
-        height="h-[600px]"
-      />
+      {/* WORKSPACE */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-10 min-h-[80vh]">
 
-      <div className="text-xs text-slate-500">
-        Updated:{" "}
-        {new Date(algorithm.updated_at).toLocaleString()}
+        {/* CODE EDITOR */}
+        <div className="lg:col-span-3 flex flex-col">
+
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col flex-1">
+
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">
+                Strategy Code
+              </h2>
+              {isGithub && (
+                <span className="text-xs text-amber-400">
+                  Synced from GitHub
+                </span>
+              )}
+            </div>
+
+            <div className="flex-1">
+              <CodeEditor
+                value={code}
+                onChange={setCode}
+                disabled={!editing || isGithub}
+                height="h-full"
+              />
+            </div>
+
+          </div>
+
+        </div>
+
+        {/* DOCUMENTATION PANEL */}
+        <div className="lg:col-span-2 flex flex-col">
+
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl flex flex-col flex-1 overflow-hidden">
+
+            <div className="flex-1 overflow-y-auto p-4">
+              <DocumentationPanel code={code} />
+            </div>
+
+          </div>
+
+        </div>
+
       </div>
     </div>
   );

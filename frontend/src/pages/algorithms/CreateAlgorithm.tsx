@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createAlgorithm } from "../../services/algorithm.service";
 import CodeEditor from "../../components/ui/CodeEditor";
-import ConfigDocumentation from "../../components/algorithms/ConfigDocumentation";
+import DocumentationPanel from "../../components/algorithms/DocumentationPanel";
 
 export default function CreateAlgorithm() {
   const navigate = useNavigate();
@@ -45,97 +45,129 @@ export default function CreateAlgorithm() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-6 py-8 space-y-8">
+    <div className="max-w-[1600px] mx-auto px-8 py-10 space-y-10">
 
-      {/* Header */}
+      {/* HEADER */}
       <div>
-        <h1 className="text-3xl font-bold text-white">
+        <h1 className="text-4xl font-bold text-white tracking-tight">
           Create Algorithm
         </h1>
-        <p className="text-slate-400 text-sm mt-2">
-          Define your strategy logic and optional risk configuration.
+        <p className="text-slate-400 text-sm mt-3">
+          Build a QuantLab strategy. Your code must define{" "}
+          <span className="text-white font-medium">
+            generate_signal(candle)
+          </span>.
         </p>
       </div>
 
       {error && (
-        <div className="bg-red-900/30 border border-red-800 text-red-400 p-4 rounded-lg">
+        <div className="bg-red-900/30 border border-red-800 text-red-400 p-4 rounded-xl">
           {error}
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <form
+        onSubmit={handleSubmit}
+        className="space-y-10"
+      >
 
-        {/* LEFT SIDE – FORM + EDITOR */}
-        <div className="lg:col-span-2 space-y-6">
+        {/* TOP SECTION – META + IMPORT */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-lg space-y-6">
 
-          <div className="space-y-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
             <input
               placeholder="Algorithm name"
-              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-sky-600"
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-sky-600 outline-none"
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
             />
 
-            <textarea
-              placeholder="Description (optional)"
-              rows={3}
-              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-sky-600"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
+            <input
+              placeholder="GitHub raw file URL (optional)"
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-sky-600 outline-none"
+              value={githubUrl}
+              onChange={(e) => setGithubUrl(e.target.value)}
             />
 
           </div>
 
-          {/* Code Editor */}
-          <div>
-            <label className="text-slate-400 text-sm mb-2 block">
-              Python Strategy Code
-            </label>
-
-            <CodeEditor
-              value={code}
-              onChange={setCode}
-              height="h-[500px]"
-            />
-          </div>
-
-          {/* Divider */}
-          <div className="text-center text-slate-500 text-sm">
-            — OR —
-          </div>
-
-          <input
-            placeholder="GitHub file URL"
-            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-sky-600"
-            value={githubUrl}
-            onChange={(e) => setGithubUrl(e.target.value)}
+          <textarea
+            placeholder="Description (optional)"
+            rows={3}
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-sky-600 outline-none"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
           />
 
-          {/* Submit */}
+        </div>
+
+        {/* WORKSPACE */}
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-10 min-h-[calc(100vh-350px)]">
+
+          {/* CODE COLUMN */}
+          <div className="lg:col-span-3 flex flex-col">
+
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col flex-1">
+
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">
+                  Strategy Code
+                </h2>
+                {githubUrl && (
+                  <span className="text-xs text-amber-400">
+                    External source provided
+                  </span>
+                )}
+              </div>
+
+              <div className="flex-1">
+                <CodeEditor
+                  value={code}
+                  onChange={setCode}
+                  height="h-full"
+                />
+              </div>
+
+            </div>
+
+          </div>
+
+          {/* RIGHT COLUMN */}
+          <div className="lg:col-span-2 flex flex-col">
+
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl flex flex-col flex-1 overflow-hidden">
+
+              <div className="flex-1 overflow-y-auto p-4">
+                <DocumentationPanel code={code} />
+              </div>
+
+            </div>
+
+          </div>
+
+        </div>
+
+        {/* SUBMIT BUTTON */}
+        <div className="pt-6">
           <button
             type="submit"
             disabled={isSubmitDisabled}
             className="
-              bg-sky-600 hover:bg-sky-700 
-              transition 
-              px-6 py-3 
-              rounded-lg 
-              text-white 
-              font-medium
-              disabled:opacity-50 
-              disabled:cursor-not-allowed
+              bg-gradient-to-r from-sky-600 to-indigo-600
+              hover:opacity-90
+              transition
+              px-10 py-4
+              rounded-xl
+              text-white
+              font-semibold
+              shadow-lg
+              disabled:opacity-40
             "
           >
             {loading ? "Creating Algorithm..." : "Create Algorithm"}
           </button>
-
-        </div>
-
-        {/* RIGHT SIDE – CONFIG DOCUMENTATION */}
-        <div className="lg:col-span-1">
-          <ConfigDocumentation />
         </div>
 
       </form>
