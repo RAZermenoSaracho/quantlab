@@ -11,7 +11,9 @@ SignalModeType = Literal[
     "volatility_breakout",
     "rsi_reversion",
 ]
-
+ExecutionModelType = Literal["next_open", "same_close"]
+StopFillModelType = Literal["stop_price", "worst_case"]
+MarginModeType = Literal["isolated", "cross"]
 
 # =========================================================
 # CONFIG DATACLASS
@@ -100,6 +102,17 @@ class AlgorithmConfig:
     require_volume_confirmation: bool = True
     require_return_confirmation: bool = True
 
+    # ============================
+    # Execution Advanced
+    # ============================
+    execution_model: ExecutionModelType = "next_open"
+    stop_fill_model: StopFillModelType = "stop_price"
+
+    # ============================
+    # Leverage / Margin
+    # ============================
+    leverage: float = 1.0
+    margin_mode: MarginModeType = "isolated"
 
 # =========================================================
 # HELPERS
@@ -144,6 +157,18 @@ def validate_config(config: AlgorithmConfig) -> None:
 
     if not _is_number(config.slippage_bps) or not (0 <= config.slippage_bps <= 500):
         raise ValueError("slippage_bps must be between 0 and 500")
+    
+    if config.execution_model not in ("next_open", "same_close"):
+        raise ValueError("execution_model invalid")
+
+    if config.stop_fill_model not in ("stop_price", "worst_case"):
+        raise ValueError("stop_fill_model invalid")
+
+    if not _is_number(config.leverage) or config.leverage < 1 or config.leverage > 125:
+        raise ValueError("leverage must be between 1 and 125")
+
+    if config.margin_mode not in ("isolated", "cross"):
+        raise ValueError("margin_mode invalid")
 
     # -----------------------------
     # Stop / TP validation
