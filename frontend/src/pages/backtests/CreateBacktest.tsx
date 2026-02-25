@@ -7,6 +7,7 @@ import {
   getSymbols,
   getDefaultFeeRate,
 } from "../../services/market.service";
+import DateSection from "../../components/backtests/DateSection";
 
 type FormState = {
   algorithm_id: string;
@@ -278,36 +279,13 @@ export default function CreateBacktest() {
         </Card>
 
         {/* DATE RANGE */}
-        <Card
-          title="Backtest Period"
-          description="Choose historical simulation window."
-        >
-          <div className="grid md:grid-cols-2 gap-8">
-            <Field label="Start Date">
-              <input
-                type="date"
-                value={form.start_date}
-                onChange={(e) =>
-                  setForm({ ...form, start_date: e.target.value })
-                }
-                className="form-input"
-                required
-              />
-            </Field>
-
-            <Field label="End Date">
-              <input
-                type="date"
-                value={form.end_date}
-                onChange={(e) =>
-                  setForm({ ...form, end_date: e.target.value })
-                }
-                className="form-input"
-                required
-              />
-            </Field>
-          </div>
-        </Card>
+        <DateSection
+          start={form.start_date}
+          end={form.end_date}
+          onChange={(start, end) =>
+            setForm({ ...form, start_date: start, end_date: end })
+          }
+        />
 
         {/* CAPITAL */}
         <Card
