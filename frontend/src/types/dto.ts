@@ -1,6 +1,6 @@
 export interface CreateAlgorithmDto {
   name: string;
-  description?: string;
+  notesHtml?: string;
   code?: string;
   githubUrl?: string;
 }

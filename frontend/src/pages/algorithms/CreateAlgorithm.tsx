@@ -8,7 +8,7 @@ export default function CreateAlgorithm() {
   const navigate = useNavigate();
 
   const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
+  const [notesHtml, setNotesHtml] = useState("");
   const [code, setCode] = useState("");
   const [githubUrl, setGithubUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +31,7 @@ export default function CreateAlgorithm() {
     try {
       const algo = await createAlgorithm({
         name,
-        description: description || undefined,
+        notesHtml: notesHtml || undefined,
         code: code || undefined,
         githubUrl: githubUrl || undefined,
       });
@@ -97,8 +97,8 @@ export default function CreateAlgorithm() {
             placeholder="Description (optional)"
             rows={3}
             className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-sky-600 outline-none"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            value={notesHtml}
+            onChange={(e) => setNotesHtml(e.target.value)}
           />
 
         </div>
