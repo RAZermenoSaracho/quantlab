@@ -2,9 +2,11 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getAlgorithms } from "../../services/algorithm.service";
 import type { Algorithm } from "../../types/models";
+import ListView, { type ListColumn } from "../../components/ui/ListView";
 
 export default function AlgorithmsList() {
   const [algorithms, setAlgorithms] = useState<Algorithm[]>([]);
+  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -14,73 +16,64 @@ export default function AlgorithmsList() {
         setAlgorithms(data);
       } catch (err) {
         console.error(err);
+      } finally {
+        setLoading(false);
       }
     }
 
     load();
   }, []);
 
-  return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-white">
-          Algorithms
-        </h1>
+  const columns: ListColumn<Algorithm>[] = [
+    {
+      key: "name",
+      header: "Name",
+      render: (algo) => (
+        <span className="text-white font-medium">
+          {algo.name}
+        </span>
+      ),
+    },
+    {
+      key: "description",
+      header: "Description",
+      render: (algo) => (
+        <div
+          className="prose prose-invert max-w-none text-slate-300 line-clamp-2"
+          dangerouslySetInnerHTML={{
+            __html: algo.notes_html || "<span class='text-slate-500'>—</span>",
+          }}
+        />
+      ),
+      className: "max-w-md",
+    },
+    {
+      key: "created",
+      header: "Created",
+      render: (algo) =>
+        new Date(algo.created_at).toLocaleDateString(),
+    },
+  ];
 
+  return (
+    <ListView
+      title="Algorithms"
+      description="Reusable trading strategies used in backtests and paper trading."
+      columns={columns}
+      data={algorithms}
+      loading={loading}
+      emptyMessage="No algorithms yet."
+      onRowClick={(algo) =>
+        navigate(`/algorithms/${algo.id}`)
+      }
+      actions={
         <button
           onClick={() => navigate("/algorithms/new")}
-          className="bg-sky-600 hover:bg-sky-700 px-4 py-2 rounded-lg text-white"
+          className="bg-sky-600 hover:bg-sky-700 px-4 py-2 rounded-xl text-white font-medium"
         >
-          New Algorithm
+          + New Algorithm
         </button>
-      </div>
-
-      <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-slate-900 text-slate-400 uppercase text-xs">
-            <tr>
-              <th className="px-4 py-3 text-left">Name</th>
-              <th className="px-4 py-3 text-left">Description</th>
-              <th className="px-4 py-3 text-left">Created</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {algorithms.map((algo) => (
-              <tr
-                key={algo.id}
-                onClick={() => navigate(`/algorithms/${algo.id}`)}
-                className="border-t border-slate-700 hover:bg-slate-900 cursor-pointer"
-              >
-                <td className="px-4 py-3 text-white font-medium">
-                  {algo.name}
-                </td>
-
-                <td className="px-4 py-3 text-slate-400">
-                  <div
-                    className="prose prose-invert max-w-none text-slate-300"
-                    dangerouslySetInnerHTML={{
-                      __html: algo.notes_html || "",
-                    }}
-                  />
-                </td>
-
-                <td className="px-4 py-3 text-slate-500">
-                  {new Date(algo.created_at).toLocaleDateString()}
-                </td>
-              </tr>
-            ))}
-
-            {algorithms.length === 0 && (
-              <tr>
-                <td colSpan={3} className="text-center py-6 text-slate-500">
-                  No algorithms yet.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
+      }
+    />
   );
 }
