@@ -219,18 +219,32 @@ export async function createBacktest(
     }
 
     /* ==============================
-       UPDATE RUN FINAL DATA
+      UPDATE RUN FINAL DATA
     ============================== */
+
+    const candles = engineResult.candles ?? [];
+    const candlesCount = engineResult.candles_count ?? candles.length ?? 0;
+    const candlesStartTs = engineResult.candles_start_ts ?? null;
+    const candlesEndTs = engineResult.candles_end_ts ?? null;
+
     await client.query(
       `UPDATE backtest_runs
-       SET equity_curve = $1::jsonb,
-           analysis = $2::jsonb,
-           status = 'COMPLETED',
-           updated_at = NOW()
-       WHERE id = $3`,
+      SET equity_curve = $1::jsonb,
+          analysis = $2::jsonb,
+          candles = $3::jsonb,
+          candles_count = $4,
+          candles_start_ts = $5,
+          candles_end_ts = $6,
+          status = 'COMPLETED',
+          updated_at = NOW()
+      WHERE id = $7`,
       [
         JSON.stringify(engineResult.equity_curve ?? []),
         JSON.stringify(engineResult.analysis ?? null),
+        JSON.stringify(candles),
+        candlesCount,
+        candlesStartTs,
+        candlesEndTs,
         runId
       ]
     );
@@ -267,9 +281,15 @@ export async function getBacktestById(req: Request, res: Response, next: NextFun
     const userId = req.user!.id;
 
     const runResult = await pool.query(
-      `SELECT *
-       FROM backtest_runs
-       WHERE id = $1 AND user_id = $2`,
+      `
+      SELECT 
+        r.*,
+        a.name AS algorithm_name,
+        a.notes_html AS algorithm_description
+      FROM backtest_runs r
+      JOIN algorithms a ON a.id = r.algorithm_id
+      WHERE r.id = $1 AND r.user_id = $2
+      `,
       [id, userId]
     );
 
@@ -300,6 +320,10 @@ export async function getBacktestById(req: Request, res: Response, next: NextFun
       analysis: run.analysis || null,
       trades: tradesResult.rows,
       equity_curve: run.equity_curve || [],
+      candles: run.candles || [],
+      candles_count: run.candles_count || 0,
+      candles_start_ts: run.candles_start_ts || null,
+      candles_end_ts: run.candles_end_ts || null,
     });
 
   } catch (err) {

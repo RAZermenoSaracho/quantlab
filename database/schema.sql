@@ -83,8 +83,18 @@ CREATE TABLE backtest_runs (
 
     status run_status DEFAULT 'PENDING',
 
+    -- ==============================
+    -- Engine Data
+    -- ==============================
+
     equity_curve JSONB,
     analysis JSONB,
+
+    -- 🔥 NEW: Candlestick Data
+    candles JSONB,
+    candles_count INTEGER,
+    candles_start_ts BIGINT,
+    candles_end_ts BIGINT,
 
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
@@ -92,6 +102,7 @@ CREATE TABLE backtest_runs (
 
 CREATE INDEX idx_backtest_user ON backtest_runs(user_id);
 CREATE INDEX idx_backtest_algorithm ON backtest_runs(algorithm_id);
+CREATE INDEX idx_backtest_candles_start ON backtest_runs(candles_start_ts);
 
 -- ==============================
 -- PAPER RUNS

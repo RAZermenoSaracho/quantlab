@@ -56,8 +56,14 @@ def run_backtest(
         start_date=start_date,
         end_date=end_date
     )
-    print("Candles received:", len(candles_raw))
-    
+
+    # Normalized candles for UI charting + analysis
+    candles_norm = []
+
+    # Optional: real time range actually returned
+    first_ts = None
+    last_ts = None
+
     # ============================
     # STATE VARIABLES
     # ============================
@@ -89,8 +95,14 @@ def run_backtest(
             "low": float(candle[3]),
             "close": float(candle[4]),
             "volume": float(candle[5]),
-            "timestamp": candle[0]
+            "timestamp": candle[0]  # ms epoch from Binance
         }
+
+        candles_norm.append(candle_data)
+
+        if first_ts is None:
+            first_ts = candle_data["timestamp"]
+        last_ts = candle_data["timestamp"]
 
         current_price = candle_data["close"]
         signal = generate_signal(candle_data)
@@ -259,14 +271,23 @@ def run_backtest(
         "exchange": exchange,
         "fee_rate": final_fee_rate,
         "config_used": config_used,
+
         "initial_balance": initial_balance,
         "final_balance": balance,
+
         "total_return_usdt": total_return_usdt,
         "total_return_percent": total_return_percent,
         "max_drawdown_percent": max_drawdown * 100,
         "win_rate_percent": win_rate_percent,
         "profit_factor": profit_factor,
         "total_trades": total_trades,
+
+        # NEW for UI / quant analysis
+        "candles_count": len(candles_norm),
+        "candles_start_ts": first_ts,
+        "candles_end_ts": last_ts,
+        "candles": candles_norm,
+
         "equity_curve": equity_curve,
         "trades": trades,
         "analysis": analysis

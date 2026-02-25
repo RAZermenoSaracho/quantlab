@@ -20,17 +20,15 @@ type Props = {
 };
 
 function formatDate(ts: number) {
-  const d = new Date(ts);
-  return d.toLocaleDateString();
+  return new Date(ts).toLocaleDateString();
 }
 
 function formatFullDate(ts: number) {
-  const d = new Date(ts);
-  return d.toLocaleString();
+  return new Date(ts).toLocaleString();
 }
 
 export default function EquityCurveChart({ equity }: Props) {
-  if (!equity || equity.length === 0) {
+  if (!equity?.length) {
     return (
       <div className="h-80 flex items-center justify-center text-slate-500">
         No equity data.
@@ -38,12 +36,18 @@ export default function EquityCurveChart({ equity }: Props) {
     );
   }
 
-  const initial = equity[0].equity;
-  const final = equity[equity.length - 1].equity;
+  const initial = Number(equity[0]?.equity ?? 0);
+  const final = Number(equity[equity.length - 1]?.equity ?? initial);
   const positive = final >= initial;
 
   return (
-    <div className="h-80 w-full min-h-[300px]">
+    <div
+      className="w-full"
+      style={{
+        height: 320,
+        minWidth: 0, // 🔥 MUY IMPORTANTE para flex/grid
+      }}
+    >
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={equity}>
           <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" />
@@ -53,6 +57,7 @@ export default function EquityCurveChart({ equity }: Props) {
             tickFormatter={(value) => formatDate(Number(value))}
             stroke="#64748b"
             tick={{ fill: "#64748b", fontSize: 12 }}
+            minTickGap={30}
           />
 
           <YAxis
@@ -60,7 +65,7 @@ export default function EquityCurveChart({ equity }: Props) {
             stroke="#64748b"
             tick={{ fill: "#64748b", fontSize: 12 }}
             tickFormatter={(v) => Number(v).toFixed(0)}
-            domain={["auto", "auto"]}
+            width={60}
           />
 
           <Tooltip
@@ -88,7 +93,11 @@ export default function EquityCurveChart({ equity }: Props) {
             type="monotone"
             dataKey="equity"
             stroke="none"
-            fill={positive ? "#22c55e20" : "#ef444420"}
+            fill={
+              positive
+                ? "rgba(34,197,94,0.12)"
+                : "rgba(239,68,68,0.12)"
+            }
           />
 
           <Line
@@ -97,6 +106,7 @@ export default function EquityCurveChart({ equity }: Props) {
             stroke={positive ? "#22c55e" : "#ef4444"}
             strokeWidth={2.5}
             dot={false}
+            isAnimationActive={false} // 🔥 evita glitches en dev
           />
         </LineChart>
       </ResponsiveContainer>
