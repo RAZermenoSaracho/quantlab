@@ -3,6 +3,8 @@ from pydantic import BaseModel, Field, field_validator
 from typing import Any, Dict, Optional
 from datetime import datetime
 import logging
+from dotenv import load_dotenv
+import asyncio
 
 from .validator import validate_algorithm, AlgorithmValidationError
 from .backtest import run_backtest
@@ -11,6 +13,7 @@ from .backtest import run_backtest
 # ======================================================
 # =================== APP INIT =========================
 # ======================================================
+load_dotenv()
 
 app = FastAPI(
     title="QuantLab Engine",
@@ -37,6 +40,7 @@ class BacktestRequest(BaseModel):
     start_date: str
     end_date: str
     fee_rate: Optional[float] = Field(default=None, ge=0)
+    run_id: Optional[str] = None
 
     # 🔥 Optional live/testnet credentials
     api_key: Optional[str] = None
@@ -84,35 +88,40 @@ async def validate(request: AlgorithmRequest) -> Dict[str, Any]:
 # ======================================================
 # ===================== Backtesting ====================
 # ======================================================
-
+BACKTEST_PROGRESS = {}
 @app.post("/backtest")
-async def backtest(request: BacktestRequest) -> Dict[str, Any]:
-    try:
-        result = run_backtest(
-            code=request.code,
-            exchange=request.exchange,
-            symbol=request.symbol,
-            timeframe=request.timeframe,
-            initial_balance=request.initial_balance,
-            start_date=request.start_date,
-            end_date=request.end_date,
-            fee_rate=request.fee_rate,
-            api_key=request.api_key,
-            api_secret=request.api_secret,
-            testnet=request.testnet
-        )
+async def backtest(request: BacktestRequest):
 
-        return {
-            "success": True,
-            "data": result
-        }
+    BACKTEST_PROGRESS[request.run_id] = 0
 
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    def progress_callback(progress_pct: int):
+        if request.run_id:
+            BACKTEST_PROGRESS[request.run_id] = progress_pct
 
-    except Exception as e:
-        logger.exception("Backtest failed")
-        raise HTTPException(
-            status_code=500,
-            detail="Backtest execution failed"
-        )
+    result = await asyncio.to_thread(
+        run_backtest,
+        code=request.code,
+        exchange=request.exchange,
+        symbol=request.symbol,
+        timeframe=request.timeframe,
+        initial_balance=request.initial_balance,
+        start_date=request.start_date,
+        end_date=request.end_date,
+        fee_rate=request.fee_rate,
+        api_key=request.api_key,
+        api_secret=request.api_secret,
+        testnet=request.testnet,
+        progress_callback=progress_callback,
+    )
+
+    BACKTEST_PROGRESS[request.run_id] = 100
+
+    return {
+        "success": True,
+        "data": result
+    }
+
+@app.get("/backtest-progress/{run_id}")
+async def get_progress(run_id: str):
+    progress = BACKTEST_PROGRESS.get(run_id, 0)
+    return {"progress": progress}

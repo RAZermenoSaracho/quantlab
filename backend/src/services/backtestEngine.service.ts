@@ -1,20 +1,25 @@
 import axios from "axios";
 import { env } from "../config/env";
 
-export async function runBacktestOnEngine(payload: {
-  code: string;
-  exchange: string;
-  symbol: string;
-  timeframe: string;
-  initial_balance: number;
-  start_date: string;
-  end_date: string;
-  fee_rate?: number;
-}) {
+export async function runBacktestOnEngine(
+  runId: string,
+  payload: {
+    code: string;
+    exchange: string;
+    symbol: string;
+    timeframe: string;
+    initial_balance: number;
+    start_date: string;
+    end_date: string;
+    fee_rate?: number;
+  }) {
   try {
     const response = await axios.post(
       `${env.ENGINE_URL}/backtest`,
-      payload
+      {
+        ...payload,
+        run_id: runId,
+      },
     );
 
     const data = response.data;
@@ -46,4 +51,11 @@ export async function runBacktestOnEngine(payload: {
     console.error("Engine connection error:", error.message);
     throw new Error("Engine unavailable");
   }
+}
+
+export async function getEngineProgress(runId: string) {
+  const res = await axios.get(
+    `${env.ENGINE_URL}/backtest-progress/${runId}`
+  );
+  return res.data;
 }

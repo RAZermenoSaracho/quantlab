@@ -31,7 +31,7 @@ export default function CreateAlgorithm() {
     try {
       const algo = await createAlgorithm({
         name,
-        notesHtml: notesHtml || undefined,
+        notes_html: notesHtml || undefined,
         code: code || undefined,
         githubUrl: githubUrl || undefined,
       });

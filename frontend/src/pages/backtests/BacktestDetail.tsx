@@ -24,6 +24,8 @@ type BacktestDetailPayload = {
   candles_count?: number;
   candles_start_ts?: number;
   candles_end_ts?: number;
+  open_positions_at_end?: number;
+  had_forced_close?: boolean;
 };
 
 /* ================= UTILITIES ================= */
@@ -167,6 +169,14 @@ export default function BacktestDetail() {
   const metrics = data?.metrics ?? {};
   const analysis = data?.analysis ?? {};
   const trades = data?.trades ?? [];
+
+  const openPositionsAtEnd = Number(data?.open_positions_at_end ?? 0);
+  const hadForcedClose = Boolean(data?.had_forced_close ?? false);
+
+  const forcedCloseCount = trades.filter(
+    (t: any) => t.forced_close === true
+  ).length;
+
   const equity_curve = data?.equity_curve ?? [];
   const candles = data?.candles ?? [];
   const candlesCount = data?.candles_count ?? candles.length ?? 0;
@@ -366,6 +376,14 @@ export default function BacktestDetail() {
         </div>
       </div>
 
+      {hadForcedClose && (
+        <div className="bg-amber-900/40 border border-amber-600 text-amber-300 px-4 py-3 rounded-lg text-sm">
+          ⚠ Strategy ended with <strong>{openPositionsAtEnd}</strong> open position
+          {openPositionsAtEnd > 1 ? "s" : ""}.  
+          They were automatically closed at the last candle for reporting purposes.
+        </div>
+      )}
+
       {/* CORE METRICS */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <KpiCard
@@ -377,6 +395,13 @@ export default function BacktestDetail() {
         <KpiCard title="Sharpe" value={fmtMoney(Number(sharpe ?? 0), 2)} />
         <KpiCard title="Volatility" value={fmtPct(Number(volatility ?? 0) * 100)} />
         <KpiCard title="Max Drawdown" value={fmtPct(Number(maxDD ?? 0))} />
+        {forcedCloseCount > 0 && (
+          <KpiCard
+            title="Forced Closures"
+            value={String(forcedCloseCount)}
+            positive={false}
+          />
+        )}
       </div>
 
       {/* RUN META + TRADE QUALITY */}
@@ -506,7 +531,14 @@ export default function BacktestDetail() {
                   className="border-t border-slate-700 hover:bg-slate-900"
                 >
                   <td className="px-4 py-3 text-slate-500">{i + 1}</td>
-                  <td className="px-4 py-3">{t.side}</td>
+                  <td className="px-4 py-3 flex items-center gap-2">
+                    {t.side}
+                    {t.forced_close && (
+                      <span className="text-xs bg-amber-700 text-white px-2 py-0.5 rounded">
+                        Forced
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-3">{Number(t.quantity ?? 0).toFixed(4)}</td>
                   <td className="px-4 py-3">{Number(t.entry_price ?? 0).toFixed(2)}</td>
                   <td className="px-4 py-3">

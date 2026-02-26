@@ -9,7 +9,6 @@ import {
 } from "../../services/algorithm.service";
 import CodeEditor from "../../components/ui/CodeEditor";
 import type { Algorithm } from "../../types/models";
-import RichTextEditor from "../../components/ui/RichTextEditor";
 import DetailNavigator from "../../components/navigation/DetailNavigator";
 import DocumentationPanel from "../../components/algorithms/DocumentationPanel";
 
@@ -238,9 +237,12 @@ export default function AlgorithmDetail() {
         </h2>
 
         {editing ? (
-          <RichTextEditor
+          <textarea
+            placeholder="Description (optional)"
+            rows={3}
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-sky-600 outline-none"
             value={notesHtml}
-            onChange={setNotesHtml}
+            onChange={(e) => setNotesHtml(e.target.value)}
           />
         ) : (
           <div

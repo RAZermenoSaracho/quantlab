@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { pool } from "../config/db";
-import { runBacktestOnEngine } from "../services/backtestEngine.service";
+import { runBacktestOnEngine, getEngineProgress } from "../services/backtestEngine.service";
 import { getExchangeById } from "../services/exchangeCatalog.service";
 
 type DbTradeSide = "BUY" | "SELL";
@@ -50,7 +50,6 @@ export async function createBacktest(
   next: NextFunction
 ) {
   const client = await pool.connect();
-  let runId: string | null = null;
 
   try {
     const {
@@ -83,11 +82,7 @@ export async function createBacktest(
 
     const userId = req.user!.id;
 
-    /* ==============================
-       VALIDATE EXCHANGE
-    ============================== */
     const exchangeMeta = getExchangeById(exchange);
-
     if (!exchangeMeta) {
       return res.status(400).json({ error: "Unsupported exchange" });
     }
@@ -97,9 +92,6 @@ export async function createBacktest(
         ? fee_rate
         : exchangeMeta.default_fee_rate;
 
-    /* ==============================
-       GET ALGORITHM
-    ============================== */
     const algoResult = await client.query(
       `SELECT code FROM algorithms WHERE id = $1 AND user_id = $2`,
       [algorithm_id, userId]
@@ -111,14 +103,8 @@ export async function createBacktest(
 
     const code = algoResult.rows[0].code;
 
-    /* ==============================
-       BEGIN TRANSACTION
-    ============================== */
     await client.query("BEGIN");
 
-    /* ==============================
-       CREATE RUN (RUNNING)
-    ============================== */
     const runInsert = await client.query(
       `INSERT INTO backtest_runs
        (user_id, algorithm_id, exchange, fee_rate, symbol, timeframe,
@@ -138,12 +124,13 @@ export async function createBacktest(
       ]
     );
 
-    runId = runInsert.rows[0].id;
+    const runId: string = runInsert.rows[0].id;
 
-    /* ==============================
-       CALL ENGINE
-    ============================== */
-    const engineResult = await runBacktestOnEngine({
+    await client.query("COMMIT");
+
+    res.status(201).json({ run_id: runId });
+
+    runBacktestWorker(runId, {
       code,
       exchange,
       symbol,
@@ -153,9 +140,24 @@ export async function createBacktest(
       end_date,
       fee_rate: finalFeeRate
     });
-    /* ==============================
-       INSERT METRICS
-    ============================== */
+
+  } catch (err) {
+    await client.query("ROLLBACK");
+    next(err);
+  } finally {
+    client.release();
+  }
+}
+
+async function runBacktestWorker(runId: string, payload: any) {
+  const client = await pool.connect();
+
+  try {
+    const engineResult = await runBacktestOnEngine(runId, payload);
+
+    await client.query("BEGIN");
+
+    // INSERT METRICS
     await client.query(
       `INSERT INTO metrics
        (run_id, run_type, total_return_percent, total_return_usdt,
@@ -172,9 +174,7 @@ export async function createBacktest(
       ]
     );
 
-    /* ==============================
-       INSERT TRADES
-    ============================== */
+    // INSERT TRADES (con normalizeTradeSide)
     for (const trade of engineResult.trades ?? []) {
       const dbSide = normalizeTradeSide(trade);
 
@@ -199,11 +199,13 @@ export async function createBacktest(
         ? toDateFromEngineTs(trade.closed_at)
         : new Date();
 
+      const forcedClose = trade.forced_close === true;
+
       await client.query(
         `INSERT INTO trades
-         (run_id, run_type, side, entry_price, exit_price,
-          quantity, pnl, pnl_percent, opened_at, closed_at)
-         VALUES ($1,'BACKTEST',$2,$3,$4,$5,$6,$7,$8,$9)`,
+        (run_id, run_type, side, entry_price, exit_price,
+          quantity, pnl, pnl_percent, opened_at, closed_at, forced_close)
+        VALUES ($1,'BACKTEST',$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
         [
           runId,
           dbSide,
@@ -213,20 +215,13 @@ export async function createBacktest(
           pnl,
           computedPnlPercent,
           openedAt,
-          closedAt
+          closedAt,
+          forcedClose
         ]
       );
     }
 
-    /* ==============================
-      UPDATE RUN FINAL DATA
-    ============================== */
-
-    const candles = engineResult.candles ?? [];
-    const candlesCount = engineResult.candles_count ?? candles.length ?? 0;
-    const candlesStartTs = engineResult.candles_start_ts ?? null;
-    const candlesEndTs = engineResult.candles_end_ts ?? null;
-
+    // FINAL UPDATE
     await client.query(
       `UPDATE backtest_runs
       SET equity_curve = $1::jsonb,
@@ -235,38 +230,35 @@ export async function createBacktest(
           candles_count = $4,
           candles_start_ts = $5,
           candles_end_ts = $6,
+          open_positions_at_end = $7,
+          had_forced_close = $8,
           status = 'COMPLETED',
           updated_at = NOW()
-      WHERE id = $7`,
+      WHERE id = $9`,
       [
         JSON.stringify(engineResult.equity_curve ?? []),
         JSON.stringify(engineResult.analysis ?? null),
-        JSON.stringify(candles),
-        candlesCount,
-        candlesStartTs,
-        candlesEndTs,
+        JSON.stringify(engineResult.candles ?? []),
+        engineResult.candles_count ?? 0,
+        engineResult.candles_start_ts ?? null,
+        engineResult.candles_end_ts ?? null,
+        engineResult.open_positions_at_end ?? 0,
+        engineResult.had_forced_close ?? false,
         runId
       ]
     );
 
     await client.query("COMMIT");
 
-    return res.status(201).json({ run_id: runId });
-
   } catch (err) {
-    if (runId) {
-      await client.query(
-        `UPDATE backtest_runs
-         SET status = 'FAILED',
-             updated_at = NOW()
-         WHERE id = $1`,
-        [runId]
-      );
-    }
-
     await client.query("ROLLBACK");
 
-    next(err);
+    await client.query(
+      `UPDATE backtest_runs
+       SET status = 'FAILED'
+       WHERE id = $1`,
+      [runId]
+    );
   } finally {
     client.release();
   }
@@ -324,6 +316,9 @@ export async function getBacktestById(req: Request, res: Response, next: NextFun
       candles_count: run.candles_count || 0,
       candles_start_ts: run.candles_start_ts || null,
       candles_end_ts: run.candles_end_ts || null,
+
+      open_positions_at_end: run.open_positions_at_end || 0,
+      had_forced_close: run.had_forced_close || false,
     });
 
   } catch (err) {
@@ -391,4 +386,21 @@ export async function deleteBacktest(req: Request, res: Response, next: NextFunc
   } catch (err) {
     next(err);
   }
+}
+
+export async function getBacktestStatus(req: Request, res: Response) {
+  const rawId = req.params.id;
+
+  if (!rawId || Array.isArray(rawId)) {
+    return res.status(400).json({ error: "Invalid id parameter" });
+  }
+
+  const id = rawId;
+
+  const engineProgress = await getEngineProgress(id);
+
+  return res.json({
+    status: engineProgress.progress >= 100 ? "COMPLETED" : "RUNNING",
+    progress: engineProgress.progress,
+  });
 }

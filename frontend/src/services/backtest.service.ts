@@ -44,3 +44,12 @@ export function deleteBacktest(id: string) {
     `/backtest/${id}`
   );
 }
+
+/* ==============================
+   GET STATUS
+============================== */
+export function getBacktestStatus(runId: string) {
+  return api.get<{ status: string; progress: number }>(
+    `/backtest/${runId}/status`
+  );
+}

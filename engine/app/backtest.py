@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any, Callable
 
 from .validator import SAFE_GLOBALS, ALLOWED_RETURN_VALUES
 from .metrics import calculate_metrics
@@ -298,7 +298,10 @@ def run_backtest(
     api_key: Optional[str] = None,
     api_secret: Optional[str] = None,
     testnet: bool = False,
+    progress_callback: Optional[Callable[[int], None]] = None,
 ) -> dict:
+
+    open_positions_at_end = 0
 
     # ============================
     # SAFE EXECUTION
@@ -333,6 +336,9 @@ def run_backtest(
     )
 
     final_fee_rate = fee_rate if fee_rate is not None else client.get_default_fee_rate()
+
+    if progress_callback:
+        progress_callback(30)
 
     candles_raw = client.fetch_candles(
         symbol=symbol,
@@ -399,10 +405,19 @@ def run_backtest(
         int(getattr(config, "rsi_window", 1)),
     ) + 5
 
+    if progress_callback:
+        progress_callback(55)
     # ============================
     # LOOP
     # ============================
+    total = max(len(candles), 1)
+
     for i in range(len(candles)):
+        progress_pct = max(int((i / total) * 100), 55)
+
+        if progress_callback:
+            progress_callback(progress_pct)
+
         candle = candles[i]
         ts = int(candle["timestamp"])
 
@@ -585,6 +600,42 @@ def run_backtest(
         if getattr(config, "max_drawdown_pct", None) is not None:
             if (dd * 100.0) >= float(config.max_drawdown_pct):
                 break
+    
+    # =====================================================
+    # FORCE CLOSE OPEN POSITION AT END
+    # =====================================================
+    if position is not None and candles:
+        open_positions_at_end = 1
+
+        final_candle = candles[-1]
+        final_ts = int(final_candle["timestamp"])
+        final_exit_price = float(final_candle["close"])
+
+        trade, pnl = _close_position(
+            position=position,
+            exit_price=final_exit_price,
+            timestamp=final_ts,
+            fee_rate=float(final_fee_rate),
+            config=config,
+        )
+
+        trade["forced_close"] = True
+        trades.append(trade)
+
+        balance += pnl
+        (wins if pnl > 0 else losses).append(pnl)
+
+        position = None
+        last_exit_ts = final_ts
+
+        # Update last equity point
+        if equity_curve:
+            equity_curve[-1]["equity"] = float(balance)
+        else:
+            equity_curve.append({
+                "timestamp": final_ts,
+                "equity": float(balance)
+            })
 
     # ============================
     # FINAL METRICS
@@ -631,4 +682,7 @@ def run_backtest(
         "equity_curve": equity_curve,
         "trades": trades,
         "analysis": analysis,
+
+        "open_positions_at_end": int(open_positions_at_end),
+        "had_forced_close": open_positions_at_end > 0,
     }

@@ -87,10 +87,12 @@ CREATE TABLE backtest_runs (
     -- Engine Data
     -- ==============================
 
+    open_positions_at_end INTEGER DEFAULT 0,
+    had_forced_close BOOLEAN DEFAULT FALSE,
+
     equity_curve JSONB,
     analysis JSONB,
 
-    -- 🔥 NEW: Candlestick Data
     candles JSONB,
     candles_count INTEGER,
     candles_start_ts BIGINT,
@@ -147,12 +149,13 @@ CREATE TABLE trades (
     pnl NUMERIC(18,8),
     pnl_percent NUMERIC(10,4),
 
+    forced_close BOOLEAN DEFAULT FALSE,
+
     opened_at TIMESTAMP NOT NULL,
     closed_at TIMESTAMP,
 
     created_at TIMESTAMP DEFAULT NOW(),
 
-    -- 🔥 Proper Foreign Key (composite style via check)
     CONSTRAINT fk_trades_backtest
         FOREIGN KEY (run_id)
         REFERENCES backtest_runs(id)

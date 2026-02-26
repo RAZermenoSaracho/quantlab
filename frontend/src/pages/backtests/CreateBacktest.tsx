@@ -1,13 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { getAlgorithms } from "../../services/algorithm.service";
-import { createBacktest } from "../../services/backtest.service";
+import { createBacktest, getBacktestStatus } from "../../services/backtest.service";
 import {
   getExchanges,
   getSymbols,
   getDefaultFeeRate,
 } from "../../services/market.service";
 import DateSection from "../../components/backtests/DateSection";
+import ProgressBar from "../../components/ui/ProgressBar";
 
 type FormState = {
   algorithm_id: string;
@@ -41,6 +42,12 @@ export default function CreateBacktest() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [progress, setProgress] = useState(0);
+  const [isRunning, setIsRunning] = useState(false);
+
+  const [runId, setRunId] = useState<string | null>(null);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   /* =====================================
      Load algorithms
@@ -95,6 +102,56 @@ export default function CreateBacktest() {
     return () => clearTimeout(timeout);
   }, [symbolQuery, form.exchange]);
 
+  useEffect(() => {
+    if (!runId) return;
+
+    pollingRef.current = setInterval(async () => {
+      try {
+        const statusData = await getBacktestStatus(runId);
+        const newProgress = statusData.progress ?? 0;
+        setProgress(newProgress);
+
+        if (statusData.status === "COMPLETED") {
+          if (pollingRef.current) {
+            clearInterval(pollingRef.current);
+          }
+
+          setProgress(100);
+
+          setTimeout(() => {
+            navigate(`/backtest/${runId}`);
+          }, 500);
+        }
+
+        if (statusData.status === "FAILED") {
+          if (pollingRef.current) {
+            clearInterval(pollingRef.current);
+          }
+
+          setIsRunning(false);
+          setError("Backtest failed.");
+        }
+
+      } catch (err) {
+        console.error("❌ Polling error:", err);
+
+        if (pollingRef.current) {
+          clearInterval(pollingRef.current);
+        }
+
+        setIsRunning(false);
+        setError("Failed to fetch progress.");
+      }
+    }, 500);
+
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+      }
+    };
+
+  }, [runId, navigate]);
+
   /* =====================================
      Submit
   ===================================== */
@@ -114,13 +171,19 @@ export default function CreateBacktest() {
       return setError("Start date must be before end date.");
     }
 
-    setLoading(true);
-
     try {
+      setLoading(true);
+      setIsRunning(true);
+      setProgress(0);
+
       const result = await createBacktest(form);
-      navigate(`/backtest/${result.run_id}`);
+      const newRunId = result.run_id;
+
+      setRunId(newRunId);
+
     } catch (err: any) {
       setError(err.message || "Failed to create backtest.");
+      setIsRunning(false);
     } finally {
       setLoading(false);
     }
@@ -309,6 +372,16 @@ export default function CreateBacktest() {
         </Card>
 
         {/* SUBMIT */}
+        {isRunning && (
+          <ProgressBar
+            progress={Math.floor(progress)}
+            status={
+              progress >= 100
+                ? "completed"
+                : "running"
+            }
+          />
+        )}
         <div className="flex justify-end pt-6">
           <button
             type="submit"

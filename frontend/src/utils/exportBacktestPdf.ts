@@ -79,10 +79,14 @@ export async function exportStructuredBacktestPdf({
   run,
   metrics,
   trades,
+  openPositionsAtEnd,
+  hadForcedClose,
 }: {
   run: any;
   metrics: any;
   trades: any[];
+  openPositionsAtEnd?: number;
+  hadForcedClose?: boolean;
 }) {
   const pdf = new jsPDF("p", "mm", "a4");
 
@@ -155,6 +159,12 @@ export async function exportStructuredBacktestPdf({
   row("Win rate (%)", fmtPct(metrics?.win_rate_percent, 2));
   row("Profit factor", fmtNum(metrics?.profit_factor, 2));
   row("Total trades", safeText(metrics?.total_trades ?? trades?.length ?? 0));
+  if (hadForcedClose) {
+    row(
+      "Forced closures",
+      `${openPositionsAtEnd ?? 0} position(s) closed at final candle`
+    );
+  }
 
   // ==============================
   // CHARTS (Equity SVG -> PNG) + Candles canvas -> PNG
@@ -245,7 +255,7 @@ export async function exportStructuredBacktestPdf({
 
     const vals = [
       String(i + 1),
-      safeText(t?.side),
+      safeText(t?.side) + (t?.forced_close ? " (Forced)" : ""),
       fmtNum(t?.quantity, 4),
       fmtNum(t?.entry_price, 2),
       t?.exit_price == null ? "-" : fmtNum(t?.exit_price, 2),
