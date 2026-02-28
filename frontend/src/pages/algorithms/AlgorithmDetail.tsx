@@ -6,11 +6,16 @@ import {
   deleteAlgorithm,
   updateAlgorithm,
   refreshAlgorithmFromGithub,
+  getAlgorithmRuns,
 } from "../../services/algorithm.service";
-import CodeEditor from "../../components/ui/CodeEditor";
+
 import type { Algorithm } from "../../types/models";
 import DetailNavigator from "../../components/navigation/DetailNavigator";
-import DocumentationPanel from "../../components/algorithms/DocumentationPanel";
+import { StatusBadge } from "../../components/ui/StatusBadge";
+import ListView, { type ListColumn } from "../../components/ui/ListView";
+import AlgorithmWorkspace from "../../components/algorithms/AlgorithmWorkspace";
+
+type Tab = "overview" | "backtests" | "paper";
 
 export default function AlgorithmDetail() {
   const { id } = useParams<{ id: string }>();
@@ -18,6 +23,11 @@ export default function AlgorithmDetail() {
 
   const [allIds, setAllIds] = useState<string[]>([]);
   const [algorithm, setAlgorithm] = useState<Algorithm | null>(null);
+  const [backtests, setBacktests] = useState<any[]>([]);
+  const [paperRuns, setPaperRuns] = useState<any[]>([]);
+
+  const [activeTab, setActiveTab] = useState<Tab>("overview");
+
   const [editing, setEditing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -27,9 +37,7 @@ export default function AlgorithmDetail() {
   const [notesHtml, setNotesHtml] = useState("");
   const [code, setCode] = useState("");
 
-  /* ===========================
-     LOAD DATA
-  =========================== */
+  /* ================= LOAD ================= */
 
   useEffect(() => {
     async function load() {
@@ -39,9 +47,10 @@ export default function AlgorithmDetail() {
       setError(null);
 
       try {
-        const [algo, list] = await Promise.all([
+        const [algo, list, runs] = await Promise.all([
           getAlgorithmById(id),
           getAlgorithms(),
+          getAlgorithmRuns(id),
         ]);
 
         setAlgorithm(algo);
@@ -49,8 +58,9 @@ export default function AlgorithmDetail() {
         setNotesHtml(algo.notes_html || "");
         setCode(algo.code);
 
-        const ids = list.map((item) => item.id);
-        setAllIds(ids);
+        setBacktests(runs.backtests || []);
+        setPaperRuns(runs.paperRuns || []);
+        setAllIds(list.map((item: any) => item.id));
       } catch (err: any) {
         setError(err.message || "Failed to load algorithm");
       } finally {
@@ -61,21 +71,27 @@ export default function AlgorithmDetail() {
     load();
   }, [id]);
 
-  /* ===========================
-     EARLY RETURNS
-  =========================== */
+  /* ================= EARLY RETURNS ================= */
 
   if (loading) {
     return (
-      <div className="text-slate-400 p-6 animate-pulse">
+      <div className="p-6 text-slate-400 animate-pulse">
         Loading algorithm...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-6 bg-red-900/30 border border-red-700 text-red-400 rounded-xl">
+        {error}
       </div>
     );
   }
 
   if (!algorithm) {
     return (
-      <div className="text-red-400 p-6">
+      <div className="p-6 text-red-400">
         Algorithm not found.
       </div>
     );
@@ -83,9 +99,7 @@ export default function AlgorithmDetail() {
 
   const isGithub = Boolean(algorithm.github_url);
 
-  /* ===========================
-     ACTIONS
-  =========================== */
+  /* ================= ACTIONS ================= */
 
   async function handleSave() {
     if (!id) return;
@@ -113,7 +127,6 @@ export default function AlgorithmDetail() {
     if (!id) return;
 
     setSaving(true);
-
     try {
       const updated = await refreshAlgorithmFromGithub(id);
       setAlgorithm(updated);
@@ -142,164 +155,194 @@ export default function AlgorithmDetail() {
     }
   }
 
-  /* ===========================
-     UI
-  =========================== */
+  /* ================= BACKTEST COLUMNS ================= */
+
+  const backtestColumns: ListColumn<any>[] = [
+    {
+      key: "market",
+      header: "Market",
+      render: (bt) => (
+        <div>
+          <div className="text-white font-medium">
+            {bt.symbol}
+          </div>
+          <div className="text-xs text-slate-500">
+            {bt.timeframe} • {bt.exchange}
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "return",
+      header: "Return",
+      render: (bt) => {
+        const value = Number(bt.total_return_percent ?? 0);
+        return (
+          <span className={value >= 0 ? "text-emerald-400" : "text-red-400"}>
+            {value.toFixed(2)}%
+          </span>
+        );
+      },
+    },
+    {
+      key: "status",
+      header: "Status",
+      render: (bt) => <StatusBadge status={bt.status} />,
+    },
+    {
+      key: "created",
+      header: "Created",
+      render: (bt) =>
+        new Date(bt.created_at).toLocaleDateString(),
+    },
+  ];
+
+  /* ================= UI ================= */
 
   return (
     <div className="max-w-[1600px] mx-auto px-8 py-10 space-y-10">
 
       {/* HEADER */}
-      <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center gap-8">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-lg">
+        <div className="flex flex-col lg:flex-row justify-between gap-8">
 
-        <div>
-          {!editing ? (
-            <h1 className="text-4xl font-bold text-white tracking-tight">
-              {algorithm.name}
-            </h1>
-          ) : (
-            <input
-              className="text-4xl font-bold bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white w-full focus:ring-2 focus:ring-sky-600 outline-none"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
+          <div>
+            {!editing ? (
+              <h1 className="text-4xl font-bold text-white">
+                {algorithm.name}
+              </h1>
+            ) : (
+              <input
+                className="text-4xl font-bold bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white w-full"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            )}
+
+            <p className="text-xs text-slate-500 mt-3">
+              Last updated: {new Date(algorithm.updated_at).toLocaleString()}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-4 flex-wrap">
+            <DetailNavigator
+              ids={allIds}
+              currentId={id!}
+              basePath="/algorithms"
             />
-          )}
 
-          <p className="text-xs text-slate-500 mt-3">
-            Last updated: {new Date(algorithm.updated_at).toLocaleString()}
-          </p>
-        </div>
+            {isGithub && !editing && (
+              <button
+                onClick={handleRefresh}
+                disabled={saving}
+                className="bg-amber-600 hover:bg-amber-700 px-4 py-2 rounded-xl text-white"
+              >
+                {saving ? "Refreshing..." : "Refresh"}
+              </button>
+            )}
 
-        <div className="flex flex-wrap items-center gap-4">
+            {!editing ? (
+              <button
+                onClick={() => setEditing(true)}
+                className="bg-sky-600 hover:bg-sky-700 px-4 py-2 rounded-xl text-white"
+              >
+                Edit
+              </button>
+            ) : (
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-xl text-white"
+              >
+                {saving ? "Saving..." : "Save"}
+              </button>
+            )}
 
-          <DetailNavigator
-            ids={allIds}
-            currentId={id!}
-            basePath="/algorithms"
-          />
-
-          {isGithub && !editing && (
             <button
-              onClick={handleRefresh}
-              disabled={saving}
-              className="bg-amber-600 hover:bg-amber-700 transition px-5 py-3 rounded-xl text-white font-medium"
+              onClick={handleDelete}
+              className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-xl text-white"
             >
-              {saving ? "Refreshing..." : "Refresh"}
+              Delete
             </button>
-          )}
-
-          {!editing ? (
-            <button
-              onClick={() => setEditing(true)}
-              className="
-                bg-gradient-to-r from-sky-600 to-indigo-600
-                hover:opacity-90
-                transition
-                px-5 py-3
-                rounded-xl
-                text-white
-                font-medium
-                shadow-md
-              "
-            >
-              Edit
-            </button>
-          ) : (
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="bg-green-600 hover:bg-green-700 transition px-5 py-3 rounded-xl text-white font-medium shadow-md"
-            >
-              {saving ? "Saving..." : "Save"}
-            </button>
-          )}
-
-          <button
-            onClick={handleDelete}
-            className="bg-red-600 hover:bg-red-700 transition px-5 py-3 rounded-xl text-white font-medium"
-          >
-            Delete
-          </button>
-
+          </div>
         </div>
       </div>
 
-      {error && (
-        <div className="bg-red-900/30 border border-red-800 text-red-400 p-4 rounded-xl">
-          {error}
+      {/* TABS */}
+      <div className="flex gap-8 border-b border-slate-800 text-sm">
+        {(["overview", "backtests", "paper"] as Tab[]).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`pb-3 transition ${
+              activeTab === tab
+                ? "text-white border-b-2 border-sky-500"
+                : "text-slate-400 hover:text-white"
+            }`}
+          >
+            {tab === "overview" && "Overview"}
+            {tab === "backtests" && `Backtests (${backtests.length})`}
+            {tab === "paper" && `Paper Runs (${paperRuns.length})`}
+          </button>
+        ))}
+      </div>
+
+      {/* TAB CONTENT */}
+
+      {activeTab === "overview" && (
+        <div className="space-y-10">
+
+          {/* NOTES */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8">
+            <h2 className="text-lg font-semibold text-white mb-4">
+              Strategy Notes
+            </h2>
+
+            {editing ? (
+              <textarea
+                rows={4}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white"
+                value={notesHtml}
+                onChange={(e) => setNotesHtml(e.target.value)}
+              />
+            ) : (
+              <div
+                className="prose prose-invert max-w-none text-slate-300"
+                dangerouslySetInnerHTML={{
+                  __html: algorithm.notes_html || "",
+                }}
+              />
+            )}
+          </div>
+
+          {/* WORKSPACE */}
+          <AlgorithmWorkspace
+            code={code}
+            onChange={setCode}
+            disabled={!editing || isGithub}
+            isGithub={isGithub}
+          />
         </div>
       )}
 
-      {/* NOTES */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-lg space-y-6">
-        <h2 className="text-lg font-semibold text-white">
-          Strategy Notes
-        </h2>
+      {activeTab === "backtests" && (
+        <ListView
+          title="Backtests"
+          description="Historical runs for this strategy."
+          columns={backtestColumns}
+          data={backtests}
+          loading={false}
+          emptyMessage="No backtests yet."
+          onRowClick={(bt) => navigate(`/backtests/${bt.id}`)}
+        />
+      )}
 
-        {editing ? (
-          <textarea
-            placeholder="Description (optional)"
-            rows={3}
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-sky-600 outline-none"
-            value={notesHtml}
-            onChange={(e) => setNotesHtml(e.target.value)}
-          />
-        ) : (
-          <div
-            className="prose prose-invert max-w-none text-slate-300"
-            dangerouslySetInnerHTML={{
-              __html: algorithm.notes_html || "",
-            }}
-          />
-        )}
-      </div>
-
-      {/* WORKSPACE */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-10 min-h-[80vh]">
-
-        {/* CODE EDITOR */}
-        <div className="lg:col-span-3 flex flex-col">
-
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col flex-1">
-
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">
-                Strategy Code
-              </h2>
-              {isGithub && (
-                <span className="text-xs text-amber-400">
-                  Synced from GitHub
-                </span>
-              )}
-            </div>
-
-            <div className="flex-1">
-              <CodeEditor
-                value={code}
-                onChange={setCode}
-                disabled={!editing || isGithub}
-                height="h-full"
-              />
-            </div>
-
-          </div>
-
+      {activeTab === "paper" && (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-slate-400">
+          Paper Runs list coming soon.
         </div>
+      )}
 
-        {/* DOCUMENTATION PANEL */}
-        <div className="lg:col-span-2 flex flex-col">
-
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl flex flex-col flex-1 overflow-hidden">
-
-            <div className="flex-1 overflow-y-auto p-4">
-              <DocumentationPanel code={code} />
-            </div>
-
-          </div>
-
-        </div>
-
-      </div>
     </div>
   );
 }

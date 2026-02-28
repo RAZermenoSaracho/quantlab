@@ -236,3 +236,42 @@ export async function deleteAlgorithm(
     next(err);
   }
 }
+
+export async function getAlgorithmRuns(req: Request, res: Response) {
+  const { id } = req.params;
+  const userId = req.user!.id;
+
+  const backtests = await pool.query(
+    `
+    SELECT r.id, r.symbol, r.timeframe, r.status,
+           r.created_at,
+           m.total_return_percent,
+           m.total_return_usdt
+    FROM backtest_runs r
+    LEFT JOIN metrics m
+      ON m.run_id = r.id AND m.run_type = 'BACKTEST'
+    WHERE r.algorithm_id = $1
+      AND r.user_id = $2
+    ORDER BY r.created_at DESC
+    `,
+    [id, userId]
+  );
+
+  const paperRuns = await pool.query(
+    `
+    SELECT id, symbol, timeframe, status,
+           initial_balance, current_balance,
+           started_at
+    FROM paper_runs
+    WHERE algorithm_id = $1
+      AND user_id = $2
+    ORDER BY started_at DESC
+    `,
+    [id, userId]
+  );
+
+  res.json({
+    backtests: backtests.rows,
+    paperRuns: paperRuns.rows,
+  });
+}

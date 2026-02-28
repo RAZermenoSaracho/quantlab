@@ -337,9 +337,13 @@ export default function BacktestDetail() {
           </h1>
 
           <p className="text-slate-400 text-sm mt-1">
-            Strategy: <span className="text-white font-medium">
+            Strategy:{" "}
+            <button
+              onClick={() => navigate(`/algorithms/${run.algorithm_id}`)}
+              className="text-sky-400 hover:text-sky-300 font-medium transition-colors"
+            >
               {run.algorithm_name ?? "—"}
-            </span>
+            </button>
           </p>
 
           <p className="text-slate-500 text-xs">

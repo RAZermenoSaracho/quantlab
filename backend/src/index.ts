@@ -65,7 +65,7 @@ app.get("/health", async (_req, res, next) => {
 
 app.use("/api/auth", authRoutes);
 app.use("/api/algorithms", algorithmsRoutes);
-app.use("/api/backtest", backtestRoutes);
+app.use("/api/backtests", backtestRoutes);
 app.use("/api/exchanges", exchangeRoutes);
 app.use("/api/market", marketRoutes);
 

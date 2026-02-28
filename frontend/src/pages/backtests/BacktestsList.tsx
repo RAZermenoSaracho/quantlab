@@ -5,6 +5,16 @@ import type { BacktestRun } from "../../types/models";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 
+function fmtPct(x?: number) {
+  if (!x && x !== 0) return "—";
+  return `${Number(x).toFixed(2)}%`;
+}
+
+function fmtMoney(x?: number) {
+  if (!x && x !== 0) return "—";
+  return `${Number(x).toFixed(2)} USDT`;
+}
+
 export default function BacktestsList() {
   const [backtests, setBacktests] = useState<BacktestRun[]>([]);
   const [loading, setLoading] = useState(true);
@@ -21,18 +31,51 @@ export default function BacktestsList() {
 
   const columns: ListColumn<BacktestRun>[] = [
     {
-      key: "symbol",
-      header: "Symbol",
+      key: "strategy",
+      header: "Strategy",
       render: (bt) => (
-        <span className="text-white font-medium">
-          {bt.symbol}
-        </span>
+        <div className="flex flex-col">
+          <span className="text-white font-medium">
+            {bt.algorithm_name ?? "—"}
+          </span>
+          <span className="text-xs text-slate-500">
+            {bt.symbol} • {bt.timeframe} • {bt.exchange}
+          </span>
+        </div>
       ),
     },
     {
-      key: "timeframe",
-      header: "Timeframe",
-      render: (bt) => bt.timeframe,
+      key: "return",
+      header: "Return",
+      render: (bt) => {
+        const value = bt.total_return_percent ?? undefined;
+        const positive = value != null && value >= 0;
+
+        return (
+          <span className={positive ? "text-emerald-400" : "text-red-400"}>
+            {fmtPct(value)}
+          </span>
+        );
+      },
+    },
+    {
+      key: "profit",
+      header: "Net Profit",
+      render: (bt) => {
+        const value = bt.total_return_usdt ?? undefined;
+        const positive = value != null && value >= 0;
+
+        return (
+          <span className={positive ? "text-emerald-400" : "text-red-400"}>
+            {fmtMoney(value)}
+          </span>
+        );
+      },
+    },
+    {
+      key: "trades",
+      header: "Trades",
+      render: (bt) => bt.total_trades ?? "—",
     },
     {
       key: "status",
@@ -56,7 +99,7 @@ export default function BacktestsList() {
       loading={loading}
       emptyMessage="No backtests yet."
       onRowClick={(bt) =>
-        navigate(`/backtest/${bt.id}`)
+        navigate(`/backtests/${bt.id}`)
       }
       actions={
         <button

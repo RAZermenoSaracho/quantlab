@@ -54,3 +54,13 @@ export function deleteAlgorithm(id: string) {
     `/algorithms/${id}`
   );
 }
+
+/* ==============================
+   GET PAPER AND BACKTEST RUNS
+============================== */
+export function getAlgorithmRuns(id: string) {
+  return api.get<{
+    backtests: any[];
+    paperRuns: any[];
+  }>(`/algorithms/${id}/runs`);
+}

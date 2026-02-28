@@ -16,14 +16,14 @@ export interface BacktestsListResponse {
    GET ONE
 ============================== */
 export function getBacktest(id: string) {
-  return api.get<any>(`/backtest/${id}`);
+  return api.get<any>(`/backtests/${id}`);
 }
 
 /* ==============================
    GET ALL
 ============================== */
 export function getAllBacktests(): Promise<BacktestsListResponse> {
-  return api.get<BacktestsListResponse>("/backtest");
+  return api.get<BacktestsListResponse>("/backtests");
 }
 
 /* ==============================
@@ -31,7 +31,7 @@ export function getAllBacktests(): Promise<BacktestsListResponse> {
 ============================== */
 export function createBacktest(payload: CreateBacktestDto) {
   return api.post<{ run_id: string }>(
-    "/backtest",
+    "/backtests",
     payload
   );
 }
@@ -41,7 +41,7 @@ export function createBacktest(payload: CreateBacktestDto) {
 ============================== */
 export function deleteBacktest(id: string) {
   return api.del<{ message: string }>(
-    `/backtest/${id}`
+    `/backtests/${id}`
   );
 }
 
@@ -50,6 +50,6 @@ export function deleteBacktest(id: string) {
 ============================== */
 export function getBacktestStatus(runId: string) {
   return api.get<{ status: string; progress: number }>(
-    `/backtest/${runId}/status`
+    `/backtests/${runId}/status`
   );
 }

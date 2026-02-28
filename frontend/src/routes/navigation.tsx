@@ -36,7 +36,7 @@ export const nav = [
   // BACKTESTS
   { path: "/backtests", element: <BacktestsList />, isPrivate: true },
   { path: "/backtests/new", element: <CreateBacktest />, isPrivate: true },
-  { path: "/backtest/:id", element: <BacktestDetail />, isPrivate: true },
+  { path: "/backtests/:id", element: <BacktestDetail />, isPrivate: true },
 
   // PAPER
   { path: "/paper", element: <PaperRunsList />, isPrivate: true },

@@ -6,11 +6,13 @@ import {
   deleteAlgorithm,
   updateAlgorithm,
   refreshAlgorithmFromGithub,
+  getAlgorithmRuns,
 } from "../controllers/algorithms.controller";
 import { requireAuth } from "../middleware/auth.middleware";
 
 const router = Router();
 
+router.get("/:id/runs", requireAuth, getAlgorithmRuns);
 router.post("/", requireAuth, createAlgorithm);
 router.get("/", requireAuth, getAlgorithms);
 router.get("/:id", requireAuth, getAlgorithmById);

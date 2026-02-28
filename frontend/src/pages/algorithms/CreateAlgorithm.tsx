@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createAlgorithm } from "../../services/algorithm.service";
-import CodeEditor from "../../components/ui/CodeEditor";
-import DocumentationPanel from "../../components/algorithms/DocumentationPanel";
+import AlgorithmWorkspace from "../../components/algorithms/AlgorithmWorkspace";
 
 export default function CreateAlgorithm() {
   const navigate = useNavigate();
@@ -104,50 +103,13 @@ export default function CreateAlgorithm() {
         </div>
 
         {/* WORKSPACE */}
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-10 min-h-[calc(100vh-350px)]">
-
-          {/* CODE COLUMN */}
-          <div className="lg:col-span-3 flex flex-col">
-
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col flex-1">
-
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">
-                  Strategy Code
-                </h2>
-                {githubUrl && (
-                  <span className="text-xs text-amber-400">
-                    External source provided
-                  </span>
-                )}
-              </div>
-
-              <div className="flex-1">
-                <CodeEditor
-                  value={code}
-                  onChange={setCode}
-                  height="h-full"
-                />
-              </div>
-
-            </div>
-
-          </div>
-
-          {/* RIGHT COLUMN */}
-          <div className="lg:col-span-2 flex flex-col">
-
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl flex flex-col flex-1 overflow-hidden">
-
-              <div className="flex-1 overflow-y-auto p-4">
-                <DocumentationPanel code={code} />
-              </div>
-
-            </div>
-
-          </div>
-
-        </div>
+        <AlgorithmWorkspace
+          code={code}
+          onChange={setCode}
+          disabled={false}
+          isGithub={false}
+          initialDocsOpen={true}
+        />
 
         {/* SUBMIT BUTTON */}
         <div className="pt-6">

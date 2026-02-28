@@ -336,21 +336,24 @@ export async function getAllBacktests(req: Request, res: Response, next: NextFun
     const result = await pool.query(
       `
       SELECT 
-        r.id,
-        r.symbol,
-        r.timeframe,
-        r.status,
-        r.created_at,
-        r.analysis,
-        m.total_return_percent,
-        m.total_return_usdt,
-        m.win_rate_percent,
-        m.profit_factor
-      FROM backtest_runs r
-      LEFT JOIN metrics m 
-        ON m.run_id = r.id AND m.run_type = 'BACKTEST'
-      WHERE r.user_id = $1
-      ORDER BY r.created_at DESC
+      r.id,
+      r.symbol,
+      r.timeframe,
+      r.status,
+      r.created_at,
+      r.exchange,
+      r.algorithm_id,
+      a.name AS algorithm_name,
+      m.total_return_percent,
+      m.total_return_usdt,
+      m.total_trades
+    FROM backtest_runs r
+    LEFT JOIN algorithms a 
+      ON a.id = r.algorithm_id
+    LEFT JOIN metrics m 
+      ON m.run_id = r.id AND m.run_type = 'BACKTEST'
+    WHERE r.user_id = $1
+    ORDER BY r.created_at DESC
       `,
       [userId]
     );
