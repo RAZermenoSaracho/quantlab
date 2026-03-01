@@ -2,22 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import BacktestsList from "./backtests/BacktestsList";
 import { getAllBacktests } from "../services/backtest.service";
 import KpiCard from "../components/ui/KpiCard";
-
-type Backtest = {
-  id: string;
-  symbol: string;
-  timeframe: string;
-  total_return_usdt?: string;
-  total_return_percent?: string;
-  total_trades?: number;
-  win_rate_percent?: string;
-  profit_factor?: string;
-  status: string;
-  created_at: string;
-};
+import type { BacktestRun } from "../types/models";
 
 export default function Dashboard() {
-  const [backtests, setBacktests] = useState<Backtest[]>([]);
+  const [backtests, setBacktests] = useState<BacktestRun[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
