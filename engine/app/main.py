@@ -89,7 +89,7 @@ async def validate(request: AlgorithmRequest) -> Dict[str, Any]:
 # ===================== Backtesting ====================
 # ======================================================
 BACKTEST_PROGRESS = {}
-@app.post("/backtest")
+@app.post("/backtests")
 async def backtest(request: BacktestRequest):
 
     BACKTEST_PROGRESS[request.run_id] = 0

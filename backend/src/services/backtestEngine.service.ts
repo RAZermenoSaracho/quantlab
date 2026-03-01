@@ -15,7 +15,7 @@ export async function runBacktestOnEngine(
   }) {
   try {
     const response = await axios.post(
-      `${env.ENGINE_URL}/backtest`,
+      `${env.ENGINE_URL}/backtests`,
       {
         ...payload,
         run_id: runId,

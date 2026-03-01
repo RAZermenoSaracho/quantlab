@@ -153,10 +153,12 @@ export default function BacktestDetail() {
     async function load() {
       if (!id) return;
 
-      const detail = await getBacktest(id);
-      setData(detail);
+      const [detail, list] = await Promise.all([
+        getBacktest(id),
+        getAllBacktests(),
+      ]);
 
-      const list = await getAllBacktests();
+      setData(detail);
       setAllIds(list.backtests.map((b: any) => b.id));
     }
 
@@ -358,7 +360,7 @@ export default function BacktestDetail() {
         </div>
 
         <div className="flex gap-3 items-center">
-          <DetailNavigator ids={allIds} currentId={id!} basePath="/backtest" />
+          <DetailNavigator ids={allIds} currentId={id!} basePath="/backtests" />
           <StatusBadge status={run.status} />
 
           <button

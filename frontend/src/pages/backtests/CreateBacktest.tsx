@@ -119,7 +119,7 @@ export default function CreateBacktest() {
           setProgress(100);
 
           setTimeout(() => {
-            navigate(`/backtest/${runId}`);
+            navigate(`/backtests/${runId}`);
           }, 500);
         }
 

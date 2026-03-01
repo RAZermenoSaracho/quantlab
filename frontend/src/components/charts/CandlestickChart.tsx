@@ -57,7 +57,10 @@ export default function CandlestickChart({
 
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const markersRef = useRef<any>(null);
   const roRef = useRef<ResizeObserver | null>(null);
+
+  /* ================= TRANSFORM DATA ================= */
 
   const candleData = useMemo(() => {
     const out: CandlestickData<UTCTimestamp>[] = [];
@@ -111,13 +114,13 @@ export default function CandlestickChart({
     return out;
   }, [trades]);
 
-  // Create chart once (and handle StrictMode remounts safely)
+  /* ================= CREATE CHART ONCE ================= */
+
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
-    // Ensure empty container (important if React remounts)
-    el.innerHTML = "";
+    el.innerHTML = ""; // StrictMode safety
 
     const chart = createChart(el, {
       height,
@@ -150,44 +153,53 @@ export default function CandlestickChart({
     chartRef.current = chart;
     seriesRef.current = series;
 
-    // Resize observer => keep width correct
+    // ✅ Create markers layer ONCE
+    markersRef.current = createSeriesMarkers(series, []);
+
+    // Resize observer
     const ro = new ResizeObserver(() => {
       if (!chartRef.current || !containerRef.current) return;
       const w = containerRef.current.clientWidth;
       if (w > 0) chartRef.current.applyOptions({ width: w });
     });
+
     ro.observe(el);
     roRef.current = ro;
 
     return () => {
-      // cleanup (StrictMode-safe)
       try {
         ro.disconnect();
       } catch {}
 
-      roRef.current = null;
-
       try {
-        chartRef.current?.remove();
+        chart.remove();
       } catch {}
 
+      roRef.current = null;
       chartRef.current = null;
       seriesRef.current = null;
+      markersRef.current = null;
     };
   }, [height]);
 
-  // Update data/markers
+  /* ================= UPDATE DATA (REPLACE, NOT APPEND) ================= */
+
   useEffect(() => {
-    if (!seriesRef.current) return;
+    const series = seriesRef.current;
+    const chart = chartRef.current;
 
-    seriesRef.current.setData(candleData);
+    if (!series) return;
 
-    if (markers.length) {
-        createSeriesMarkers(seriesRef.current, markers);
+    // Replace candles
+    series.setData(candleData);
+
+    // Replace markers safely
+    if (markersRef.current) {
+      markersRef.current.setMarkers(markers);
     }
 
-    if (chartRef.current && candleData.length) {
-        chartRef.current.timeScale().fitContent();
+    if (chart && candleData.length) {
+      chart.timeScale().fitContent();
     }
   }, [candleData, markers]);
 
