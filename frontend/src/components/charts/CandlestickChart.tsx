@@ -120,11 +120,13 @@ export default function CandlestickChart({
     const el = containerRef.current;
     if (!el) return;
 
-    el.innerHTML = ""; // StrictMode safety
+    el.innerHTML = "";
+
+    const initialWidth = Math.max(el.clientWidth, 300);
 
     const chart = createChart(el, {
       height,
-      width: el.clientWidth || 600,
+      width: initialWidth,
       layout: {
         background: { type: ColorType.Solid, color: "#0b1220" },
         textColor: "#cbd5e1",
@@ -153,14 +155,14 @@ export default function CandlestickChart({
     chartRef.current = chart;
     seriesRef.current = series;
 
-    // ✅ Create markers layer ONCE
     markersRef.current = createSeriesMarkers(series, []);
 
-    // Resize observer
     const ro = new ResizeObserver(() => {
       if (!chartRef.current || !containerRef.current) return;
       const w = containerRef.current.clientWidth;
-      if (w > 0) chartRef.current.applyOptions({ width: w });
+      if (w > 0) {
+        chartRef.current.applyOptions({ width: w });
+      }
     });
 
     ro.observe(el);
@@ -182,7 +184,7 @@ export default function CandlestickChart({
     };
   }, [height]);
 
-  /* ================= UPDATE DATA (REPLACE, NOT APPEND) ================= */
+  /* ================= UPDATE DATA ================= */
 
   useEffect(() => {
     const series = seriesRef.current;
@@ -190,10 +192,8 @@ export default function CandlestickChart({
 
     if (!series) return;
 
-    // Replace candles
     series.setData(candleData);
 
-    // Replace markers safely
     if (markersRef.current) {
       markersRef.current.setMarkers(markers);
     }
@@ -203,13 +203,16 @@ export default function CandlestickChart({
     }
   }, [candleData, markers]);
 
-  if (!candles?.length) {
-    return (
-      <div className="text-slate-400 text-sm">
-        No candle data available.
-      </div>
-    );
-  }
+  /* ================= RENDER ================= */
 
-  return <div ref={containerRef} className="w-full" style={{ minWidth: 0 }} />;
+  return (
+    <div className="relative w-full min-w-0" style={{ height }}>
+      {!candles?.length && (
+        <div className="absolute inset-0 flex items-center justify-center text-slate-500 text-sm">
+          Waiting for candles...
+        </div>
+      )}
+      <div ref={containerRef} className="w-full h-full" />
+    </div>
+  );
 }

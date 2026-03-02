@@ -112,7 +112,7 @@ async function handleTradeEvent(runId: string, trade: any) {
 
     await client.query("COMMIT");
 
-    emitPaperEvent(runId, "trade", trade);
+    emitPaperEvent(runId, "trade", { run_id: runId, ...trade });
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;

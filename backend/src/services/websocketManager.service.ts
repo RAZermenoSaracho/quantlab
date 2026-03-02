@@ -24,11 +24,18 @@ export function initializeWebsocket(io: Server) {
   });
 }
 
-export function emitPaperEvent(
-  runId: string,
-  event: string,
-  payload: any
-) {
+export async function emitPaperEvent(runId: string, event: string, payload: any) {
   if (!ioInstance) return;
-  ioInstance.to(`paper:${runId}`).emit(event, payload);
+
+  const room = `paper:${runId}`;
+
+  // DEBUG: count sockets in room
+  try {
+    const sockets = await ioInstance.in(room).allSockets();
+    console.log(`[WS EMIT] event=${event} room=${room} sockets=${sockets.size}`);
+  } catch (e) {
+    console.log(`[WS EMIT] event=${event} room=${room} (could not count sockets)`);
+  }
+
+  ioInstance.to(room).emit(event, payload);
 }

@@ -1,13 +1,12 @@
-import { useEffect, useState, useMemo } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import {
-  getPaperRunById,
-  stopPaperRun,
   deletePaperRun,
   getAllPaperRuns,
+  getPaperRunById,
+  stopPaperRun,
 } from "../../services/paper.service";
-
-import { connectSocket, disconnectSocket } from "../../services/socket.service";
+import { connectSocket } from "../../services/socket.service";
 import DetailNavigator from "../../components/navigation/DetailNavigator";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
@@ -17,23 +16,20 @@ import EquityCurveChart from "../../components/charts/EquityCurveChart";
 
 type Candle = {
   run_id: string;
-  timestamp: number;
+  timestamp: number | string;
   open: number;
   high: number;
   low: number;
   close: number;
 };
 
-type EquityPoint = {
-  timestamp: number;
-  equity: number;
-};
+type EquityPoint = { timestamp: number; equity: number };
 
 export default function PaperRunDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-
   const runId = id ?? "";
+  console.log("CURRENT RUN ID:", runId);
 
   const [run, setRun] = useState<PaperRun | null>(null);
   const [trades, setTrades] = useState<PaperTrade[]>([]);
@@ -44,8 +40,6 @@ export default function PaperRunDetail() {
   const [candles, setCandles] = useState<Candle[]>([]);
   const [equityCurve, setEquityCurve] = useState<EquityPoint[]>([]);
   const [socketConnected, setSocketConnected] = useState(false);
-
-  /* ================= TRADE COLUMNS ================= */
 
   const tradeColumns: ListColumn<PaperTrade>[] = useMemo(
     () => [
@@ -64,9 +58,7 @@ export default function PaperRunDetail() {
         key: "exit",
         header: "Exit",
         render: (t) =>
-          t.exit_price != null
-            ? Number(t.exit_price).toFixed(2)
-            : "-",
+          t.exit_price != null ? Number(t.exit_price).toFixed(2) : "-",
       },
       {
         key: "pnl",
@@ -90,12 +82,11 @@ export default function PaperRunDetail() {
     []
   );
 
-  /* ================= LOAD DATA ================= */
-
   useEffect(() => {
     if (!runId) return;
 
-    let socket: ReturnType<typeof connectSocket> | null = null;
+    let cancelled = false;
+    const socket = connectSocket();
 
     async function load() {
       const [detail, list] = await Promise.all([
@@ -103,82 +94,102 @@ export default function PaperRunDetail() {
         getAllPaperRuns(),
       ]);
 
+      if (cancelled) return;
+
       setRun(detail.run);
       setTrades(detail.trades ?? []);
       setAllIds((list.runs ?? []).map((r) => r.id));
+
+      // Seed equity curve so it’s not “flat” due to having only live points
+      const seedEquity = Number(detail.run?.equity ?? detail.run?.quote_balance ?? 0);
+      if (Number.isFinite(seedEquity) && seedEquity > 0) {
+        setEquityCurve([{ timestamp: Date.now(), equity: seedEquity }]);
+      }
     }
 
     load();
 
-    socket = connectSocket();
-    socket.emit("join:paper", runId);
+    // Join room
+    socket.emit("join_paper_run", runId);
 
-    socket.on("connect", () => setSocketConnected(true));
-    socket.on("disconnect", () => setSocketConnected(false));
+    // Connection state
+    const onConnect = () => setSocketConnected(true);
+    const onDisconnect = () => setSocketConnected(false);
 
-    socket.on("paper:candle", (candle: Candle) => {
-      console.log("CANDLE RECEIVED:", candle);
-      if (candle.run_id === runId) {
-        setCandles((prev) => {
-          const exists = prev.some(
-            (c) => Number(c.timestamp) === Number(candle.timestamp)
-          );
+    // Live events
+    const onCandle = (candle: Candle) => {
+      console.log("CANDLE RAW:", candle);
+      const candleRunId = (candle as any)?.run_id;
+      if (candleRunId !== runId) return;
 
-          if (exists) return prev;
+      setCandles((prev) => {
+        const ts = String((candle as any)?.timestamp ?? "");
+        const exists = prev.some((c) => String(c.timestamp) === ts);
+        if (exists) return prev;
+        return [...prev, candle];
+      });
+    };
 
-          return [...prev, candle];
-        });
-      }
-    });
+    const onUpdate = (data: any) => {
+      if (data?.run_id !== runId) return;
 
-    socket.on("paper:update", (data: any) => {
-      if (data.run_id === runId) {
-        setRun((prev) => (prev ? { ...prev, ...data } : prev));
+      setRun((prev) => (prev ? { ...prev, ...data } : prev));
 
-        if (data.equity != null) {
-          setEquityCurve((prev) => [
-            ...prev,
-            {
-              timestamp: Date.now(),
-              equity: Number(data.equity),
-            },
-          ]);
+      if (data?.equity != null) {
+        const eq = Number(data.equity);
+        if (Number.isFinite(eq)) {
+          setEquityCurve((prev) => {
+            const next = [...prev, { timestamp: Date.now(), equity: eq }];
+            // keep last N points so recharts stays fast
+            return next.length > 2000 ? next.slice(-2000) : next;
+          });
         }
       }
-    });
+    };
 
-    socket.on("paper:trade", (trade: PaperTrade) => {
-      if (trade.run_id === runId) {
-        setTrades((prev) => [trade, ...prev]);
-      }
-    });
+    const onTrade = (trade: PaperTrade) => {
+      // IMPORTANT: some engines don’t include run_id in the emitted trade
+      const tradeRunId = (trade as any)?.run_id ?? runId;
+      if (tradeRunId !== runId) return;
 
-    socket.on("paper:stopped", (data: any) => {
-      if (data.run_id === runId) {
-        setRun((prev) =>
-          prev ? { ...prev, status: "STOPPED" } : prev
-        );
-      }
-    });
+      setTrades((prev) => [({ ...trade, run_id: runId } as any), ...prev]);
+    };
+
+    const onStopped = (data: any) => {
+      if (data?.run_id !== runId) return;
+      setRun((prev) => (prev ? { ...prev, status: "STOPPED" } : prev));
+    };
+
+    socket.on("connect", onConnect);
+    socket.on("disconnect", onDisconnect);
+
+    socket.on("candle", onCandle);
+    socket.on("update", onUpdate);
+    socket.on("trade", onTrade);
+    socket.on("stopped", onStopped);
 
     return () => {
-      if (socket) {
-        socket.emit("leave:paper", runId);
-        disconnectSocket();
-      }
+      cancelled = true;
+
+      socket.emit("leave_paper_run", runId);
+
+      // CRITICAL: prevent duplicate listeners in React 18 StrictMode dev
+      socket.off("connect", onConnect);
+      socket.off("disconnect", onDisconnect);
+
+      socket.off("candle", onCandle);
+      socket.off("update", onUpdate);
+      socket.off("trade", onTrade);
+      socket.off("stopped", onStopped);
     };
   }, [runId]);
-
-  /* ================= ACTIONS ================= */
 
   async function handleStop() {
     if (!runId) return;
     try {
       setStopping(true);
       await stopPaperRun(runId);
-      setRun((prev) =>
-        prev ? { ...prev, status: "STOPPED" } : prev
-      );
+      setRun((prev) => (prev ? { ...prev, status: "STOPPED" } : prev));
     } finally {
       setStopping(false);
     }
@@ -193,26 +204,15 @@ export default function PaperRunDetail() {
     navigate("/paper");
   }
 
-  /* ================= GUARDS ================= */
-
-  if (!runId) {
-    return <div className="p-6 text-slate-400">Invalid paper run.</div>;
-  }
-
-  if (!run) {
-    return <div className="p-6 text-slate-400">Loading...</div>;
-  }
+  if (!runId) return <div className="p-6 text-slate-400">Invalid paper run.</div>;
+  if (!run) return <div className="p-6 text-slate-400">Loading...</div>;
 
   const isActive = run.status === "ACTIVE";
   const baseAsset = run.symbol.replace("USDT", "");
   const quoteAsset = "USDT";
 
-  /* ================= UI ================= */
-
   return (
     <div className="space-y-10">
-
-      {/* HEADER */}
       <div className="flex justify-between items-start">
         <div>
           <h1 className="text-2xl font-bold text-white">
@@ -224,12 +224,7 @@ export default function PaperRunDetail() {
         </div>
 
         <div className="flex gap-3 items-center">
-          <DetailNavigator
-            ids={allIds}
-            currentId={runId}
-            basePath="/paper"
-          />
-
+          <DetailNavigator ids={allIds} currentId={runId} basePath="/paper" />
           <StatusBadge status={run.status} />
 
           {isActive && (
@@ -260,54 +255,35 @@ export default function PaperRunDetail() {
         </div>
       </div>
 
-      {/* BALANCES */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-slate-800 p-6 rounded-xl border border-slate-700">
-          <div className="text-slate-400 text-sm mb-2">
-            {quoteAsset} Available
-          </div>
-          <div className="text-2xl text-white">
-            {Number(run.quote_balance ?? 0).toFixed(2)}
-          </div>
+          <div className="text-slate-400 text-sm mb-2">{quoteAsset} Available</div>
+          <div className="text-2xl text-white">{Number(run.quote_balance ?? 0).toFixed(2)}</div>
         </div>
 
         <div className="bg-slate-800 p-6 rounded-xl border border-slate-700">
-          <div className="text-slate-400 text-sm mb-2">
-            {baseAsset} Held
-          </div>
-          <div className="text-2xl text-white">
-            {Number(run.base_balance ?? 0).toFixed(6)}
-          </div>
+          <div className="text-slate-400 text-sm mb-2">{baseAsset} Held</div>
+          <div className="text-2xl text-white">{Number(run.base_balance ?? 0).toFixed(6)}</div>
         </div>
 
         <div className="bg-slate-800 p-6 rounded-xl border border-slate-700">
-          <div className="text-slate-400 text-sm mb-2">
-            Total Equity
-          </div>
-          <div className="text-2xl text-white">
-            {Number(run.equity ?? 0).toFixed(2)}
-          </div>
+          <div className="text-slate-400 text-sm mb-2">Total Equity</div>
+          <div className="text-2xl text-white">{Number(run.equity ?? 0).toFixed(2)}</div>
         </div>
       </div>
 
-      {/* CHARTS */}
       <div className="space-y-8">
-        <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
-          <h3 className="text-white font-semibold mb-4">
-            Price Chart
-          </h3>
+        <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 min-w-0">
+          <h3 className="text-white font-semibold mb-4">Price Chart</h3>
           <CandlestickChart candles={candles} trades={trades} />
         </div>
 
         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
-          <h3 className="text-white font-semibold mb-4">
-            Equity Curve
-          </h3>
+          <h3 className="text-white font-semibold mb-4">Equity Curve</h3>
           <EquityCurveChart equity={equityCurve} />
         </div>
       </div>
 
-      {/* TRADES */}
       <ListView<PaperTrade>
         title="Trades"
         description="Executed trades for this paper session"
