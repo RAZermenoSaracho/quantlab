@@ -29,7 +29,6 @@ export default function PaperRunDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const runId = id ?? "";
-  console.log("CURRENT RUN ID:", runId);
 
   const [run, setRun] = useState<PaperRun | null>(null);
   const [trades, setTrades] = useState<PaperTrade[]>([]);
@@ -100,7 +99,6 @@ export default function PaperRunDetail() {
       setTrades(detail.trades ?? []);
       setAllIds((list.runs ?? []).map((r) => r.id));
 
-      // Seed equity curve so it’s not “flat” due to having only live points
       const seedEquity = Number(detail.run?.equity ?? detail.run?.quote_balance ?? 0);
       if (Number.isFinite(seedEquity) && seedEquity > 0) {
         setEquityCurve([{ timestamp: Date.now(), equity: seedEquity }]);
@@ -118,7 +116,6 @@ export default function PaperRunDetail() {
 
     // Live events
     const onCandle = (candle: Candle) => {
-      console.log("CANDLE RAW:", candle);
       const candleRunId = (candle as any)?.run_id;
       if (candleRunId !== runId) return;
 
@@ -218,6 +215,17 @@ export default function PaperRunDetail() {
           <h1 className="text-2xl font-bold text-white">
             {run.symbol} — {run.timeframe}
           </h1>
+
+          <p className="text-slate-400 text-sm mt-1">
+            Strategy:{" "}
+            <button
+              onClick={() => navigate(`/algorithms/${run.algorithm_id}`)}
+              className="text-sky-400 hover:text-sky-300 font-medium transition-colors"
+            >
+              {run.algorithm_name ?? "—"}
+            </button>
+          </p>
+
           <p className="text-slate-500 text-xs mt-1">
             Started: {run.started_at ?? "—"}
           </p>

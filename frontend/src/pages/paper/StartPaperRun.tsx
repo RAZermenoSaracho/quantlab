@@ -68,7 +68,7 @@ export default function StartPaperRun() {
     } finally {
       setLoading(false);
     }
-  }
+  } 
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-10 space-y-12">

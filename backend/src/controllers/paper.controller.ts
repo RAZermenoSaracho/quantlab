@@ -174,9 +174,13 @@ export async function getPaperRunById(
     const userId = req.user!.id;
 
     const runResult = await pool.query(
-      `SELECT *
-       FROM paper_runs
-       WHERE id = $1 AND user_id = $2`,
+      `SELECT 
+        r.*,
+        a.name AS algorithm_name,
+        a.notes_html AS algorithm_description
+      FROM paper_runs r
+      JOIN algorithms a ON a.id = r.algorithm_id
+      WHERE r.id = $1 AND r.user_id = $2`,
       [runId, userId]
     );
 

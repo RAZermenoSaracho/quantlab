@@ -1,8 +1,8 @@
 import type { BacktestRun, PaperRun, PaperTrade } from "./models";
 
-export interface BacktestsListResponse {
-  backtests: BacktestRun[];
-}
+/* =========================
+   Generic API Wrappers
+========================= */
 
 export interface ApiSuccess<T> {
   success: true;
@@ -13,9 +13,21 @@ export interface ApiError {
   success: false;
   error: {
     message: string;
-    details?: any;
+    details?: unknown;
   };
 }
+
+/* =========================
+   Backtests
+========================= */
+
+export interface BacktestsListResponse {
+  backtests: BacktestRun[];
+}
+
+/* =========================
+   Paper Trading
+========================= */
 
 export interface PaperRunDetailResponse {
   run: PaperRun;

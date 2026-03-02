@@ -1,3 +1,7 @@
+/* =========================
+   Algorithm
+========================= */
+
 export interface CreateAlgorithmDto {
   name: string;
   notes_html?: string;
@@ -6,10 +10,14 @@ export interface CreateAlgorithmDto {
 }
 
 export interface UpdateAlgorithmDto {
-  name: string;
+  name?: string;
   notes_html?: string;
-  code: string;
+  code?: string;
 }
+
+/* =========================
+   Backtest
+========================= */
 
 export interface CreateBacktestDto {
   algorithm_id: string;
@@ -17,7 +25,7 @@ export interface CreateBacktestDto {
   symbol: string;
   timeframe: string;
   initial_balance: number;
-  start_date: string;
-  end_date: string;
+  start_date: string; // ISO
+  end_date: string;   // ISO
   fee_rate?: number;
 }

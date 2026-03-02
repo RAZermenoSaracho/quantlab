@@ -4,39 +4,45 @@ import type { PaperRunDetailResponse } from "../types/api.types";
 
 export interface StartPaperPayload {
   algorithm_id: string;
-  exchange: string;
+  exchange?: string;
   symbol: string;
   timeframe: string;
   initial_balance: number;
   fee_rate?: number;
+  // algorithm_name: NO lo usa tu backend, no lo mandes
 }
 
 /* ================= START ================= */
 
 export async function startPaperRun(payload: StartPaperPayload) {
+  // backend: { run_id: string }
   return api.post<{ run_id: string }>("/paper/start", payload);
 }
 
 /* ================= STOP ================= */
 
 export async function stopPaperRun(runId: string) {
-  return api.post<{ success: boolean }>(`/paper/stop/${runId}`, {});
+  // backend: { message: string }
+  return api.post<{ message: string }>(`/paper/stop/${runId}`, {});
 }
 
 /* ================= DELETE ================= */
 
 export async function deletePaperRun(runId: string) {
-  return api.del<{ success: boolean }>(`/paper/${runId}`);
+  // backend: { message: string }
+  return api.del<{ message: string }>(`/paper/${runId}`);
 }
 
 /* ================= GET ONE ================= */
 
 export async function getPaperRunById(runId: string) {
+  // backend: { run, trades }
   return api.get<PaperRunDetailResponse>(`/paper/${runId}`);
 }
 
 /* ================= GET ALL ================= */
 
 export async function getAllPaperRuns() {
+  // backend: { runs: PaperRun[] }
   return api.get<{ runs: PaperRun[] }>("/paper");
 }

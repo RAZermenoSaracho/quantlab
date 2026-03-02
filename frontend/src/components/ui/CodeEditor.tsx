@@ -14,7 +14,14 @@ export default function CodeEditor({
   height = "h-[400px]",
 }: Props) {
   return (
-    <div className={`rounded-xl overflow-hidden border border-slate-700 ${height}`}>
+    <div
+      className={[
+        "w-full min-w-0 max-w-full",
+        "rounded-xl border border-slate-700",
+        "overflow-hidden", // critical: prevents editor internal nodes from pushing layout
+        height,
+      ].join(" ")}
+    >
       <Editor
         height="100%"
         defaultLanguage="python"
@@ -28,9 +35,23 @@ export default function CodeEditor({
           fontFamily: "Fira Code, monospace",
           automaticLayout: true,
           scrollBeyondLastLine: false,
+
+          // Critical for horizontal overflow:
           wordWrap: "on",
+          wrappingIndent: "indent",
+
           tabSize: 4,
           insertSpaces: true,
+
+          // Nice-to-have: makes sure long lines don't create weird horizontal behavior
+          scrollbar: {
+            horizontal: "auto",
+            vertical: "auto",
+          },
+
+          // Optional: reduces layout quirks
+          overviewRulerBorder: false,
+          hideCursorInOverviewRuler: true,
         }}
       />
     </div>
