@@ -3,6 +3,7 @@ import StrategyAnalyzer from "./StrategyAnalyzer";
 import EngineRequirements from "./EngineRequirements";
 import ConfigSpecification from "./ConfigSpecification";
 import SandboxRules from "./SandboxRules";
+import Button from "../ui/Button";
 
 type Tab = "requirements" | "config" | "sandbox";
 
@@ -31,16 +32,32 @@ export default function DocumentationPanel({ code }: Props) {
       </div>
 
       {/* TABS */}
-      <div className="flex text-xs border-b border-slate-800 min-w-0 overflow-hidden">
-        <TabButton active={tab === "requirements"} onClick={() => setTab("requirements")}>
+      <div className="flex gap-2 border-b border-slate-800 p-2">
+
+        <Button
+          variant={tab === "requirements" ? "PRIMARY" : "GHOST"}
+          size="sm"
+          onClick={() => setTab("requirements")}
+        >
           Requirements
-        </TabButton>
-        <TabButton active={tab === "config"} onClick={() => setTab("config")}>
+        </Button>
+
+        <Button
+          variant={tab === "config" ? "PRIMARY" : "GHOST"}
+          size="sm"
+          onClick={() => setTab("config")}
+        >
           CONFIG Spec
-        </TabButton>
-        <TabButton active={tab === "sandbox"} onClick={() => setTab("sandbox")}>
+        </Button>
+
+        <Button
+          variant={tab === "sandbox" ? "PRIMARY" : "GHOST"}
+          size="sm"
+          onClick={() => setTab("sandbox")}
+        >
           Sandbox
-        </TabButton>
+        </Button>
+
       </div>
 
       {/* CONTENT */}
@@ -63,28 +80,3 @@ export default function DocumentationPanel({ code }: Props) {
   );
 }
 
-function TabButton({
-  active,
-  children,
-  onClick,
-}: {
-  active: boolean;
-  children: React.ReactNode;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={[
-        "flex-1 px-4 py-3 transition font-medium",
-        "min-w-0 truncate", // prevent long labels from pushing width
-        active
-          ? "bg-slate-800 text-white"
-          : "bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800/60",
-      ].join(" ")}
-    >
-      {children}
-    </button>
-  );
-}

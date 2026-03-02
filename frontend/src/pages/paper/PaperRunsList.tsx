@@ -4,6 +4,7 @@ import { getAllPaperRuns } from "../../services/paper.service";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
 import type { PaperRun } from "../../types/models";
 import { StatusBadge } from "../../components/ui/StatusBadge";
+import Button from "../../components/ui/Button";
 
 export default function PaperRunsList() {
   const [runs, setRuns] = useState<PaperRun[]>([]);
@@ -59,12 +60,13 @@ export default function PaperRunsList() {
       loading={loading}
       onRowClick={(run) => navigate(`/paper/${run.id}`)}
       actions={
-        <button
+        <Button
+          variant="PRIMARY"
+          size="md"
           onClick={() => navigate("/paper/new")}
-          className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-white transition"
         >
           + New Paper Run
-        </button>
+        </Button>
       }
     />
   );

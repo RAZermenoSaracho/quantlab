@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthProvider";
 import OAuthButton from "../components/ui/OAuthButton";
+import Button from "../components/ui/Button";
 
 const BACKEND_URL = "http://localhost:5000";
 
@@ -98,13 +99,14 @@ export default function Register() {
             />
           </div>
 
-          <button
+          <Button
             type="submit"
-            disabled={loading}
-            className="w-full bg-sky-600 hover:bg-sky-700 transition rounded-lg py-2 text-white font-medium disabled:opacity-50"
+            variant="PRIMARY"
+            fullWidth
+            loading={loading}
           >
-            {loading ? "Creating account..." : "Register"}
-          </button>
+            Register
+          </Button>
         </form>
 
         {/* Divider */}

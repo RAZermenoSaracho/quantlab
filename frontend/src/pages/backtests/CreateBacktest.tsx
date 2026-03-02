@@ -9,6 +9,7 @@ import {
 } from "../../services/market.service";
 import DateSection from "../../components/backtests/DateSection";
 import ProgressBar from "../../components/ui/ProgressBar";
+import Button from "../../components/ui/Button";
 
 type FormState = {
   algorithm_id: string;
@@ -383,13 +384,15 @@ export default function CreateBacktest() {
           />
         )}
         <div className="flex justify-end pt-6">
-          <button
+          <Button
             type="submit"
-            disabled={loading}
-            className="bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 px-10 py-3 rounded-xl text-white font-semibold shadow-lg transition-all disabled:opacity-50"
+            variant="CREATE"
+            size="lg"
+            loading={loading}
+            loadingText="Running Backtest..."
           >
-            {loading ? "Running Backtest..." : "Run Backtest"}
-          </button>
+            Run Backtest
+          </Button>
         </div>
 
       </form>

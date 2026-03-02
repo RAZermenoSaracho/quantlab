@@ -41,6 +41,21 @@ export interface Symbol {
    Backtest
 ========================= */
 
+export interface BacktestAnalysis {
+  summary?: {
+    net_profit?: number;
+    return_pct?: number;
+    total_trades?: number;
+    win_rate_percent?: number;
+    profit_factor?: number;
+  };
+  risk?: {
+    sharpe?: number;
+    volatility?: number;
+    max_drawdown_pct?: number;
+  };
+}
+
 export interface BacktestRun {
   id: string;
 
@@ -53,11 +68,15 @@ export interface BacktestRun {
   algorithm_id: string;
   algorithm_name?: string;
 
+  // métricas planas (si backend hace join)
   total_return_percent?: number | null;
   total_return_usdt?: number | null;
   total_trades?: number | null;
   win_rate_percent?: number | null;
   profit_factor?: number | null;
+
+  // JSON analysis
+  analysis?: BacktestAnalysis | null;
 
   created_at: string;
 }

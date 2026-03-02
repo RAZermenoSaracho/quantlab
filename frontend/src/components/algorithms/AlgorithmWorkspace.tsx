@@ -1,3 +1,4 @@
+import Button from "../ui/Button";
 import CodeEditor from "../ui/CodeEditor";
 import DocumentationPanel from "./DocumentationPanel";
 import { useState } from "react";
@@ -33,13 +34,14 @@ export default function AlgorithmWorkspace({
             </span>
           )}
 
-          <button
+          <Button
             type="button"
+            variant="GHOST"
+            size="sm"
             onClick={() => setDocOpen((v) => !v)}
-            className="text-xs bg-slate-800 hover:bg-slate-700 px-3 py-1 rounded-lg transition whitespace-nowrap"
           >
             {docOpen ? "Hide Docs" : "Show Docs"}
-          </button>
+          </Button>
         </div>
       </div>
 

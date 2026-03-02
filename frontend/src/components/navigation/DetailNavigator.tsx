@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import Button from "../ui/Button";
 
 type Props = {
   ids: string[];
@@ -39,20 +40,22 @@ export default function DetailNavigator({
       </span>
 
       {/* Previous */}
-      <button
+      <Button
+        variant="GHOST"
+        size="icon"
         onClick={goPrev}
-        className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 transition"
       >
-        <ChevronLeft size={18} className="text-slate-300" />
-      </button>
+        <ChevronLeft size={18} />
+      </Button>
 
       {/* Next */}
-      <button
+      <Button
+        variant="GHOST"
+        size="icon"
         onClick={goNext}
-        className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 transition"
       >
         <ChevronRight size={18} className="text-slate-300" />
-      </button>
+      </Button>
     </div>
   );
 }

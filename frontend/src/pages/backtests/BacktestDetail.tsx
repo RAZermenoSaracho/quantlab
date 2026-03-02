@@ -11,7 +11,7 @@ import CandlestickChart from "../../components/charts/CandlestickChart";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import DetailNavigator from "../../components/navigation/DetailNavigator";
 import KpiCard from "../../components/ui/KpiCard";
-import MetricCard from "../../components/ui/MetricCard";
+import Button from "../../components/ui/Button";
 import { exportStructuredBacktestPdf } from "../../utils/exportBacktestPdf";
 
 type BacktestDetailPayload = {
@@ -363,22 +363,25 @@ export default function BacktestDetail() {
           <DetailNavigator ids={allIds} currentId={id!} basePath="/backtests" />
           <StatusBadge status={run.status} />
 
-          <button
+          <Button
+            variant="PRIMARY"
+            size="md"
+            loading={loadingPdf}
+            loadingText="Generating..."
             onClick={handleExportPdf}
-            className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-white"
-            disabled={loadingPdf}
-            title="Export current report view"
           >
-            {loadingPdf ? "Generating..." : "Export PDF"}
-          </button>
+            Export PDF
+          </Button>
 
-          <button
+          <Button
+            variant="DELETE"
+            size="md"
+            loading={loadingDelete}
+            loadingText="Deleting..."
             onClick={handleDelete}
-            className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded text-white"
-            disabled={loadingDelete}
           >
-            {loadingDelete ? "Deleting..." : "Delete"}
-          </button>
+            Delete
+          </Button>
         </div>
       </div>
 
@@ -391,21 +394,50 @@ export default function BacktestDetail() {
       )}
 
       {/* CORE METRICS */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-5">
         <KpiCard
           title="Net Profit"
-          value={`${fmtMoney(Number(netProfit ?? 0))} USDT`}
+          value={Number(netProfit ?? 0)}
           positive={Number(netProfit ?? 0) >= 0}
+          format={(v) => `${fmtMoney(v)} USDT`}
+          size="compact"
         />
-        <KpiCard title="Return" value={fmtPct(Number(retPct ?? 0))} positive={Number(retPct ?? 0) >= 0} />
-        <KpiCard title="Sharpe" value={fmtMoney(Number(sharpe ?? 0), 2)} />
-        <KpiCard title="Volatility" value={fmtPct(Number(volatility ?? 0) * 100)} />
-        <KpiCard title="Max Drawdown" value={fmtPct(Number(maxDD ?? 0))} />
+
+        <KpiCard
+          title="Return"
+          value={Number(retPct ?? 0)}
+          positive={Number(retPct ?? 0) >= 0}
+          format={(v) => fmtPct(v)}
+          size="compact"
+        />
+
+        <KpiCard
+          title="Sharpe"
+          value={Number(sharpe ?? 0)}
+          format={(v) => v.toFixed(2)}
+          size="compact"
+        />
+
+        <KpiCard
+          title="Volatility"
+          value={Number(volatility ?? 0) * 100}
+          format={(v) => fmtPct(v)}
+          size="compact"
+        />
+
+        <KpiCard
+          title="Max Drawdown"
+          value={Number(maxDD ?? 0)}
+          positive={Number(maxDD ?? 0) < 20}
+          format={(v) => fmtPct(v)}
+          size="compact"
+        />
         {forcedCloseCount > 0 && (
           <KpiCard
             title="Forced Closures"
-            value={String(forcedCloseCount)}
+            value={forcedCloseCount}
             positive={false}
+            size="compact"
           />
         )}
       </div>
@@ -414,28 +446,82 @@ export default function BacktestDetail() {
       <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
         <KpiCard
           title="Initial Balance"
-          value={`${fmtMoney(Number(derived.initial ?? run.initial_balance ?? 0))} USDT`}
+          value={Number(derived.initial ?? run.initial_balance ?? 0)}
+          format={(v) => `${fmtMoney(v)} USDT`}
+          size="compact"
         />
+
         <KpiCard
           title="Final Balance"
-          value={`${fmtMoney(Number(derived.final ?? 0))} USDT`}
+          value={Number(derived.final ?? 0)}
           positive={Number(derived.final ?? 0) >= Number(derived.initial ?? 0)}
+          format={(v) => `${fmtMoney(v)} USDT`}
+          size="compact"
         />
-        <KpiCard title="Total Trades" value={String(totalTrades)} />
-        <KpiCard title="Win Rate" value={fmtPct(winRate)} positive={winRate >= 50} />
-        <KpiCard title="Candles" value={String(candlesCount)} />
-        <KpiCard title="Expectancy" value={`${fmtMoney(expectancy, 2)} USDT`} positive={expectancy >= 0} />
+
+        <KpiCard
+          title="Total Trades"
+          value={totalTrades}
+          size="compact"
+        />
+
+        <KpiCard
+          title="Win Rate"
+          value={winRate}
+          positive={winRate >= 50}
+          format={(v) => fmtPct(v)}
+          size="compact"
+        />
+
+        <KpiCard
+          title="Candles"
+          value={candlesCount}
+          size="compact"
+        />
+
+        <KpiCard
+          title="Expectancy"
+          value={expectancy}
+          positive={expectancy >= 0}
+          format={(v) => `${fmtMoney(v)} USDT`}
+          size="compact"
+        />
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MetricCard title="Avg Win" value={`${fmtMoney(avgWin, 2)} USDT`} positive={avgWin >= 0} />
-        <MetricCard title="Avg Loss" value={`${fmtMoney(avgLoss, 2)} USDT`} positive={avgLoss >= 0} />
-        <MetricCard title="Risk/Reward" value={fmtMoney(rr, 2)} positive={rr >= 1} />
-        <MetricCard
-          title="Profit Factor"
-          value={fmtMoney(Number(metrics?.profit_factor ?? 0), 2)}
-          positive={Number(metrics?.profit_factor ?? 0) >= 1}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+
+        <KpiCard
+          title="Avg Win"
+          value={avgWin}
+          positive={avgWin >= 0}
+          format={(v) => `${fmtMoney(v, 2)} USDT`}
+          size="compact"
         />
+
+        <KpiCard
+          title="Avg Loss"
+          value={avgLoss}
+          positive={avgLoss >= 0}
+          format={(v) => `${fmtMoney(v, 2)} USDT`}
+          size="compact"
+        />
+
+        <KpiCard
+          title="Risk/Reward"
+          value={rr}
+          positive={rr >= 1}
+          format={(v) => v.toFixed(2)}
+          size="compact"
+        />
+
+        <KpiCard
+          title="Profit Factor"
+          value={Number(metrics?.profit_factor ?? 0)}
+          positive={Number(metrics?.profit_factor ?? 0) >= 1}
+          format={(v) => v.toFixed(2)}
+          size="compact"
+        />
+
       </div>
 
       {/* PRICE CHART */}
@@ -470,10 +556,12 @@ export default function BacktestDetail() {
           </select>
         </div>
 
-        <MetricCard
-          title={`Average ${returnPeriod} Return`}
-          value={fmtPct(avgPeriodReturn)}
+        <KpiCard
+          title={`Avg ${returnPeriod} Return`}
+          value={avgPeriodReturn}
           positive={avgPeriodReturn >= 0}
+          format={(v) => fmtPct(v)}
+          size="compact"
         />
 
         <select
@@ -490,10 +578,12 @@ export default function BacktestDetail() {
         </select>
 
         {specificReturn != null && (
-          <MetricCard
-            title="Selected Period Return"
-            value={fmtPct(specificReturn)}
+          <KpiCard
+            title="Selected Period"
+            value={specificReturn}
             positive={specificReturn >= 0}
+            format={(v) => fmtPct(v)}
+            size="compact"
           />
         )}
       </div>

@@ -4,6 +4,7 @@ import { getAllBacktests } from "../../services/backtest.service";
 import type { BacktestRun } from "../../types/models";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
 import { StatusBadge } from "../../components/ui/StatusBadge";
+import Button from "../../components/ui/Button";
 
 function fmtPct(x?: number) {
   if (!x && x !== 0) return "—";
@@ -102,12 +103,13 @@ export default function BacktestsList() {
         navigate(`/backtests/${bt.id}`)
       }
       actions={
-        <button
-          onClick={() => navigate("/backtests/new")}
-          className="bg-sky-600 hover:bg-sky-700 px-4 py-2 rounded-xl text-white"
-        >
-          + New Backtest
-        </button>
+        <Button
+                  variant="PRIMARY"
+                  size="md"
+                  onClick={() => navigate("/backtests/new")}
+                >
+                  + New Backtest
+                </Button>
       }
     />
   );

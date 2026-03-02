@@ -8,11 +8,13 @@ import {
 } from "../../services/paper.service";
 import { connectSocket } from "../../services/socket.service";
 import DetailNavigator from "../../components/navigation/DetailNavigator";
-import { StatusBadge } from "../../components/ui/StatusBadge";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
 import type { PaperRun, PaperTrade } from "../../types/models";
 import CandlestickChart from "../../components/charts/CandlestickChart";
 import EquityCurveChart from "../../components/charts/EquityCurveChart";
+import StatusIndicator from "../../components/paper/StatusIndicator";
+import Button from "../../components/ui/Button";
+import KpiCard from "../../components/ui/KpiCard";
 
 type Candle = {
   run_id: string;
@@ -38,7 +40,10 @@ export default function PaperRunDetail() {
 
   const [candles, setCandles] = useState<Candle[]>([]);
   const [equityCurve, setEquityCurve] = useState<EquityPoint[]>([]);
-  const [socketConnected, setSocketConnected] = useState(false);
+  const [backendConnected, setBackendConnected] = useState(false);
+  const [exchangeStreaming, setExchangeStreaming] = useState(false);
+
+  /* ================= TRADE TABLE ================= */
 
   const tradeColumns: ListColumn<PaperTrade>[] = useMemo(
     () => [
@@ -68,7 +73,7 @@ export default function PaperRunDetail() {
             <span
               className={
                 pnl >= 0
-                  ? "text-green-400 font-semibold"
+                  ? "text-emerald-400 font-semibold"
                   : "text-red-400 font-semibold"
               }
             >
@@ -80,6 +85,8 @@ export default function PaperRunDetail() {
     ],
     []
   );
+
+  /* ================= LOAD DATA ================= */
 
   useEffect(() => {
     if (!runId) return;
@@ -99,28 +106,29 @@ export default function PaperRunDetail() {
       setTrades(detail.trades ?? []);
       setAllIds((list.runs ?? []).map((r) => r.id));
 
-      const seedEquity = Number(detail.run?.equity ?? detail.run?.quote_balance ?? 0);
-      if (Number.isFinite(seedEquity) && seedEquity > 0) {
+      const seedEquity = Number(
+        detail.run?.equity ?? detail.run?.quote_balance ?? 0
+      );
+
+      if (Number.isFinite(seedEquity)) {
         setEquityCurve([{ timestamp: Date.now(), equity: seedEquity }]);
       }
     }
 
     load();
 
-    // Join room
     socket.emit("join_paper_run", runId);
 
-    // Connection state
-    const onConnect = () => setSocketConnected(true);
-    const onDisconnect = () => setSocketConnected(false);
+    const onConnect = () => setBackendConnected(true);
+    const onDisconnect = () => setBackendConnected(false);
 
-    // Live events
     const onCandle = (candle: Candle) => {
-      const candleRunId = (candle as any)?.run_id;
-      if (candleRunId !== runId) return;
+      if ((candle as any)?.run_id !== runId) return;
+
+      setExchangeStreaming(true);
 
       setCandles((prev) => {
-        const ts = String((candle as any)?.timestamp ?? "");
+        const ts = String(candle.timestamp);
         const exists = prev.some((c) => String(c.timestamp) === ts);
         if (exists) return prev;
         return [...prev, candle];
@@ -137,7 +145,6 @@ export default function PaperRunDetail() {
         if (Number.isFinite(eq)) {
           setEquityCurve((prev) => {
             const next = [...prev, { timestamp: Date.now(), equity: eq }];
-            // keep last N points so recharts stays fast
             return next.length > 2000 ? next.slice(-2000) : next;
           });
         }
@@ -145,11 +152,8 @@ export default function PaperRunDetail() {
     };
 
     const onTrade = (trade: PaperTrade) => {
-      // IMPORTANT: some engines don’t include run_id in the emitted trade
-      const tradeRunId = (trade as any)?.run_id ?? runId;
-      if (tradeRunId !== runId) return;
-
-      setTrades((prev) => [({ ...trade, run_id: runId } as any), ...prev]);
+      if ((trade as any)?.run_id !== runId) return;
+      setTrades((prev) => [trade, ...prev]);
     };
 
     const onStopped = (data: any) => {
@@ -159,7 +163,6 @@ export default function PaperRunDetail() {
 
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
-
     socket.on("candle", onCandle);
     socket.on("update", onUpdate);
     socket.on("trade", onTrade);
@@ -167,19 +170,17 @@ export default function PaperRunDetail() {
 
     return () => {
       cancelled = true;
-
       socket.emit("leave_paper_run", runId);
-
-      // CRITICAL: prevent duplicate listeners in React 18 StrictMode dev
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
-
       socket.off("candle", onCandle);
       socket.off("update", onUpdate);
       socket.off("trade", onTrade);
       socket.off("stopped", onStopped);
     };
   }, [runId]);
+
+  /* ================= ACTIONS ================= */
 
   async function handleStop() {
     if (!runId) return;
@@ -201,87 +202,410 @@ export default function PaperRunDetail() {
     navigate("/paper");
   }
 
-  if (!runId) return <div className="p-6 text-slate-400">Invalid paper run.</div>;
+  /* ================= UI GUARDS ================= */
+
+  if (!runId) return <div className="p-6 text-slate-400">Invalid run.</div>;
   if (!run) return <div className="p-6 text-slate-400">Loading...</div>;
 
-  const isActive = run.status === "ACTIVE";
+  const isRunning = run.status === "ACTIVE";
   const baseAsset = run.symbol.replace("USDT", "");
   const quoteAsset = "USDT";
 
+  const initialBalance = Number(run.initial_balance ?? 0);
+  const equity = Number(run.equity ?? 0);
+  const lastPrice = Number(run.last_price ?? 0);
+  const totalTrades = trades.length;
+
+  const netPnl = equity - initialBalance;
+  const returnPct = initialBalance
+    ? (netPnl / initialBalance) * 100
+    : 0;
+
+  const hasPosition = !!run.position;
+  const positionSide = run.position?.side ?? null;
+  const positionQty = Number(run.position?.quantity ?? 0);
+  const entryPrice = Number(run.position?.entry_price ?? 0);
+
+  let unrealizedPnl = 0;
+
+  if (hasPosition && lastPrice && entryPrice) {
+    if (positionSide === "LONG") {
+      unrealizedPnl = (lastPrice - entryPrice) * positionQty;
+    } else {
+      unrealizedPnl = (entryPrice - lastPrice) * positionQty;
+    }
+  }
+
+  /* ===== ADVANCED METRICS ===== */
+
+  const winTrades = trades.filter(t => Number(t.pnl ?? 0) > 0);
+  const lossTrades = trades.filter(t => Number(t.pnl ?? 0) < 0);
+
+  const winRate = totalTrades
+    ? (winTrades.length / totalTrades) * 100
+    : 0;
+
+  const avgWin = winTrades.length
+    ? winTrades.reduce((a, t) => a + Number(t.pnl ?? 0), 0) / winTrades.length
+    : 0;
+
+  const avgLoss = lossTrades.length
+    ? lossTrades.reduce((a, t) => a + Number(t.pnl ?? 0), 0) / lossTrades.length
+    : 0;
+
+  const exposurePct = equity
+    ? (positionQty * lastPrice) / equity * 100
+    : 0;
+
+  const maxEquity = Math.max(...equityCurve.map(e => e.equity ?? 0), equity);
+  const drawdownPct = maxEquity
+    ? ((equity - maxEquity) / maxEquity) * 100
+    : 0;
+
+  /* ===== INSTITUTIONAL RISK METRICS ===== */
+
+  const returnsSeries = equityCurve.length > 1
+    ? equityCurve.slice(1).map((p, i) => {
+        const prev = equityCurve[i].equity ?? 0;
+        return prev ? (p.equity - prev) / prev : 0;
+      })
+    : [];
+
+  const meanReturn =
+    returnsSeries.length
+      ? returnsSeries.reduce((a, b) => a + b, 0) / returnsSeries.length
+      : 0;
+
+  const volatility =
+    returnsSeries.length > 1
+      ? Math.sqrt(
+          returnsSeries.reduce((a, r) => a + Math.pow(r - meanReturn, 2), 0) /
+            returnsSeries.length
+        )
+      : 0;
+
+  const sharpe =
+    volatility ? (meanReturn / volatility) * Math.sqrt(returnsSeries.length) : 0;
+
+  const profitFactor =
+    avgLoss !== 0 ? Math.abs(avgWin / avgLoss) : 0;
+
+  const expectancy =
+    totalTrades ? netPnl / totalTrades : 0;
+
+  /* Simple risk score 0–100 */
+  const riskScore = Math.min(
+    100,
+    Math.max(
+      0,
+      50 +
+        returnPct * 0.5 -
+        Math.abs(drawdownPct) * 0.7 -
+        volatility * 100
+    )
+  );
+
+  /* Account health indicator */
+  const accountHealth =
+    riskScore > 70
+      ? "Strong"
+      : riskScore > 50
+      ? "Stable"
+      : riskScore > 30
+      ? "Risky"
+      : "Critical";
+
+  /* ================= UI ================= */
+
   return (
-    <div className="space-y-10">
-      <div className="flex justify-between items-start">
-        <div>
-          <h1 className="text-2xl font-bold text-white">
-            {run.symbol} — {run.timeframe}
-          </h1>
+    <div className="space-y-8">
 
-          <p className="text-slate-400 text-sm mt-1">
-            Strategy:{" "}
-            <button
-              onClick={() => navigate(`/algorithms/${run.algorithm_id}`)}
-              className="text-sky-400 hover:text-sky-300 font-medium transition-colors"
-            >
-              {run.algorithm_name ?? "—"}
-            </button>
-          </p>
+      {/* HEADER */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
 
-          <p className="text-slate-500 text-xs mt-1">
-            Started: {run.started_at ?? "—"}
-          </p>
-        </div>
+        <div className="flex flex-col lg:flex-row justify-between gap-6">
 
-        <div className="flex gap-3 items-center">
-          <DetailNavigator ids={allIds} currentId={runId} basePath="/paper" />
-          <StatusBadge status={run.status} />
+          {/* LEFT */}
+          <div className="space-y-2">
+            <h1 className="text-2xl font-bold text-white">
+              {run.symbol}
+              <span className="text-slate-400 ml-3 text-base">
+                {run.timeframe}
+              </span>
+            </h1>
 
-          {isActive && (
-            <button
-              onClick={handleStop}
-              disabled={stopping}
-              className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded text-white"
-            >
-              {stopping ? "Stopping..." : "Stop"}
-            </button>
-          )}
+            <p className="text-slate-500 text-xs">
+              Strategy:
+              <span
+                onClick={() =>
+                  navigate(`/algorithms/${run.algorithm_id}`)
+                }
+                className="ml-2 text-sky-400 hover:text-sky-300 cursor-pointer"
+              >
+                {run.algorithm_name ?? "—"}
+              </span>
+            </p>
 
-          <button
-            onClick={handleDelete}
-            disabled={deleting}
-            className="bg-red-700 hover:bg-red-800 px-4 py-2 rounded text-white"
-          >
-            {deleting ? "Deleting..." : "Delete"}
-          </button>
+            {/* STATUS STRIP */}
+            <div className="flex items-center gap-5 mt-2">
 
-          <div className="text-xs">
-            {socketConnected ? (
-              <span className="text-green-400">● Live</span>
-            ) : (
-              <span className="text-red-400">● Disconnected</span>
+              <div
+                className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                  run.status === "ACTIVE"
+                    ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
+                    : "bg-slate-600/20 text-slate-400 border border-slate-600/40"
+                }`}
+              >
+                {run.status === "ACTIVE" ? "Running" : "Stopped"}
+              </div>
+
+              <StatusIndicator
+                label="Engine"
+                active={run.status === "ACTIVE"}
+                tooltip="Paper engine execution"
+              />
+
+              <StatusIndicator
+                label="Exchange"
+                active={exchangeStreaming}
+                tooltip="Receiving market data stream"
+              />
+
+              <StatusIndicator
+                label="Backend"
+                active={backendConnected}
+                tooltip="Connected to backend WebSocket"
+              />
+            </div>
+          </div>
+
+          {/* RIGHT */}
+          <div className="flex items-start gap-3 flex-wrap">
+            <DetailNavigator
+              ids={allIds}
+              currentId={runId}
+              basePath="/paper"
+            />
+
+            {isRunning && (
+              <Button
+                variant="STOP"
+                size="md"
+                loading={stopping}
+                loadingText="Stopping..."
+                onClick={handleStop}
+              >
+                Stop
+              </Button>
             )}
+
+            <Button
+              variant="DELETE"
+              size="md"
+              loading={deleting}
+              loadingText="Deleting..."
+              onClick={handleDelete}
+            >
+              Delete
+            </Button>
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-slate-800 p-6 rounded-xl border border-slate-700">
-          <div className="text-slate-400 text-sm mb-2">{quoteAsset} Available</div>
-          <div className="text-2xl text-white">{Number(run.quote_balance ?? 0).toFixed(2)}</div>
-        </div>
+      {/* KPI STRIP */}
+      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-4">
 
-        <div className="bg-slate-800 p-6 rounded-xl border border-slate-700">
-          <div className="text-slate-400 text-sm mb-2">{baseAsset} Held</div>
-          <div className="text-2xl text-white">{Number(run.base_balance ?? 0).toFixed(6)}</div>
-        </div>
+        {/* ===== CORE PERFORMANCE ===== */}
 
-        <div className="bg-slate-800 p-6 rounded-xl border border-slate-700">
-          <div className="text-slate-400 text-sm mb-2">Total Equity</div>
-          <div className="text-2xl text-white">{Number(run.equity ?? 0).toFixed(2)}</div>
-        </div>
+        <KpiCard
+          title="Total Equity"
+          value={equity}
+          positive={netPnl >= 0}
+          size="compact"
+          format={(v) => `${v.toFixed(2)} ${quoteAsset}`}
+          sparkline={equityCurve.map(e => e.equity)}
+          tooltip="Current account total value"
+        />
+
+        <KpiCard
+          title="Net PnL"
+          value={netPnl}
+          positive={netPnl >= 0}
+          size="compact"
+          format={(v) => `${v.toFixed(2)} ${quoteAsset}`}
+          sparkline={equityCurve.map(e => e.equity)}
+          tooltip="Profit/loss since session start"
+        />
+
+        <KpiCard
+          title="Return"
+          value={returnPct}
+          positive={returnPct >= 0}
+          size="compact"
+          format={(v) => `${v.toFixed(2)}%`}
+        />
+
+        <KpiCard
+          title="Drawdown"
+          value={drawdownPct}
+          positive={drawdownPct >= 0}
+          size="compact"
+          format={(v) => `${v.toFixed(2)}%`}
+          tooltip="Current drawdown from peak equity"
+        />
+
+        {/* ===== ACCOUNT STRUCTURE ===== */}
+
+        <KpiCard
+          title={`${quoteAsset} Available`}
+          value={Number(run.quote_balance ?? 0)}
+          size="compact"
+          format={(v) => `${v.toFixed(2)} ${quoteAsset}`}
+        />
+
+        <KpiCard
+          title={`${baseAsset} Held`}
+          value={Number(run.base_balance ?? 0)}
+          size="compact"
+          format={(v) => `${v.toFixed(6)} ${baseAsset}`}
+        />
+
+        <KpiCard
+          title="Total Trades"
+          value={totalTrades}
+          size="compact"
+        />
+
+        <KpiCard
+          title="Win Rate"
+          value={winRate}
+          positive={winRate >= 50}
+          size="compact"
+          format={(v) => `${v.toFixed(1)}%`}
+        />
+
+        {/* ===== POSITION ===== */}
+
+        {hasPosition && (
+          <>
+            <KpiCard
+              title="Position"
+              value={positionSide === "LONG" ? 1 : -1}
+              positive={positionSide === "LONG"}
+              size="compact"
+              format={() => positionSide ?? "-"}
+            />
+
+            <KpiCard
+              title="Exposure"
+              value={exposurePct}
+              positive={exposurePct < 50}
+              size="compact"
+              format={(v) => `${v.toFixed(1)}%`}
+              tooltip="Position value as % of total equity"
+            />
+
+            <KpiCard
+              title="Entry"
+              value={entryPrice}
+              size="compact"
+              format={(v) => `${v.toFixed(2)} ${quoteAsset}`}
+            />
+
+            <KpiCard
+              title="Live Price"
+              value={lastPrice}
+              size="compact"
+              format={(v) => `${v.toFixed(2)} ${quoteAsset}`}
+            />
+
+            <KpiCard
+              title="Unrealized PnL"
+              value={unrealizedPnl}
+              positive={unrealizedPnl >= 0}
+              size="compact"
+              format={(v) => `${v.toFixed(2)} ${quoteAsset}`}
+            />
+          </>
+        )}
+
+        {/* ===== TRADE QUALITY ===== */}
+
+        <KpiCard
+          title="Avg Win"
+          value={avgWin}
+          positive={avgWin >= 0}
+          size="compact"
+          format={(v) => `${v.toFixed(2)} ${quoteAsset}`}
+        />
+
+        <KpiCard
+          title="Avg Loss"
+          value={avgLoss}
+          positive={false}
+          size="compact"
+          format={(v) => `${v.toFixed(2)} ${quoteAsset}`}
+        />
+
+        {/* ===== ADVANCED RISK ===== */}
+
+        <KpiCard
+          title="Sharpe"
+          value={sharpe}
+          size="compact"
+          format={(v) => v.toFixed(2)}
+          tooltip="Risk-adjusted return"
+        />
+
+        <KpiCard
+          title="Volatility"
+          value={volatility * 100}
+          size="compact"
+          format={(v) => `${v.toFixed(2)}%`}
+          tooltip="Return variability"
+        />
+
+        <KpiCard
+          title="Profit Factor"
+          value={profitFactor}
+          positive={profitFactor >= 1}
+          size="compact"
+          format={(v) => v.toFixed(2)}
+          tooltip="Avg win / Avg loss"
+        />
+
+        <KpiCard
+          title="Expectancy"
+          value={expectancy}
+          positive={expectancy >= 0}
+          size="compact"
+          format={(v) => `${v.toFixed(2)} ${quoteAsset}`}
+          tooltip="Expected PnL per trade"
+        />
+
+        <KpiCard
+          title="Risk Score"
+          value={riskScore}
+          positive={riskScore >= 50}
+          size="compact"
+          format={(v) => `${v.toFixed(0)}/100`}
+          tooltip="Composite performance risk index"
+        />
+
+        <KpiCard
+          title="Account Health"
+          value={riskScore}
+          positive={riskScore >= 50}
+          size="compact"
+          format={() => accountHealth}
+          tooltip="Overall system state"
+        />
+
       </div>
 
+      {/* CHARTS */}
       <div className="space-y-8">
-        <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 min-w-0">
+        <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
           <h3 className="text-white font-semibold mb-4">Price Chart</h3>
           <CandlestickChart candles={candles} trades={trades} />
         </div>
@@ -292,13 +616,15 @@ export default function PaperRunDetail() {
         </div>
       </div>
 
-      <ListView<PaperTrade>
+      {/* TRADES */}
+      <ListView
         title="Trades"
-        description="Executed trades for this paper session"
+        description="Executed trades"
         columns={tradeColumns}
         data={trades}
-        emptyMessage="No trades generated yet."
+        emptyMessage="No trades yet."
       />
     </div>
   );
 }
+

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { startPaperRun } from "../../services/paper.service";
 import { getAlgorithms } from "../../services/algorithm.service";
+import Button from "../../components/ui/Button";
 
 type FormState = {
   algorithm_id: string;
@@ -199,13 +200,15 @@ export default function StartPaperRun() {
 
         {/* SUBMIT */}
         <div className="flex justify-end pt-6">
-          <button
+          <Button
             type="submit"
-            disabled={loading}
-            className="bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 px-10 py-3 rounded-xl text-white font-semibold shadow-lg transition-all disabled:opacity-50"
+            variant="CREATE"
+            size="lg"
+            loading={loading}
+            loadingText="Starting Session..."
           >
-            {loading ? "Starting Session..." : "Start Paper Trading"}
-          </button>
+            Start Paper Trading
+          </Button>
         </div>
 
       </form>

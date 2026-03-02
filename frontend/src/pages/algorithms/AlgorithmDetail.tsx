@@ -14,6 +14,7 @@ import DetailNavigator from "../../components/navigation/DetailNavigator";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
 import AlgorithmWorkspace from "../../components/algorithms/AlgorithmWorkspace";
+import Button from "../../components/ui/Button";
 
 type Tab = "overview" | "backtests" | "paper";
 
@@ -232,38 +233,44 @@ export default function AlgorithmDetail() {
             />
 
             {isGithub && !editing && (
-              <button
+              <Button
+                variant="WARNING"
+                size="md"
+                loading={saving}
+                loadingText="Refreshing..."
                 onClick={handleRefresh}
-                disabled={saving}
-                className="bg-amber-600 hover:bg-amber-700 px-4 py-2 rounded-xl text-white"
               >
-                {saving ? "Refreshing..." : "Refresh"}
-              </button>
+                Refresh
+              </Button>
             )}
 
             {!editing ? (
-              <button
+              <Button
+                variant="PRIMARY"
+                size="md"
                 onClick={() => setEditing(true)}
-                className="bg-sky-600 hover:bg-sky-700 px-4 py-2 rounded-xl text-white"
               >
                 Edit
-              </button>
+              </Button>
             ) : (
-              <button
+              <Button
+                variant="SUCCESS"
+                size="md"
+                loading={saving}
+                loadingText="Saving..."
                 onClick={handleSave}
-                disabled={saving}
-                className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-xl text-white"
               >
-                {saving ? "Saving..." : "Save"}
-              </button>
+                Save
+              </Button>
             )}
 
-            <button
+            <Button
+              variant="DELETE"
+              size="md"
               onClick={handleDelete}
-              className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-xl text-white"
             >
               Delete
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -271,19 +278,16 @@ export default function AlgorithmDetail() {
       {/* TABS */}
       <div className="flex gap-8 border-b border-slate-800 text-sm">
         {(["overview", "backtests", "paper"] as Tab[]).map((tab) => (
-          <button
+          <Button
             key={tab}
+            variant={activeTab === tab ? "PRIMARY" : "GHOST"}
+            size="sm"
             onClick={() => setActiveTab(tab)}
-            className={`pb-3 transition ${
-              activeTab === tab
-                ? "text-white border-b-2 border-sky-500"
-                : "text-slate-400 hover:text-white"
-            }`}
           >
             {tab === "overview" && "Overview"}
             {tab === "backtests" && `Backtests (${backtests.length})`}
             {tab === "paper" && `Paper Runs (${paperRuns.length})`}
-          </button>
+          </Button>
         ))}
       </div>
 

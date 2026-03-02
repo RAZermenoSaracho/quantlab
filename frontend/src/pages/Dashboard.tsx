@@ -1,22 +1,38 @@
 import { useEffect, useMemo, useState } from "react";
 import BacktestsList from "./backtests/BacktestsList";
+import PaperRunsList from "./paper/PaperRunsList";
 import { getAllBacktests } from "../services/backtest.service";
+import { getAllPaperRuns } from "../services/paper.service";
 import KpiCard from "../components/ui/KpiCard";
-import type { BacktestRun } from "../types/models";
+import Button from "../components/ui/Button";
+import type { BacktestRun, PaperRun } from "../types/models";
+
+type Tab = "backtests" | "paper";
+
+function fmtMoney(x: number, d = 2) {
+  if (!Number.isFinite(x)) return "0.00";
+  return x.toFixed(d);
+}
 
 export default function Dashboard() {
+  const [activeTab, setActiveTab] = useState<Tab>("backtests");
+
   const [backtests, setBacktests] = useState<BacktestRun[]>([]);
+  const [paperRuns, setPaperRuns] = useState<PaperRun[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
       try {
-        const response = await getAllBacktests();
-        const runs = response.backtests || [];
-        setBacktests(runs);
+        const [btRes, prRes] = await Promise.all([
+          getAllBacktests(),
+          getAllPaperRuns(),
+        ]);
+
+        setBacktests(btRes.backtests || []);
+        setPaperRuns(prRes.runs || []);
       } catch (err) {
         console.error(err);
-        setBacktests([]);
       } finally {
         setLoading(false);
       }
@@ -25,146 +41,82 @@ export default function Dashboard() {
     load();
   }, []);
 
-  // =====================================================
-  // FILTER COMPLETED ONLY (real performance stats)
-  // =====================================================
-
   const completed = useMemo(
     () => backtests.filter((bt) => bt.status === "COMPLETED"),
     [backtests]
   );
 
-  const running = useMemo(
-    () => backtests.filter((bt) => bt.status === "RUNNING").length,
-    [backtests]
-  );
-
-  // =====================================================
-  // AGGREGATE METRICS
-  // =====================================================
-
-  const stats = useMemo(() => {
-    if (!completed.length) {
-      return {
-        totalPnL: 0,
-        avgReturn: 0,
-        totalTrades: 0,
-        avgWinRate: 0,
-        avgProfitFactor: 0,
-      };
-    }
-
-    const totalPnL = completed.reduce(
-      (acc, bt) => acc + Number(bt.total_return_usdt || 0),
-      0
-    );
-
-    const avgReturn =
-      completed.reduce(
-        (acc, bt) => acc + Number(bt.total_return_percent || 0),
-        0
-      ) / completed.length;
-
-    const totalTrades = completed.reduce(
-      (acc, bt) => acc + Number(bt.total_trades || 0),
-      0
-    );
-
-    const avgWinRate =
-      completed.reduce(
-        (acc, bt) => acc + Number(bt.win_rate_percent || 0),
-        0
-      ) / completed.length;
-
-    const avgProfitFactor =
-      completed.reduce(
-        (acc, bt) => acc + Number(bt.profit_factor || 0),
-        0
-      ) / completed.length;
-
-    return {
-      totalPnL,
-      avgReturn,
-      totalTrades,
-      avgWinRate,
-      avgProfitFactor,
-    };
+  const totalPnL = useMemo(() => {
+    return completed.reduce((acc, bt) => {
+      const pnl = Number(bt.analysis?.summary?.net_profit ?? 0);
+      return acc + pnl;
+    }, 0);
   }, [completed]);
 
-  // =====================================================
-  // UI
-  // =====================================================
-
   if (loading) {
-    return (
-      <div className="p-6 text-slate-400">
-        Loading dashboard...
-      </div>
-    );
+    return <div className="p-6 text-slate-400">Loading dashboard...</div>;
   }
 
   return (
     <div className="space-y-8">
-      {/* ================= KPI GRID ================= */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+
+      {/* ================= KPI ================= */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+
+        <KpiCard
+          title="Total Backtests"
+          value={backtests.length}
+          size="compact"
+        />
+
+        <KpiCard
+          title="Completed"
+          value={completed.length}
+          size="compact"
+        />
+
+        <KpiCard
+          title="Paper Runs"
+          value={paperRuns.length}
+          size="compact"
+        />
 
         <KpiCard
           title="Total Net PnL"
-          value={`${stats.totalPnL.toFixed(2)} USDT`}
-          positive={stats.totalPnL >= 0}
-        />
-
-        <KpiCard
-          title="Average Return"
-          value={`${stats.avgReturn.toFixed(2)}%`}
-          positive={stats.avgReturn >= 0}
-        />
-
-        <KpiCard
-          title="Total Trades"
-          value={stats.totalTrades.toString()}
-        />
-
-        <KpiCard
-          title="Avg Win Rate"
-          value={`${stats.avgWinRate.toFixed(2)}%`}
-          positive={stats.avgWinRate >= 50}
-        />
-
-        <KpiCard
-          title="Avg Profit Factor"
-          value={stats.avgProfitFactor.toFixed(2)}
-          positive={stats.avgProfitFactor >= 1}
+          value={totalPnL}
+          positive={totalPnL >= 0}
+          format={(v) => `${fmtMoney(v)} USDT`}
+          size="compact"
         />
 
       </div>
 
-      {/* ================= SECONDARY STATS ================= */}
-      <div className="flex justify-between items-center text-sm text-slate-400">
-        <div>
-          Total Backtests:{" "}
-          <span className="text-slate-200 font-medium">
-            {backtests.length}
-          </span>
-        </div>
+      {/* ================= TABS ================= */}
+      <div className="flex gap-4 border-b border-slate-800 pb-3">
 
-        <div>
-          Running:{" "}
-          <span className="text-yellow-400 font-medium">
-            {running}
-          </span>
-        </div>
+        <Button
+          variant={activeTab === "backtests" ? "PRIMARY" : "GHOST"}
+          size="sm"
+          onClick={() => setActiveTab("backtests")}
+        >
+          Backtest Runs
+        </Button>
 
-        <div>
-          Completed:{" "}
-          <span className="text-green-400 font-medium">
-            {completed.length}
-          </span>
-        </div>
+        <Button
+          variant={activeTab === "paper" ? "PRIMARY" : "GHOST"}
+          size="sm"
+          onClick={() => setActiveTab("paper")}
+        >
+          Paper Runs
+        </Button>
+
       </div>
 
-      {/* ================= TABLE ================= */}
-      <BacktestsList />
+      {/* ================= CONTENT ================= */}
+
+      {activeTab === "backtests" && <BacktestsList />}
+      {activeTab === "paper" && <PaperRunsList />}
+
     </div>
   );
 }

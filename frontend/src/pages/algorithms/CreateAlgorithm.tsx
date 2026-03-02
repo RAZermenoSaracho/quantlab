@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createAlgorithm } from "../../services/algorithm.service";
 import AlgorithmWorkspace from "../../components/algorithms/AlgorithmWorkspace";
+import Button from "../../components/ui/Button";
 
 export default function CreateAlgorithm() {
   const navigate = useNavigate();
@@ -113,23 +114,16 @@ export default function CreateAlgorithm() {
 
         {/* SUBMIT BUTTON */}
         <div className="pt-6">
-          <button
+          <Button
             type="submit"
+            variant="CREATE"
+            size="lg"
+            loading={loading}
+            loadingText="Creating Algorithm..."
             disabled={isSubmitDisabled}
-            className="
-              bg-gradient-to-r from-sky-600 to-indigo-600
-              hover:opacity-90
-              transition
-              px-10 py-4
-              rounded-xl
-              text-white
-              font-semibold
-              shadow-lg
-              disabled:opacity-40
-            "
           >
-            {loading ? "Creating Algorithm..." : "Create Algorithm"}
-          </button>
+            Create Algorithm
+          </Button>
         </div>
 
       </form>

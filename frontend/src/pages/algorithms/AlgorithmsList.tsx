@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { getAlgorithms } from "../../services/algorithm.service";
 import type { Algorithm } from "../../types/models";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
+import Button from "../../components/ui/Button";
 
 export default function AlgorithmsList() {
   const [algorithms, setAlgorithms] = useState<Algorithm[]>([]);
@@ -67,12 +68,13 @@ export default function AlgorithmsList() {
         navigate(`/algorithms/${algo.id}`)
       }
       actions={
-        <button
+        <Button
+          variant="CREATE"
+          size="md"
           onClick={() => navigate("/algorithms/new")}
-          className="bg-sky-600 hover:bg-sky-700 px-4 py-2 rounded-xl text-white font-medium"
         >
           + New Algorithm
-        </button>
+        </Button>
       }
     />
   );
