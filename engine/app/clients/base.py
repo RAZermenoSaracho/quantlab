@@ -1,11 +1,11 @@
 from abc import ABC, abstractmethod
-from typing import List, Any, Dict, Optional
+from typing import List, Any, Dict, Optional, Callable, Awaitable
 
 
 class BaseExchangeClient(ABC):
 
     # ==========================================================
-    # MARKET DATA
+    # MARKET DATA (SYNC - Historical / REST)
     # ==========================================================
 
     @abstractmethod
@@ -37,6 +37,30 @@ class BaseExchangeClient(ABC):
         symbol: str,
         limit: int = 100
     ) -> Dict:
+        pass
+
+    # ==========================================================
+    # STREAMING (ASYNC - WebSocket)
+    # ==========================================================
+
+    @abstractmethod
+    async def subscribe_klines(
+        self,
+        symbol: str,
+        timeframe: str,
+        on_message: Callable[[Dict[str, Any]], Awaitable[None]]
+    ) -> None:
+        """
+        Subscribe to live kline stream.
+        Must call on_message(candle_dict) when a candle closes.
+        """
+        pass
+
+    @abstractmethod
+    async def close_stream(self) -> None:
+        """
+        Close any active websocket connections.
+        """
         pass
 
     # ==========================================================

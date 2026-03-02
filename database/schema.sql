@@ -112,15 +112,34 @@ CREATE INDEX idx_backtest_candles_start ON backtest_runs(candles_start_ts);
 
 CREATE TABLE paper_runs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     algorithm_id UUID NOT NULL REFERENCES algorithms(id) ON DELETE CASCADE,
 
+    -- Market info
+    exchange VARCHAR(50) NOT NULL DEFAULT 'binance',
     symbol VARCHAR(20) NOT NULL,
     timeframe VARCHAR(10) NOT NULL,
-    initial_balance NUMERIC(18,8) NOT NULL,
-    current_balance NUMERIC(18,8) NOT NULL,
 
+    -- Fees
+    fee_rate NUMERIC(10,8) NOT NULL DEFAULT 0.001,
+
+    -- Account balances
+    initial_balance NUMERIC(18,8) NOT NULL,
+    current_balance NUMERIC(18,8) NOT NULL, -- legacy compatibility (mirrors equity)
+
+    quote_balance NUMERIC(18,8),   -- e.g. USDT available
+    base_balance NUMERIC(18,8),    -- e.g. BTC held
+    equity NUMERIC(18,8),          -- mark-to-market total value
+    last_price NUMERIC(18,8),      -- last market price received
+
+    -- Position snapshot
+    position JSONB,                -- current open position (if any)
+
+    -- Engine status
     status paper_status DEFAULT 'ACTIVE',
+
+    engine_session_id VARCHAR(100),
 
     started_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
@@ -128,6 +147,8 @@ CREATE TABLE paper_runs (
 
 CREATE INDEX idx_paper_user ON paper_runs(user_id);
 CREATE INDEX idx_paper_algorithm ON paper_runs(algorithm_id);
+CREATE INDEX idx_paper_status ON paper_runs(status);
+CREATE INDEX idx_paper_symbol ON paper_runs(symbol);
 
 -- ==============================
 -- TRADES
@@ -156,11 +177,11 @@ CREATE TABLE trades (
 
     created_at TIMESTAMP DEFAULT NOW(),
 
-    CONSTRAINT fk_trades_backtest
-        FOREIGN KEY (run_id)
-        REFERENCES backtest_runs(id)
-        ON DELETE CASCADE
-        DEFERRABLE INITIALLY DEFERRED
+    -- CONSTRAINT fk_trades_backtest
+    --     FOREIGN KEY (run_id)
+    --     REFERENCES backtest_runs(id)
+    --     ON DELETE CASCADE
+    --     DEFERRABLE INITIALLY DEFERRED
 );
 
 CREATE INDEX idx_trades_run ON trades(run_id);
@@ -191,11 +212,11 @@ CREATE TABLE metrics (
 
     created_at TIMESTAMP DEFAULT NOW(),
 
-    CONSTRAINT fk_metrics_backtest
-        FOREIGN KEY (run_id)
-        REFERENCES backtest_runs(id)
-        ON DELETE CASCADE
-        DEFERRABLE INITIALLY DEFERRED
+    -- CONSTRAINT fk_metrics_backtest
+    --     FOREIGN KEY (run_id)
+    --     REFERENCES backtest_runs(id)
+    --     ON DELETE CASCADE
+    --     DEFERRABLE INITIALLY DEFERRED
 );
 
 CREATE INDEX idx_metrics_run ON metrics(run_id);

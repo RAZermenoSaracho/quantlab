@@ -21,8 +21,8 @@ type Candle = {
 
 type Trade = {
   side: "BUY" | "SELL" | string;
-  opened_at?: string;
-  closed_at?: string;
+  opened_at?: string | null;
+  closed_at?: string | null;
 };
 
 function toUnixSeconds(ts: any): UTCTimestamp | null {

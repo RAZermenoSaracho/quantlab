@@ -1,4 +1,4 @@
-import type { BacktestRun } from "./models";
+import type { BacktestRun, PaperRun, PaperTrade } from "./models";
 
 export interface BacktestsListResponse {
   backtests: BacktestRun[];
@@ -15,4 +15,9 @@ export interface ApiError {
     message: string;
     details?: any;
   };
+}
+
+export interface PaperRunDetailResponse {
+  run: PaperRun;
+  trades: PaperTrade[];
 }

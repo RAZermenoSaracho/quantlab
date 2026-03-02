@@ -2,44 +2,8 @@ import { Request, Response, NextFunction } from "express";
 import { pool } from "../config/db";
 import { runBacktestOnEngine, getEngineProgress } from "../services/backtestEngine.service";
 import { getExchangeById } from "../services/exchangeCatalog.service";
-
-type DbTradeSide = "BUY" | "SELL";
-
-function normalizeTradeSide(trade: any): DbTradeSide {
-  const raw = String(trade?.side ?? "").toUpperCase().trim();
-
-  // Engine might send LONG/SHORT or BUY/SELL
-  if (raw === "LONG" || raw === "BUY") return "BUY";
-  if (raw === "SHORT" || raw === "SELL") return "SELL";
-
-  // fallback heuristic
-  const entry = Number(trade?.entry_price ?? 0);
-  const exit = Number(trade?.exit_price ?? 0);
-
-  if (Number.isFinite(entry) && Number.isFinite(exit)) {
-    return entry < exit ? "BUY" : "SELL";
-  }
-
-  // safest default
-  return "BUY";
-}
-
-function toDateFromEngineTs(ts: any): Date {
-  // Engine can send ms epoch, seconds epoch, or ISO string
-  if (ts == null) return new Date();
-
-  if (typeof ts === "number") {
-    // heuristic: ms epoch usually > 10_000_000_000
-    return ts > 10_000_000_000 ? new Date(ts) : new Date(ts * 1000);
-  }
-
-  const asNum = Number(ts);
-  if (Number.isFinite(asNum)) {
-    return asNum > 10_000_000_000 ? new Date(asNum) : new Date(asNum * 1000);
-  }
-
-  return new Date(String(ts));
-}
+import { toDateFromEngineTs } from "../utils/dateUtils";
+import { normalizeTradeSide } from "../utils/tradeUtils";
 
 /* ==============================
    CREATE

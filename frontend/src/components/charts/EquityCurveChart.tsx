@@ -45,7 +45,7 @@ export default function EquityCurveChart({ equity }: Props) {
       className="w-full"
       style={{
         height: 320,
-        minWidth: 0, // 🔥 MUY IMPORTANTE para flex/grid
+        minWidth: 0,
       }}
     >
       <ResponsiveContainer width="100%" height="100%">
@@ -106,7 +106,7 @@ export default function EquityCurveChart({ equity }: Props) {
             stroke={positive ? "#22c55e" : "#ef4444"}
             strokeWidth={2.5}
             dot={false}
-            isAnimationActive={false} // 🔥 evita glitches en dev
+            isAnimationActive={false}
           />
         </LineChart>
       </ResponsiveContainer>

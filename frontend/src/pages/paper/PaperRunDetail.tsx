@@ -1,7 +1,320 @@
+import { useEffect, useState, useMemo } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import {
+  getPaperRunById,
+  stopPaperRun,
+  deletePaperRun,
+  getAllPaperRuns,
+} from "../../services/paper.service";
+
+import { connectSocket, disconnectSocket } from "../../services/socket.service";
+import DetailNavigator from "../../components/navigation/DetailNavigator";
+import { StatusBadge } from "../../components/ui/StatusBadge";
+import ListView, { type ListColumn } from "../../components/ui/ListView";
+import type { PaperRun, PaperTrade } from "../../types/models";
+import CandlestickChart from "../../components/charts/CandlestickChart";
+import EquityCurveChart from "../../components/charts/EquityCurveChart";
+
+type Candle = {
+  run_id: string;
+  timestamp: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+};
+
+type EquityPoint = {
+  timestamp: number;
+  equity: number;
+};
+
 export default function PaperRunDetail() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+
+  const runId = id ?? "";
+
+  const [run, setRun] = useState<PaperRun | null>(null);
+  const [trades, setTrades] = useState<PaperTrade[]>([]);
+  const [allIds, setAllIds] = useState<string[]>([]);
+  const [stopping, setStopping] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const [candles, setCandles] = useState<Candle[]>([]);
+  const [equityCurve, setEquityCurve] = useState<EquityPoint[]>([]);
+  const [socketConnected, setSocketConnected] = useState(false);
+
+  /* ================= TRADE COLUMNS ================= */
+
+  const tradeColumns: ListColumn<PaperTrade>[] = useMemo(
+    () => [
+      { key: "side", header: "Side", render: (t) => t.side },
+      {
+        key: "quantity",
+        header: "Qty",
+        render: (t) => Number(t.quantity ?? 0).toFixed(4),
+      },
+      {
+        key: "entry",
+        header: "Entry",
+        render: (t) => Number(t.entry_price ?? 0).toFixed(2),
+      },
+      {
+        key: "exit",
+        header: "Exit",
+        render: (t) =>
+          t.exit_price != null
+            ? Number(t.exit_price).toFixed(2)
+            : "-",
+      },
+      {
+        key: "pnl",
+        header: "PnL",
+        render: (t) => {
+          const pnl = Number(t.pnl ?? 0);
+          return (
+            <span
+              className={
+                pnl >= 0
+                  ? "text-green-400 font-semibold"
+                  : "text-red-400 font-semibold"
+              }
+            >
+              {pnl.toFixed(2)}
+            </span>
+          );
+        },
+      },
+    ],
+    []
+  );
+
+  /* ================= LOAD DATA ================= */
+
+  useEffect(() => {
+    if (!runId) return;
+
+    let socket: ReturnType<typeof connectSocket> | null = null;
+
+    async function load() {
+      const [detail, list] = await Promise.all([
+        getPaperRunById(runId),
+        getAllPaperRuns(),
+      ]);
+
+      setRun(detail.run);
+      setTrades(detail.trades ?? []);
+      setAllIds((list.runs ?? []).map((r) => r.id));
+    }
+
+    load();
+
+    socket = connectSocket();
+    socket.emit("join:paper", runId);
+
+    socket.on("connect", () => setSocketConnected(true));
+    socket.on("disconnect", () => setSocketConnected(false));
+
+    socket.on("paper:candle", (candle: Candle) => {
+      console.log("CANDLE RECEIVED:", candle);
+      if (candle.run_id === runId) {
+        setCandles((prev) => {
+          const exists = prev.some(
+            (c) => Number(c.timestamp) === Number(candle.timestamp)
+          );
+
+          if (exists) return prev;
+
+          return [...prev, candle];
+        });
+      }
+    });
+
+    socket.on("paper:update", (data: any) => {
+      if (data.run_id === runId) {
+        setRun((prev) => (prev ? { ...prev, ...data } : prev));
+
+        if (data.equity != null) {
+          setEquityCurve((prev) => [
+            ...prev,
+            {
+              timestamp: Date.now(),
+              equity: Number(data.equity),
+            },
+          ]);
+        }
+      }
+    });
+
+    socket.on("paper:trade", (trade: PaperTrade) => {
+      if (trade.run_id === runId) {
+        setTrades((prev) => [trade, ...prev]);
+      }
+    });
+
+    socket.on("paper:stopped", (data: any) => {
+      if (data.run_id === runId) {
+        setRun((prev) =>
+          prev ? { ...prev, status: "STOPPED" } : prev
+        );
+      }
+    });
+
+    return () => {
+      if (socket) {
+        socket.emit("leave:paper", runId);
+        disconnectSocket();
+      }
+    };
+  }, [runId]);
+
+  /* ================= ACTIONS ================= */
+
+  async function handleStop() {
+    if (!runId) return;
+    try {
+      setStopping(true);
+      await stopPaperRun(runId);
+      setRun((prev) =>
+        prev ? { ...prev, status: "STOPPED" } : prev
+      );
+    } finally {
+      setStopping(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!runId) return;
+    if (!confirm("Delete paper run?")) return;
+    setDeleting(true);
+    await deletePaperRun(runId);
+    setDeleting(false);
+    navigate("/paper");
+  }
+
+  /* ================= GUARDS ================= */
+
+  if (!runId) {
+    return <div className="p-6 text-slate-400">Invalid paper run.</div>;
+  }
+
+  if (!run) {
+    return <div className="p-6 text-slate-400">Loading...</div>;
+  }
+
+  const isActive = run.status === "ACTIVE";
+  const baseAsset = run.symbol.replace("USDT", "");
+  const quoteAsset = "USDT";
+
+  /* ================= UI ================= */
+
   return (
-    <div className="text-white p-6">
-      Paper Run Detail Page
+    <div className="space-y-10">
+
+      {/* HEADER */}
+      <div className="flex justify-between items-start">
+        <div>
+          <h1 className="text-2xl font-bold text-white">
+            {run.symbol} — {run.timeframe}
+          </h1>
+          <p className="text-slate-500 text-xs mt-1">
+            Started: {run.started_at ?? "—"}
+          </p>
+        </div>
+
+        <div className="flex gap-3 items-center">
+          <DetailNavigator
+            ids={allIds}
+            currentId={runId}
+            basePath="/paper"
+          />
+
+          <StatusBadge status={run.status} />
+
+          {isActive && (
+            <button
+              onClick={handleStop}
+              disabled={stopping}
+              className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded text-white"
+            >
+              {stopping ? "Stopping..." : "Stop"}
+            </button>
+          )}
+
+          <button
+            onClick={handleDelete}
+            disabled={deleting}
+            className="bg-red-700 hover:bg-red-800 px-4 py-2 rounded text-white"
+          >
+            {deleting ? "Deleting..." : "Delete"}
+          </button>
+
+          <div className="text-xs">
+            {socketConnected ? (
+              <span className="text-green-400">● Live</span>
+            ) : (
+              <span className="text-red-400">● Disconnected</span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* BALANCES */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="bg-slate-800 p-6 rounded-xl border border-slate-700">
+          <div className="text-slate-400 text-sm mb-2">
+            {quoteAsset} Available
+          </div>
+          <div className="text-2xl text-white">
+            {Number(run.quote_balance ?? 0).toFixed(2)}
+          </div>
+        </div>
+
+        <div className="bg-slate-800 p-6 rounded-xl border border-slate-700">
+          <div className="text-slate-400 text-sm mb-2">
+            {baseAsset} Held
+          </div>
+          <div className="text-2xl text-white">
+            {Number(run.base_balance ?? 0).toFixed(6)}
+          </div>
+        </div>
+
+        <div className="bg-slate-800 p-6 rounded-xl border border-slate-700">
+          <div className="text-slate-400 text-sm mb-2">
+            Total Equity
+          </div>
+          <div className="text-2xl text-white">
+            {Number(run.equity ?? 0).toFixed(2)}
+          </div>
+        </div>
+      </div>
+
+      {/* CHARTS */}
+      <div className="space-y-8">
+        <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
+          <h3 className="text-white font-semibold mb-4">
+            Price Chart
+          </h3>
+          <CandlestickChart candles={candles} trades={trades} />
+        </div>
+
+        <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
+          <h3 className="text-white font-semibold mb-4">
+            Equity Curve
+          </h3>
+          <EquityCurveChart equity={equityCurve} />
+        </div>
+      </div>
+
+      {/* TRADES */}
+      <ListView<PaperTrade>
+        title="Trades"
+        description="Executed trades for this paper session"
+        columns={tradeColumns}
+        data={trades}
+        emptyMessage="No trades generated yet."
+      />
     </div>
   );
 }

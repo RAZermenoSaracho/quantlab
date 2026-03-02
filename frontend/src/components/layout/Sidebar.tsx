@@ -51,7 +51,7 @@ export default function Sidebar() {
         </NavLink>
 
         <NavLink
-          to="/paper-runs"
+          to="/paper"
           className={({ isActive }) =>
             `${linkClasses} ${
               isActive

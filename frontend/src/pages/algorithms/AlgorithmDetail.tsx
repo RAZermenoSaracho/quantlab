@@ -338,9 +338,54 @@ export default function AlgorithmDetail() {
       )}
 
       {activeTab === "paper" && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-slate-400">
-          Paper Runs list coming soon.
-        </div>
+        <ListView
+          title="Paper Runs"
+          description="Live and past simulated trading sessions."
+          columns={[
+            {
+              key: "market",
+              header: "Market",
+              render: (run) => (
+                <div>
+                  <div className="text-white font-medium">
+                    {run.symbol}
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    {run.timeframe} • {run.exchange}
+                  </div>
+                </div>
+              ),
+            },
+            {
+              key: "equity",
+              header: "Equity",
+              render: (run) => {
+                const equity = Number(run.current_balance ?? 0);
+                return (
+                  <span className="text-slate-300">
+                    ${equity.toFixed(2)}
+                  </span>
+                );
+              },
+            },
+            {
+              key: "status",
+              header: "Status",
+              render: (run) => <StatusBadge status={run.status} />,
+            },
+            {
+              key: "started",
+              header: "Started",
+              render: (run) =>
+                run.started_at
+                  ? new Date(run.started_at).toLocaleDateString()
+                  : "—",
+            },
+          ]}
+          data={paperRuns}
+          emptyMessage="No paper runs yet."
+          onRowClick={(run) => navigate(`/paper/${run.id}`)}
+        />
       )}
 
     </div>
