@@ -1,8 +1,8 @@
 // src/services/backtest.service.ts
 
 import api from "./api.service";
-import type { BacktestRun } from "../types/models";
-import type { CreateBacktestDto } from "../types/dto";
+import type { BacktestRun } from "@quantlab/contracts";
+import type { CreateBacktestDto } from "@quantlab/contracts";
 
 /* ==============================
    TYPES

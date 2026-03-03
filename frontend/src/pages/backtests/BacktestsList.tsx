@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getAllBacktests } from "../../services/backtest.service";
-import type { BacktestRun } from "../../types/models";
+import type { BacktestRun } from "@quantlab/contracts";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import Button from "../../components/ui/Button";

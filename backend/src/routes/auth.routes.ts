@@ -4,6 +4,7 @@ import { requireAuth } from "../middleware/auth.middleware";
 import passport from "passport";
 import { env } from "../config/env";
 import jwt, { SignOptions } from "jsonwebtoken";
+import { AuthResponseSchema } from "../../../packages/contracts/dist";
 
 const router = Router();
 
@@ -43,8 +44,15 @@ router.get(
       signOptions
     );
 
+    const response = AuthResponseSchema.parse({
+      user: { id, email },
+      token,
+    });
+
+    const encoded = encodeURIComponent(JSON.stringify(response));
+
     return res.redirect(
-      `${env.FRONTEND_URL}/oauth-success?token=${token}&email=${email}&id=${id}`
+      `${env.FRONTEND_URL}/oauth-success?payload=${encoded}`
     );
   }
 );
@@ -79,8 +87,15 @@ router.get(
       signOptions
     );
 
+    const response = AuthResponseSchema.parse({
+      user: { id, email },
+      token,
+    });
+
+    const encoded = encodeURIComponent(JSON.stringify(response));
+
     return res.redirect(
-      `${env.FRONTEND_URL}/oauth-success?token=${token}&email=${email}&id=${id}`
+      `${env.FRONTEND_URL}/oauth-success?payload=${encoded}`
     );
   }
 );

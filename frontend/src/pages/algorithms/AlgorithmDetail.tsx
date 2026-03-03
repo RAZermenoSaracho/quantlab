@@ -9,7 +9,7 @@ import {
   getAlgorithmRuns,
 } from "../../services/algorithm.service";
 
-import type { Algorithm } from "../../types/models";
+import type { Algorithm } from "@quantlab/contracts";
 import DetailNavigator from "../../components/navigation/DetailNavigator";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import ListView, { type ListColumn } from "../../components/ui/ListView";

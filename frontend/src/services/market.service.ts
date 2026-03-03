@@ -1,5 +1,5 @@
 import api from "./api.service";
-import type { Exchange, Symbol } from "../types/models";
+import type { Exchange, Symbol } from "@quantlab/contracts";
 
 export function getExchanges() {
   return api.get<{ exchanges: Exchange[] }>(

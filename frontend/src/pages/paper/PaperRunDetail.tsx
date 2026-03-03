@@ -9,7 +9,7 @@ import {
 import { connectSocket } from "../../services/socket.service";
 import DetailNavigator from "../../components/navigation/DetailNavigator";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
-import type { PaperRun, PaperTrade } from "../../types/models";
+import type { PaperRun, PaperTrade } from "@quantlab/contracts";
 import CandlestickChart from "../../components/charts/CandlestickChart";
 import EquityCurveChart from "../../components/charts/EquityCurveChart";
 import StatusIndicator from "../../components/paper/StatusIndicator";

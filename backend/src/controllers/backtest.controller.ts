@@ -4,6 +4,7 @@ import { runBacktestOnEngine, getEngineProgress } from "../services/backtestEngi
 import { getExchangeById } from "../services/exchangeCatalog.service";
 import { toDateFromEngineTs } from "../utils/dateUtils";
 import { normalizeTradeSide } from "../utils/tradeUtils";
+import { BacktestDetailResponseSchema, BacktestsListResponseSchema, CreateBacktestSchema } from "@quantlab/contracts";
 
 /* ==============================
    CREATE
@@ -16,49 +17,32 @@ export async function createBacktest(
   const client = await pool.connect();
 
   try {
-    const {
-      algorithm_id,
-      exchange,
-      symbol,
-      timeframe,
-      initial_balance,
-      start_date,
-      end_date,
-      fee_rate
-    } = req.body;
+    const payload = CreateBacktestSchema.parse(req.body);
 
-    if (
-      !algorithm_id ||
-      !exchange ||
-      !symbol ||
-      !timeframe ||
-      !initial_balance ||
-      !start_date ||
-      !end_date
-    ) {
+    if (payload instanceof Error) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    const parsedBalance = Number(initial_balance);
+    const parsedBalance = Number(payload.initial_balance);
     if (!Number.isFinite(parsedBalance) || parsedBalance <= 0) {
       return res.status(400).json({ error: "Invalid initial_balance" });
     }
 
     const userId = req.user!.id;
 
-    const exchangeMeta = getExchangeById(exchange);
+    const exchangeMeta = getExchangeById(payload.exchange);
     if (!exchangeMeta) {
       return res.status(400).json({ error: "Unsupported exchange" });
     }
 
     const finalFeeRate =
-      typeof fee_rate === "number"
-        ? fee_rate
+      typeof payload.fee_rate === "number"
+        ? payload.fee_rate
         : exchangeMeta.default_fee_rate;
 
     const algoResult = await client.query(
       `SELECT code FROM algorithms WHERE id = $1 AND user_id = $2`,
-      [algorithm_id, userId]
+      [payload.algorithm_id, userId]
     );
 
     if (!algoResult.rowCount) {
@@ -77,14 +61,14 @@ export async function createBacktest(
        RETURNING id`,
       [
         userId,
-        algorithm_id,
-        exchange,
+        payload.algorithm_id,
+        payload.exchange,
         finalFeeRate,
-        symbol,
-        timeframe,
+        payload.symbol,
+        payload.timeframe,
         parsedBalance,
-        start_date,
-        end_date
+        payload.start_date,
+        payload.end_date
       ]
     );
 
@@ -96,12 +80,12 @@ export async function createBacktest(
 
     runBacktestWorker(runId, {
       code,
-      exchange,
-      symbol,
-      timeframe,
+      exchange: payload.exchange,
+      symbol: payload.symbol,
+      timeframe: payload.timeframe,
       initial_balance: parsedBalance,
-      start_date,
-      end_date,
+      start_date: payload.start_date,
+      end_date: payload.end_date,
       fee_rate: finalFeeRate
     });
 
@@ -231,7 +215,11 @@ async function runBacktestWorker(runId: string, payload: any) {
 /* ==============================
    GET ONE
 ============================== */
-export async function getBacktestById(req: Request, res: Response, next: NextFunction) {
+export async function getBacktestById(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
   try {
     const { id } = req.params;
     const userId = req.user!.id;
@@ -253,7 +241,7 @@ export async function getBacktestById(req: Request, res: Response, next: NextFun
       return res.status(404).json({ error: "Backtest not found" });
     }
 
-    const run = runResult.rows[0];
+    const rawRun = runResult.rows[0];
 
     const metricsResult = await pool.query(
       `SELECT *
@@ -270,20 +258,65 @@ export async function getBacktestById(req: Request, res: Response, next: NextFun
       [id]
     );
 
-    return res.json({
-      run,
-      metrics: metricsResult.rows[0] || null,
-      analysis: run.analysis || null,
-      trades: tradesResult.rows,
-      equity_curve: run.equity_curve || [],
-      candles: run.candles || [],
-      candles_count: run.candles_count || 0,
-      candles_start_ts: run.candles_start_ts || null,
-      candles_end_ts: run.candles_end_ts || null,
+    const run = {
+      ...rawRun,
 
-      open_positions_at_end: run.open_positions_at_end || 0,
-      had_forced_close: run.had_forced_close || false,
-    });
+      created_at:
+        rawRun.created_at instanceof Date
+          ? rawRun.created_at.toISOString()
+          : rawRun.created_at,
+
+      updated_at:
+        rawRun.updated_at instanceof Date
+          ? rawRun.updated_at.toISOString()
+          : rawRun.updated_at,
+
+      candles_start_ts:
+        rawRun.candles_start_ts != null
+          ? Number(rawRun.candles_start_ts)
+          : null,
+
+      candles_end_ts:
+        rawRun.candles_end_ts != null
+          ? Number(rawRun.candles_end_ts)
+          : null,
+
+      start_date:
+        rawRun.start_date instanceof Date
+          ? rawRun.start_date.toISOString()
+          : rawRun.start_date,
+
+      end_date:
+        rawRun.end_date instanceof Date
+          ? rawRun.end_date.toISOString()
+          : rawRun.end_date,
+
+      fee_rate:
+        rawRun.fee_rate != null
+          ? Number(rawRun.fee_rate)
+          : null,
+
+      initial_balance:
+        rawRun.initial_balance != null
+          ? Number(rawRun.initial_balance)
+          : null,
+    };
+
+    return res.json(
+      BacktestDetailResponseSchema.parse({
+        run,
+        metrics: metricsResult.rows[0] || null,
+        analysis: run.analysis || null,
+        trades: tradesResult.rows,
+        equity_curve: run.equity_curve || [],
+        candles: run.candles || [],
+        candles_count: run.candles_count || 0,
+        candles_start_ts: run.candles_start_ts,
+        candles_end_ts: run.candles_end_ts,
+        open_positions_at_end: run.open_positions_at_end || 0,
+        had_forced_close: run.had_forced_close || false,
+      })
+    );
 
   } catch (err) {
     next(err);
@@ -322,7 +355,35 @@ export async function getAllBacktests(req: Request, res: Response, next: NextFun
       [userId]
     );
 
-    return res.json({ backtests: result.rows });
+    const normalized = result.rows.map((row) => ({
+      ...row,
+
+      total_return_percent:
+        row.total_return_percent != null
+          ? Number(row.total_return_percent)
+          : null,
+
+      total_return_usdt:
+        row.total_return_usdt != null
+          ? Number(row.total_return_usdt)
+          : null,
+
+      total_trades:
+        row.total_trades != null
+          ? Number(row.total_trades)
+          : null,
+
+      created_at:
+        row.created_at instanceof Date
+          ? row.created_at.toISOString()
+          : row.created_at,
+    }));
+
+    return res.json(
+      BacktestsListResponseSchema.parse({
+        backtests: normalized,
+      })
+    );
 
   } catch (err) {
     next(err);

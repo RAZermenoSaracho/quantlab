@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthProvider";
 
@@ -7,20 +7,20 @@ export default function OAuthSuccess() {
   const navigate = useNavigate();
   const { login } = useAuth();
 
-  const hasProcessed = useRef(false);
-
   useEffect(() => {
-    if (hasProcessed.current) return;
+    const payload = params.get("payload");
 
-    const token = params.get("token");
-    const email = params.get("email");
-    const id = params.get("id");
+    if (!payload) {
+      navigate("/login");
+      return;
+    }
 
-    if (token && email && id) {
-      login(token, { id, email });
-      hasProcessed.current = true;
+    try {
+      const parsed = JSON.parse(decodeURIComponent(payload));
+
+      login(parsed.token, parsed.user);
       navigate("/dashboard");
-    } else {
+    } catch {
       navigate("/login");
     }
   }, []);

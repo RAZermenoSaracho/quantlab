@@ -1,9 +1,9 @@
 import api from "./api.service";
-import type { Algorithm } from "../types/models";
+import type { Algorithm } from "@quantlab/contracts";
 import type {
   CreateAlgorithmDto,
   UpdateAlgorithmDto,
-} from "../types/dto";
+} from "@quantlab/contracts";
 
 /* ==============================
    GET ALL

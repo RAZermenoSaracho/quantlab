@@ -1,16 +1,12 @@
 import { createContext, useContext, useState } from "react";
 import type { ReactNode } from "react";
-
-export type User = {
-    id: string;
-    email: string;
-};
+import type { AuthUser } from "@quantlab/contracts";
 
 type AuthContextType = {
-    user: User | null;
+    user: AuthUser | null;
     token: string | null;
     isAuthenticated: boolean;
-    login: (token: string, user: User) => void;
+    login: (token: string, user: AuthUser) => void;
     logout: () => void;
 };
 
@@ -22,14 +18,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.getItem("token")
     );
 
-    const [user, setUser] = useState<User | null>(() => {
+    const [user, setUser] = useState<AuthUser | null>(() => {
         const stored = localStorage.getItem("user");
         return stored ? JSON.parse(stored) : null;
     });
 
     const isAuthenticated = !!token;
 
-    const login = (newToken: string, newUser: User) => {
+    const login = (newToken: string, newUser: AuthUser) => {
         localStorage.setItem("token", newToken);
         localStorage.setItem("user", JSON.stringify(newUser));
 

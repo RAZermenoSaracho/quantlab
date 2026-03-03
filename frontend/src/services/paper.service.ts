@@ -1,6 +1,6 @@
 import api from "./api.service";
-import type { PaperRun } from "../types/models";
-import type { PaperRunDetailResponse } from "../types/api.types";
+import type { PaperRun } from "@quantlab/contracts";
+import type { PaperRunDetailResponse } from "@quantlab/contracts";
 
 export interface StartPaperPayload {
   algorithm_id: string;

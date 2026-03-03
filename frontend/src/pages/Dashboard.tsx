@@ -5,7 +5,7 @@ import { getAllBacktests } from "../services/backtest.service";
 import { getAllPaperRuns } from "../services/paper.service";
 import KpiCard from "../components/ui/KpiCard";
 import Button from "../components/ui/Button";
-import type { BacktestRun, PaperRun } from "../types/models";
+import type { BacktestRun, PaperRun } from "@quantlab/contracts";
 
 type Tab = "backtests" | "paper";
 

@@ -1,36 +1,45 @@
 {
   "compilerOptions": {
-   "typeRoots": ["./node_modules/@types", "./src/types"],
+    "typeRoots": ["./node_modules/@types", "./src/types"],
+
     /* ========================
        Core Settings
     ======================== */
     "target": "ES2020",
     "module": "CommonJS",
     "moduleResolution": "node",
+
     /* ========================
        Project Structure
     ======================== */
     "rootDir": "./src",
     "outDir": "./dist",
+
+    /* ========================
+       NEW (IMPORTANTE)
+    ======================== */
+    "baseUrl": ".",
+    "paths": {
+      "@quantlab/contracts": ["../packages/contracts"]
+    },
+
     /* ========================
        Interop & Compatibility
     ======================== */
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
+
     /* ========================
        Type Checking
     ======================== */
     "strict": true,
     "skipLibCheck": true,
+
     /* ========================
        Developer Experience
     ======================== */
     "sourceMap": true
   },
-  "include": [
-    "src"
-  ],
-  "exclude": [
-    "node_modules"
-  ]
+  "include": ["src"],
+  "exclude": ["node_modules"]
 }

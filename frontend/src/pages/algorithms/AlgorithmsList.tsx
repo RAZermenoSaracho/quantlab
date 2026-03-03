@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getAlgorithms } from "../../services/algorithm.service";
-import type { Algorithm } from "../../types/models";
+import type { Algorithm } from "@quantlab/contracts";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
 import Button from "../../components/ui/Button";
 

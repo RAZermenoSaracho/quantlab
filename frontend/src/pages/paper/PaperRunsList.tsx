@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getAllPaperRuns } from "../../services/paper.service";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
-import type { PaperRun } from "../../types/models";
+import type { PaperRun } from "@quantlab/contracts";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import Button from "../../components/ui/Button";
 
