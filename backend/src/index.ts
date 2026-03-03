@@ -15,6 +15,8 @@ import marketRoutes from "./routes/market.routes";
 import paperRoutes from "./routes/paper.routes";
 
 import { initializeWebsocket } from "./services/websocketManager.service";
+import passport from "passport";
+import "./config/passport";
 
 const app = express();
 
@@ -30,6 +32,7 @@ app.use(
 );
 
 app.use(express.json());
+app.use(passport.initialize());
 
 /* =====================================================
    HEALTH CHECK
