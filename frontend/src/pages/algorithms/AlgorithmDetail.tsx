@@ -1,14 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import {
-  getAlgorithms,
-  getAlgorithmById,
-  deleteAlgorithm,
-  updateAlgorithm,
-  refreshAlgorithmFromGithub,
-  getAlgorithmRuns,
-} from "../../services/algorithm.service";
-
 import type { BacktestRun, PaperRun } from "@quantlab/contracts";
 import DetailNavigator from "../../components/navigation/DetailNavigator";
 import { StatusBadge } from "../../components/ui/StatusBadge";
@@ -16,7 +7,14 @@ import ListView, { type ListColumn } from "../../components/ui/ListView";
 import AlgorithmWorkspace from "../../components/algorithms/AlgorithmWorkspace";
 import Button from "../../components/ui/Button";
 import { formatDateTime } from "../../utils/date";
-import { useApi } from "../../hooks/useApi";
+import {
+  useAlgorithm,
+  useAlgorithmRuns,
+  useAlgorithms,
+  useDeleteAlgorithmMutation,
+  useRefreshAlgorithmMutation,
+  useUpdateAlgorithmMutation,
+} from "../../data/algorithms";
 
 type Tab = "overview" | "backtests" | "paper";
 
@@ -64,45 +62,27 @@ export default function AlgorithmDetail() {
   const [code, setCode] = useState("");
 
   const {
-    data: detailData,
-    loading: detailLoading,
-    error: detailError,
-    setData: setDetailData,
-  } = useApi(
-    async () => {
-      if (!id) {
-        throw new Error("Missing algorithm id");
-      }
+    data: algorithm,
+    loading: algorithmLoading,
+    error: algorithmError,
+  } = useAlgorithm(id ?? "");
+  const {
+    data: algorithms,
+    loading: algorithmsLoading,
+    error: algorithmsError,
+  } = useAlgorithms();
+  const {
+    data: runs,
+    loading: runsLoading,
+    error: runsError,
+  } = useAlgorithmRuns(id ?? "");
+  const updateMutation = useUpdateAlgorithmMutation(id ?? "");
+  const refreshMutation = useRefreshAlgorithmMutation(id ?? "");
+  const deleteMutation = useDeleteAlgorithmMutation();
 
-      const [algorithm, list, runs] = await Promise.all([
-        getAlgorithmById(id),
-        getAlgorithms(),
-        getAlgorithmRuns(id),
-      ]);
-
-      return {
-        algorithm,
-        allIds: list.algorithms.map((item) => item.id),
-        runs,
-      };
-    },
-    [id],
-    {
-      enabled: Boolean(id),
-      fallbackMessage: "Failed to load algorithm",
-    }
-  );
-
-  const algorithm = detailData?.algorithm ?? null;
-  const allIds = detailData?.allIds ?? [];
-  const backtests = useMemo(
-    () => detailData?.runs.backtests ?? [],
-    [detailData]
-  );
-  const paperRuns = useMemo(
-    () => detailData?.runs.paperRuns ?? [],
-    [detailData]
-  );
+  const allIds = useMemo(() => algorithms ?? [], [algorithms]).map((item) => item.id);
+  const backtests = useMemo(() => runs?.backtests ?? [], [runs]);
+  const paperRuns = useMemo(() => runs?.paperRuns ?? [], [runs]);
 
   useEffect(() => {
     if (!algorithm) {
@@ -114,7 +94,8 @@ export default function AlgorithmDetail() {
     setCode(algorithm.code);
   }, [algorithm]);
 
-  const error = actionError || detailError;
+  const detailLoading = algorithmLoading || algorithmsLoading || runsLoading;
+  const error = actionError || algorithmError || algorithmsError || runsError;
 
   if (detailLoading) {
     return (
@@ -147,20 +128,11 @@ export default function AlgorithmDetail() {
     setActionError(null);
 
     try {
-      const updated = await updateAlgorithm(id, {
+      await updateMutation.mutate({
         name,
         notes_html: notesHtml,
         code,
       });
-
-      setDetailData((current) =>
-        current
-          ? {
-              ...current,
-              algorithm: updated,
-            }
-          : current
-      );
       setEditing(false);
     } catch (err: unknown) {
       setActionError(getErrorMessage(err, "Failed to save algorithm"));
@@ -178,15 +150,7 @@ export default function AlgorithmDetail() {
     setActionError(null);
 
     try {
-      const updated = await refreshAlgorithmFromGithub(id);
-      setDetailData((current) =>
-        current
-          ? {
-              ...current,
-              algorithm: updated,
-            }
-          : current
-      );
+      const updated = await refreshMutation.mutate(undefined);
       setCode(updated.code);
     } catch (err: unknown) {
       setActionError(getErrorMessage(err, "Failed to refresh algorithm"));
@@ -200,7 +164,7 @@ export default function AlgorithmDetail() {
       return;
     }
 
-    await deleteAlgorithm(id);
+    await deleteMutation.mutate(id);
 
     const index = allIds.indexOf(id);
     const nextId =

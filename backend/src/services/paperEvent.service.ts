@@ -1,6 +1,10 @@
 import { pool } from "../config/db";
 import { emitPaperEvent } from "./websocketManager.service";
-import { normalizeTradeSide } from "../utils/tradeUtils";
+import {
+  calculateTradePnl,
+  calculateTradePnlPercent,
+  normalizeTradeSide,
+} from "../utils/tradeUtils";
 import { toDateFromEngineTs, toIsoOrNull } from "../utils/dateUtils";
 
 import {
@@ -91,13 +95,15 @@ async function handleTradeEvent(
     const entryPrice = trade.entry_price;
     const exitPrice = trade.exit_price ?? null;
     const quantity = trade.quantity;
-    const pnl = trade.pnl ?? 0;
+    const pnl =
+      trade.pnl ??
+      (exitPrice != null
+        ? calculateTradePnl(dbSide, entryPrice, exitPrice, quantity)
+        : 0);
 
     const computedPnlPercent =
       trade.pnl_percent ??
-      (entryPrice
-        ? (pnl / (entryPrice * quantity)) * 100
-        : 0);
+      calculateTradePnlPercent(pnl, entryPrice, quantity);
 
     const openedAt = trade.opened_at
       ? toDateFromEngineTs(trade.opened_at)
@@ -105,28 +111,70 @@ async function handleTradeEvent(
 
     const closedAt = trade.closed_at
       ? toDateFromEngineTs(trade.closed_at)
-      : new Date();
+      : null;
 
     const forcedClose = trade.forced_close === true;
-
-    await client.query(
-      `INSERT INTO trades
-       (run_id, run_type, side, entry_price, exit_price,
-        quantity, pnl, pnl_percent, opened_at, closed_at, forced_close)
-       VALUES ($1,'PAPER',$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-      [
-        runId,
-        dbSide,
-        entryPrice,
-        exitPrice,
-        quantity,
-        pnl,
-        computedPnlPercent,
-        openedAt,
-        closedAt,
-        forcedClose,
-      ]
+    const existingTradeResult = await client.query<{ id: string }>(
+      `
+      SELECT id
+      FROM trades
+      WHERE run_id = $1
+        AND run_type = 'PAPER'
+        AND opened_at = $2
+      ORDER BY created_at DESC
+      LIMIT 1
+      `,
+      [runId, openedAt]
     );
+
+    const existingTrade = existingTradeResult.rows[0];
+
+    if (existingTrade) {
+      await client.query(
+        `
+        UPDATE trades
+        SET side = $1,
+            entry_price = $2,
+            exit_price = $3,
+            quantity = $4,
+            pnl = $5,
+            pnl_percent = $6,
+            closed_at = $7,
+            forced_close = $8
+        WHERE id = $9
+        `,
+        [
+          dbSide,
+          entryPrice,
+          exitPrice,
+          quantity,
+          pnl,
+          computedPnlPercent,
+          closedAt,
+          forcedClose,
+          existingTrade.id,
+        ]
+      );
+    } else {
+      await client.query(
+        `INSERT INTO trades
+         (run_id, run_type, side, entry_price, exit_price,
+          quantity, pnl, pnl_percent, opened_at, closed_at, forced_close)
+         VALUES ($1,'PAPER',$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [
+          runId,
+          dbSide,
+          entryPrice,
+          exitPrice,
+          quantity,
+          pnl,
+          computedPnlPercent,
+          openedAt,
+          closedAt,
+          forcedClose,
+        ]
+      );
+    }
 
     await client.query("COMMIT");
 

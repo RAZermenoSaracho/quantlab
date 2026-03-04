@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import BacktestsList from "./backtests/BacktestsList";
 import PaperRunsList from "./paper/PaperRunsList";
-import { getAllBacktests } from "../services/backtest.service";
-import { getAllPaperRuns } from "../services/paper.service";
 import KpiCard from "../components/ui/KpiCard";
 import Button from "../components/ui/Button";
 import type { BacktestRun, PaperRun } from "@quantlab/contracts";
+import { useBacktests } from "../data/backtests";
+import { usePaperRuns } from "../data/paper";
 
 type Tab = "backtests" | "paper";
 
@@ -16,30 +16,11 @@ function fmtMoney(x: number, d = 2) {
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<Tab>("backtests");
-
-  const [backtests, setBacktests] = useState<BacktestRun[]>([]);
-  const [paperRuns, setPaperRuns] = useState<PaperRun[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    async function load() {
-      try {
-        const [btRes, prRes] = await Promise.all([
-          getAllBacktests(),
-          getAllPaperRuns(),
-        ]);
-
-        setBacktests(btRes.backtests || []);
-        setPaperRuns(prRes.runs || []);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    load();
-  }, []);
+  const { data: backtestsData, loading: backtestsLoading } = useBacktests();
+  const { data: paperRunsData, loading: paperRunsLoading } = usePaperRuns();
+  const backtests: BacktestRun[] = backtestsData ?? [];
+  const paperRuns: PaperRun[] = paperRunsData ?? [];
+  const loading = backtestsLoading || paperRunsLoading;
 
   const completed = useMemo(
     () => backtests.filter((bt) => bt.status === "COMPLETED"),

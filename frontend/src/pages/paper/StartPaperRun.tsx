@@ -1,12 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { startPaperRun } from "../../services/paper.service";
-import { getAlgorithms } from "../../services/algorithm.service";
-import {
-  getExchanges,
-  getSymbols,
-  getDefaultFeeRate,
-} from "../../services/market.service";
 import Button from "../../components/ui/Button";
 import FormCard from "../../components/ui/FormCard";
 import Field from "../../components/ui/Field";
@@ -17,7 +10,13 @@ import type {
   StartPaperRunRequest,
   Symbol,
 } from "@quantlab/contracts";
-import { useApi } from "../../hooks/useApi";
+import { useAlgorithms } from "../../data/algorithms";
+import { useStartPaperRunMutation } from "../../data/paper";
+import {
+  useDefaultFeeRate,
+  useExchanges,
+  useSymbols,
+} from "../../data/market";
 
 export default function StartPaperRun() {
 
@@ -37,31 +36,21 @@ export default function StartPaperRun() {
     initial_balance: 1000,
   });
 
-  const { data: algorithmsData } = useApi(getAlgorithms, [], {
-    fallbackMessage: "Failed to load algorithms",
-  });
-  const { data: exchangesData } = useApi(getExchanges, [], {
-    fallbackMessage: "Failed to load exchanges",
-  });
-  const { data: symbolsData } = useApi(
-    () => getSymbols(form.exchange, debouncedSymbolQuery),
-    [form.exchange, debouncedSymbolQuery],
-    {
-      enabled: Boolean(debouncedSymbolQuery),
-      initialData: { symbols: [] },
-      fallbackMessage: "Failed to load symbols",
-    }
-  );
+  const startMutation = useStartPaperRunMutation();
+  const { data: algorithmsData } = useAlgorithms();
+  const { data: exchangesData } = useExchanges();
+  const { data: symbolsData } = useSymbols(form.exchange, debouncedSymbolQuery);
+  const { data: feeRateData } = useDefaultFeeRate(form.exchange);
   const algorithms = useMemo<Algorithm[]>(
-    () => algorithmsData?.algorithms ?? [],
+    () => algorithmsData ?? [],
     [algorithmsData]
   );
   const exchanges = useMemo<Exchange[]>(
-    () => exchangesData?.exchanges ?? [],
+    () => exchangesData ?? [],
     [exchangesData]
   );
   const symbols = useMemo<Symbol[]>(
-    () => symbolsData?.symbols ?? [],
+    () => symbolsData ?? [],
     [symbolsData]
   );
 
@@ -86,22 +75,13 @@ export default function StartPaperRun() {
 
   useEffect(() => {
 
-    async function loadFee() {
-
-      if (!form.exchange) return;
-
-      const data = await getDefaultFeeRate(form.exchange);
-
+    if (feeRateData) {
       setForm((prev) => ({
         ...prev,
-        fee_rate: data.default_fee_rate,
+        fee_rate: feeRateData.default_fee_rate,
       }));
-
     }
-
-    loadFee();
-
-  }, [form.exchange]);
+  }, [feeRateData]);
 
   /* =====================================
      Submit
@@ -124,7 +104,7 @@ export default function StartPaperRun() {
 
       setLoading(true);
 
-      const res = await startPaperRun(form);
+      const res = await startMutation.mutate(form);
 
       navigate(`/paper/${res.run_id}`);
 

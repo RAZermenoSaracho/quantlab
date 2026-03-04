@@ -1,0 +1,276 @@
+import type {
+  BacktestProgressEvent,
+  BacktestRun,
+  BacktestStatusResponse,
+  PaperRun,
+  PaperRunDetailResponse,
+  PaperRunErrorEvent,
+  PaperRunStatusEvent,
+  PaperRunUpdateEvent,
+  PaperTick,
+  PaperTrade,
+  TradeExecution,
+} from "@quantlab/contracts";
+import {
+  BACKTESTS,
+  PAPER_RUNS,
+  backtestStatusKey,
+  paperRunKey,
+} from "./keys";
+import { updateFromEvent, updateQuery } from "./queryClient";
+
+let bindingsRegistered = false;
+
+function getTradeIdentity(payload: TradeExecution): string {
+  return payload.opened_at ?? payload.closed_at ?? new Date().toISOString();
+}
+
+function buildPaperTrade(payload: TradeExecution): PaperTrade {
+  return {
+    id: `${payload.run_id}:${getTradeIdentity(payload)}`,
+    run_id: payload.run_id,
+    run_type: "PAPER",
+    side: payload.side,
+    entry_price: payload.entry_price,
+    exit_price: payload.exit_price ?? null,
+    quantity: payload.quantity,
+    pnl: payload.pnl ?? null,
+    pnl_percent: payload.pnl_percent ?? null,
+    opened_at: payload.opened_at ?? null,
+    closed_at: payload.closed_at ?? null,
+    created_at: payload.closed_at ?? payload.opened_at ?? null,
+    forced_close: payload.forced_close,
+  };
+}
+
+function findExistingTradeIndex(
+  trades: readonly PaperTrade[],
+  payload: TradeExecution
+): number {
+  if (payload.opened_at) {
+    const tradeId = `${payload.run_id}:${payload.opened_at}`;
+    return trades.findIndex((trade) => trade.id === tradeId);
+  }
+
+  return trades.findIndex(
+    (trade) =>
+      trade.run_id === payload.run_id &&
+      trade.closed_at == null &&
+      trade.side === payload.side &&
+      trade.entry_price === payload.entry_price &&
+      trade.quantity === payload.quantity
+  );
+}
+
+function mergePaperTrade(
+  existingTrade: PaperTrade,
+  payload: TradeExecution
+): PaperTrade {
+  return {
+    ...existingTrade,
+    side: payload.side,
+    entry_price: payload.entry_price,
+    exit_price: payload.exit_price ?? existingTrade.exit_price ?? null,
+    quantity: payload.quantity,
+    pnl: payload.pnl ?? existingTrade.pnl ?? null,
+    pnl_percent: payload.pnl_percent ?? existingTrade.pnl_percent ?? null,
+    opened_at: payload.opened_at ?? existingTrade.opened_at ?? null,
+    closed_at: payload.closed_at ?? existingTrade.closed_at ?? null,
+    created_at:
+      existingTrade.created_at ??
+      payload.closed_at ??
+      payload.opened_at ??
+      null,
+    forced_close: payload.forced_close ?? existingTrade.forced_close,
+  };
+}
+
+function updatePaperRunList(
+  runId: string,
+  updater: (run: PaperRun) => PaperRun
+) {
+  updateQuery<PaperRun[]>(PAPER_RUNS, (current) => {
+    if (!current?.data) {
+      return current;
+    }
+
+    return {
+      ...current,
+      data: current.data.map((run) => (run.id === runId ? updater(run) : run)),
+    };
+  });
+}
+
+function updatePaperRunDetail(
+  runId: string,
+  updater: (detail: PaperRunDetailResponse) => PaperRunDetailResponse
+) {
+  updateQuery<PaperRunDetailResponse>(paperRunKey(runId), (current) => {
+    if (!current?.data) {
+      return current;
+    }
+
+    return {
+      ...current,
+      data: updater(current.data),
+    };
+  });
+}
+
+function applyPaperRunUpdate(payload: PaperRunUpdateEvent) {
+  updatePaperRunList(payload.run_id, (run) => ({
+    ...run,
+    quote_balance: payload.quote_balance ?? run.quote_balance,
+    base_balance: payload.base_balance ?? run.base_balance,
+    equity: payload.equity ?? run.equity,
+    last_price: payload.last_price ?? run.last_price,
+    position: payload.position ?? run.position,
+    updated_at: new Date().toISOString(),
+  }));
+
+  updatePaperRunDetail(payload.run_id, (detail) => ({
+    ...detail,
+    run: {
+      ...detail.run,
+      quote_balance: payload.quote_balance ?? detail.run.quote_balance,
+      base_balance: payload.base_balance ?? detail.run.base_balance,
+      equity: payload.equity ?? detail.run.equity,
+      last_price: payload.last_price ?? detail.run.last_price,
+      position: payload.position ?? detail.run.position,
+      updated_at: new Date().toISOString(),
+    },
+  }));
+}
+
+function applyPaperRunStatus(payload: PaperRunStatusEvent) {
+  updatePaperRunList(payload.run_id, (run) => ({
+    ...run,
+    status: payload.status,
+    updated_at: new Date().toISOString(),
+  }));
+
+  updatePaperRunDetail(payload.run_id, (detail) => ({
+    ...detail,
+    run: {
+      ...detail.run,
+      status: payload.status,
+      updated_at: new Date().toISOString(),
+    },
+  }));
+}
+
+function applyPaperRunError(payload: PaperRunErrorEvent) {
+  updatePaperRunList(payload.run_id, (run) => ({
+    ...run,
+    status: "STOPPED",
+    updated_at: new Date().toISOString(),
+  }));
+
+  updatePaperRunDetail(payload.run_id, (detail) => ({
+    ...detail,
+    run: {
+      ...detail.run,
+      status: "STOPPED",
+      updated_at: new Date().toISOString(),
+    },
+  }));
+}
+
+function applyPaperTick(payload: PaperTick) {
+  updatePaperRunList(payload.run_id, (run) => ({
+    ...run,
+    last_price: payload.close,
+    updated_at: new Date().toISOString(),
+  }));
+
+  updatePaperRunDetail(payload.run_id, (detail) => ({
+    ...detail,
+    run: {
+      ...detail.run,
+      last_price: payload.close,
+      updated_at: new Date().toISOString(),
+    },
+  }));
+}
+
+function applyTradeExecution(payload: TradeExecution) {
+  updatePaperRunDetail(payload.run_id, (detail) => {
+    const existingIndex = findExistingTradeIndex(detail.trades, payload);
+
+    if (existingIndex >= 0) {
+      const nextTrades = [...detail.trades];
+      nextTrades[existingIndex] = mergePaperTrade(
+        nextTrades[existingIndex],
+        payload
+      );
+
+      return {
+        ...detail,
+        trades: nextTrades,
+      };
+    }
+
+    const trade = buildPaperTrade(payload);
+
+    return {
+      ...detail,
+      trades: [trade, ...detail.trades],
+    };
+  });
+}
+
+function applyBacktestProgress(payload: BacktestProgressEvent) {
+  updateQuery<BacktestStatusResponse>(
+    backtestStatusKey(payload.run_id),
+    (current) => {
+      const previous = current ?? {
+        data: null,
+        loading: false,
+        error: null,
+      };
+
+      return {
+        ...previous,
+        data: {
+          status: payload.status,
+          progress: payload.progress,
+        },
+        loading: false,
+        error: null,
+      };
+    }
+  );
+
+  updateQuery<BacktestRun[]>(BACKTESTS, (current) => {
+    if (!current?.data) {
+      return current;
+    }
+
+    return {
+      ...current,
+      data: current.data.map((run) =>
+        run.id === payload.run_id
+          ? {
+              ...run,
+              status: payload.status,
+            }
+          : run
+      ),
+    };
+  });
+}
+
+export function registerEventBindings() {
+  if (bindingsRegistered) {
+    return;
+  }
+
+  bindingsRegistered = true;
+
+  updateFromEvent("paper_tick", applyPaperTick);
+  updateFromEvent("trade_execution", applyTradeExecution);
+  updateFromEvent("paper_run_update", applyPaperRunUpdate);
+  updateFromEvent("paper_run_status", applyPaperRunStatus);
+  updateFromEvent("paper_run_error", applyPaperRunError);
+  updateFromEvent("backtest_progress", applyBacktestProgress);
+}

@@ -1,20 +1,21 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { getAlgorithms } from "../../services/algorithm.service";
-import { createBacktest, getBacktestStatus } from "../../services/backtest.service";
-import {
-  getExchanges,
-  getSymbols,
-  getDefaultFeeRate,
-} from "../../services/market.service";
 import DateSection from "../../components/backtests/DateSection";
 import ProgressBar from "../../components/ui/ProgressBar";
 import Button from "../../components/ui/Button";
 import type {
   CreateBacktestRequest,
 } from "@quantlab/contracts";
-import { useApi } from "../../hooks/useApi";
-import { usePolling } from "../../hooks/usePolling";
+import {
+  useBacktestStatus,
+  useCreateBacktestMutation,
+} from "../../data/backtests";
+import { useAlgorithms } from "../../data/algorithms";
+import {
+  useDefaultFeeRate,
+  useExchanges,
+  useSymbols,
+} from "../../data/market";
 
 export default function CreateBacktest() {
   const navigate = useNavigate();
@@ -40,34 +41,15 @@ export default function CreateBacktest() {
   const [isRunning, setIsRunning] = useState(false);
 
   const [runId, setRunId] = useState<string | null>(null);
-
-  const { data: algorithmsData } = useApi(getAlgorithms, [], {
-    fallbackMessage: "Failed to load algorithms",
-  });
-  const { data: exchangesData } = useApi(getExchanges, [], {
-    fallbackMessage: "Failed to load exchanges",
-  });
-  const { data: symbolsData } = useApi(
-    () => getSymbols(form.exchange, debouncedSymbolQuery),
-    [form.exchange, debouncedSymbolQuery],
-    {
-      enabled: Boolean(debouncedSymbolQuery),
-      initialData: { symbols: [] },
-      fallbackMessage: "Failed to load symbols",
-    }
-  );
-  const algorithms = useMemo(
-    () => algorithmsData?.algorithms ?? [],
-    [algorithmsData]
-  );
-  const exchanges = useMemo(
-    () => exchangesData?.exchanges ?? [],
-    [exchangesData]
-  );
-  const symbols = useMemo(
-    () => symbolsData?.symbols ?? [],
-    [symbolsData]
-  );
+  const createMutation = useCreateBacktestMutation();
+  const { data: algorithmsData } = useAlgorithms();
+  const { data: exchangesData } = useExchanges();
+  const { data: symbolsData } = useSymbols(form.exchange, debouncedSymbolQuery);
+  const { data: feeRateData } = useDefaultFeeRate(form.exchange);
+  const statusQuery = useBacktestStatus(runId ?? "");
+  const algorithms = useMemo(() => algorithmsData ?? [], [algorithmsData]);
+  const exchanges = useMemo(() => exchangesData ?? [], [exchangesData]);
+  const symbols = useMemo(() => symbolsData ?? [], [symbolsData]);
 
   /* =====================================
      Load default fee when exchange changes
@@ -88,55 +70,39 @@ export default function CreateBacktest() {
   }, [symbolQuery]);
 
   useEffect(() => {
-    async function loadFee() {
-      if (!form.exchange) return;
-      const data = await getDefaultFeeRate(form.exchange);
-
+    if (feeRateData) {
       setForm((prev) => ({
         ...prev,
-        fee_rate: data.default_fee_rate,
+        fee_rate: feeRateData.default_fee_rate,
       }));
     }
+  }, [feeRateData]);
 
-    loadFee();
-  }, [form.exchange]);
+  useEffect(() => {
+    const statusData = statusQuery.data;
+    if (!runId || !statusData) {
+      return;
+    }
 
-  usePolling(
-    async () => {
-      if (!runId) {
-        return;
-      }
+    const newProgress = statusData.progress ?? 0;
+    setProgress(newProgress);
 
-      try {
-        const statusData = await getBacktestStatus(runId);
-        const newProgress = statusData.progress ?? 0;
-        setProgress(newProgress);
+    if (statusData.status === "COMPLETED") {
+      setProgress(100);
+      setRunId(null);
 
-        if (statusData.status === "COMPLETED") {
-          setProgress(100);
-          setRunId(null);
+      setTimeout(() => {
+        navigate(`/backtests/${runId}`);
+      }, 500);
+      return;
+    }
 
-          setTimeout(() => {
-            navigate(`/backtests/${runId}`);
-          }, 500);
-        }
-
-        if (statusData.status === "FAILED") {
-          setRunId(null);
-          setIsRunning(false);
-          setError("Backtest failed.");
-        }
-
-      } catch (err) {
-        console.error("❌ Polling error:", err);
-        setRunId(null);
-        setIsRunning(false);
-        setError("Failed to fetch progress.");
-      }
-    },
-    500,
-    Boolean(runId)
-  );
+    if (statusData.status === "FAILED") {
+      setRunId(null);
+      setIsRunning(false);
+      setError("Backtest failed.");
+    }
+  }, [navigate, runId, statusQuery.data]);
 
   /* =====================================
      Submit
@@ -162,7 +128,7 @@ export default function CreateBacktest() {
       setIsRunning(true);
       setProgress(0);
 
-      const result = await createBacktest(form);
+      const result = await createMutation.mutate(form);
       const newRunId = result.run_id;
 
       setRunId(newRunId);

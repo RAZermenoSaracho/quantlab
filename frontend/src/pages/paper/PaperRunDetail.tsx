@@ -1,23 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import {
-  deletePaperRun,
-  getAllPaperRuns,
-  getPaperRunById,
-  stopPaperRun,
-} from "../../services/paper.service";
 import DetailNavigator from "../../components/navigation/DetailNavigator";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
 import type {
   Candle,
   EquityPoint,
-  PaperRun,
   PaperTrade,
-  PaperRunErrorEvent,
-  PaperRunStatusEvent,
   PaperRunUpdateEvent,
   PaperTick,
-  TradeExecution,
 } from "@quantlab/contracts";
 import CandlestickChart from "../../components/charts/CandlestickChart";
 import EquityCurveChart from "../../components/charts/EquityCurveChart";
@@ -25,17 +15,19 @@ import StatusIndicator from "../../components/paper/StatusIndicator";
 import Button from "../../components/ui/Button";
 import KpiCard from "../../components/ui/KpiCard";
 import { formatDateTime } from "../../utils/date";
-import { useApi } from "../../hooks/useApi";
 import { usePaperRunEvents } from "../../hooks/usePaperRunEvents";
+import {
+  useDeletePaperRunMutation,
+  usePaperRun,
+  usePaperRuns,
+  useStopPaperRunMutation,
+} from "../../data/paper";
 
 export default function PaperRunDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const runId = id ?? "";
 
-  const [run, setRun] = useState<PaperRun | null>(null);
-  const [trades, setTrades] = useState<PaperTrade[]>([]);
-  const [allIds, setAllIds] = useState<string[]>([]);
   const [stopping, setStopping] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -43,28 +35,36 @@ export default function PaperRunDetail() {
   const [equityCurve, setEquityCurve] = useState<EquityPoint[]>([]);
   const [exchangeStreaming, setExchangeStreaming] = useState(false);
 
-  const { data: initialData, error: loadError } = useApi(
-    async () => {
-      if (!runId) {
-        throw new Error("Invalid run.");
-      }
+  const { data: initialData, error: detailError } = usePaperRun(runId);
+  const { data: runs, error: runsError } = usePaperRuns();
+  const stopMutation = useStopPaperRunMutation();
+  const deleteMutation = useDeletePaperRunMutation();
+  const run = initialData?.run ?? null;
+  const trades = initialData?.trades ?? [];
+  const sortedTrades = useMemo(
+    () =>
+      [...trades].sort((left, right) => {
+        const leftTime = Date.parse(
+          left.opened_at ?? left.closed_at ?? left.created_at ?? ""
+        );
+        const rightTime = Date.parse(
+          right.opened_at ?? right.closed_at ?? right.created_at ?? ""
+        );
 
-      const [detail, list] = await Promise.all([
-        getPaperRunById(runId),
-        getAllPaperRuns(),
-      ]);
-
-      return {
-        detail,
-        allIds: list.runs.map((item) => item.id),
-      };
-    },
-    [runId],
-    {
-      enabled: Boolean(runId),
-      fallbackMessage: "Failed to load paper run",
-    }
+        return (
+          (Number.isFinite(rightTime) ? rightTime : 0) -
+          (Number.isFinite(leftTime) ? leftTime : 0)
+        );
+      }),
+    [trades]
   );
+  const allIds = useMemo(() => (runs ?? []).map((item) => item.id), [runs]);
+
+  useEffect(() => {
+    setCandles([]);
+    setEquityCurve([]);
+    setExchangeStreaming(false);
+  }, [runId]);
 
   /* ================= TRADE TABLE ================= */
 
@@ -160,22 +160,22 @@ export default function PaperRunDetail() {
   );
 
   useEffect(() => {
-    if (!initialData) {
+    if (!run) {
       return;
     }
 
-    setRun(initialData.detail.run);
-    setTrades(initialData.detail.trades);
-    setAllIds(initialData.allIds);
-
     const seedEquity = Number(
-      initialData.detail.run.equity ?? initialData.detail.run.quote_balance ?? 0
+      run.equity ?? run.quote_balance ?? 0
     );
 
     if (Number.isFinite(seedEquity)) {
-      setEquityCurve([{ timestamp: Date.now(), equity: seedEquity }]);
+      setEquityCurve((current) =>
+        current.length > 0
+          ? current
+          : [{ timestamp: Date.now(), equity: seedEquity }]
+      );
     }
-  }, [initialData]);
+  }, [run?.id]);
 
   const { backendConnected } = usePaperRunEvents(runId, {
     onTick: (candle: PaperTick) => {
@@ -199,8 +199,6 @@ export default function PaperRunDetail() {
       });
     },
     onRunUpdate: (data: PaperRunUpdateEvent) => {
-      setRun((prev) => (prev ? { ...prev, ...data } : prev));
-
       if (data.equity != null) {
         const eq = Number(data.equity);
         if (Number.isFinite(eq)) {
@@ -211,31 +209,6 @@ export default function PaperRunDetail() {
         }
       }
     },
-    onTradeExecution: (trade: TradeExecution) => {
-      const nextTrade: PaperTrade = {
-        id: `${trade.run_id}:${trade.opened_at ?? Date.now()}`,
-        run_id: trade.run_id,
-        run_type: "PAPER",
-        side: trade.side,
-        entry_price: trade.entry_price,
-        exit_price: trade.exit_price ?? null,
-        quantity: trade.quantity,
-        pnl: trade.pnl ?? null,
-        pnl_percent: trade.pnl_percent ?? null,
-        opened_at: trade.opened_at ?? null,
-        closed_at: trade.closed_at ?? null,
-        created_at: trade.closed_at ?? trade.opened_at ?? null,
-        forced_close: trade.forced_close,
-      };
-
-      setTrades((prev) => [nextTrade, ...prev]);
-    },
-    onRunStatus: (data: PaperRunStatusEvent) => {
-      setRun((prev) => (prev ? { ...prev, status: data.status } : prev));
-    },
-    onRunError: (_data: PaperRunErrorEvent) => {
-      setRun((prev) => (prev ? { ...prev, status: "STOPPED" } : prev));
-    },
   });
 
   /* ================= ACTIONS ================= */
@@ -244,8 +217,7 @@ export default function PaperRunDetail() {
     if (!runId) return;
     try {
       setStopping(true);
-      await stopPaperRun(runId);
-      setRun((prev) => (prev ? { ...prev, status: "STOPPED" } : prev));
+      await stopMutation.mutate(runId);
     } finally {
       setStopping(false);
     }
@@ -255,7 +227,7 @@ export default function PaperRunDetail() {
     if (!runId) return;
     if (!confirm("Delete paper run?")) return;
     setDeleting(true);
-    await deletePaperRun(runId);
+    await deleteMutation.mutate(runId);
     setDeleting(false);
     navigate("/paper");
   }
@@ -263,7 +235,9 @@ export default function PaperRunDetail() {
   /* ================= UI GUARDS ================= */
 
   if (!runId) return <div className="p-6 text-slate-400">Invalid run.</div>;
-  if (loadError) return <div className="p-6 text-red-400">{loadError}</div>;
+  if (detailError || runsError) {
+    return <div className="p-6 text-red-400">{detailError || runsError}</div>;
+  }
   if (!run) return <div className="p-6 text-slate-400">Loading...</div>;
 
   const isRunning = run.status === "ACTIVE";
@@ -273,7 +247,7 @@ export default function PaperRunDetail() {
   const initialBalance = Number(run.initial_balance ?? 0);
   const equity = Number(run.equity ?? 0);
   const lastPrice = Number(run.last_price ?? 0);
-  const totalTrades = trades.length;
+  const totalTrades = sortedTrades.length;
 
   const netPnl = equity - initialBalance;
   const returnPct = initialBalance
@@ -297,8 +271,8 @@ export default function PaperRunDetail() {
 
   /* ===== ADVANCED METRICS ===== */
 
-  const winTrades = trades.filter(t => Number(t.pnl ?? 0) > 0);
-  const lossTrades = trades.filter(t => Number(t.pnl ?? 0) < 0);
+  const winTrades = sortedTrades.filter(t => Number(t.pnl ?? 0) > 0);
+  const lossTrades = sortedTrades.filter(t => Number(t.pnl ?? 0) < 0);
 
   const winRate = totalTrades
     ? (winTrades.length / totalTrades) * 100
@@ -666,7 +640,7 @@ export default function PaperRunDetail() {
       <div className="space-y-8">
         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
           <h3 className="text-white font-semibold mb-4">Price Chart</h3>
-          <CandlestickChart candles={candles} trades={trades} />
+          <CandlestickChart candles={candles} trades={sortedTrades} />
         </div>
 
         <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
@@ -680,7 +654,7 @@ export default function PaperRunDetail() {
         title="Trades"
         description="Executed trades"
         columns={tradeColumns}
-        data={trades}
+        data={sortedTrades}
         emptyMessage="No trades yet."
       />
     </div>

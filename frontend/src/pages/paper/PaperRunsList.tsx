@@ -1,19 +1,16 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { getAllPaperRuns } from "../../services/paper.service";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
 import type { PaperRun } from "@quantlab/contracts";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import Button from "../../components/ui/Button";
 import { formatDateTime } from "../../utils/date";
-import { useApi } from "../../hooks/useApi";
+import { usePaperRuns } from "../../data/paper";
 
 export default function PaperRunsList() {
   const navigate = useNavigate();
-  const { data, loading } = useApi(getAllPaperRuns, [], {
-    fallbackMessage: "Failed to load paper runs",
-  });
-  const runs = useMemo(() => data?.runs ?? [], [data]);
+  const { data, loading } = usePaperRuns();
+  const runs = useMemo(() => data ?? [], [data]);
 
   const columns: ListColumn<PaperRun>[] = [
     {

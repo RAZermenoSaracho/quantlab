@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { createAlgorithm } from "../../services/algorithm.service";
 import AlgorithmWorkspace from "../../components/algorithms/AlgorithmWorkspace";
 import Button from "../../components/ui/Button";
+import { useCreateAlgorithmMutation } from "../../data/algorithms";
 
 export default function CreateAlgorithm() {
   const navigate = useNavigate();
@@ -13,6 +13,7 @@ export default function CreateAlgorithm() {
   const [githubUrl, setGithubUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const createMutation = useCreateAlgorithmMutation();
 
   const isSubmitDisabled =
     loading || (!code.trim() && !githubUrl.trim());
@@ -29,7 +30,7 @@ export default function CreateAlgorithm() {
     setLoading(true);
 
     try {
-      const algo = await createAlgorithm({
+      const algo = await createMutation.mutate({
         name,
         notes_html: notesHtml || undefined,
         code: code || undefined,

@@ -40,3 +40,37 @@ export function assertTradeSide(input: unknown): PaperTradeSide {
 
   throw new Error(`Invalid trade side: ${raw}`);
 }
+
+export function calculateTradePnl(
+  side: PaperTradeSide,
+  entryPrice: number,
+  exitPrice: number,
+  quantity: number
+): number {
+  if (!Number.isFinite(entryPrice) || !Number.isFinite(exitPrice)) {
+    return 0;
+  }
+
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    return 0;
+  }
+
+  if (side === "SHORT") {
+    return (entryPrice - exitPrice) * quantity;
+  }
+
+  return (exitPrice - entryPrice) * quantity;
+}
+
+export function calculateTradePnlPercent(
+  pnl: number,
+  entryPrice: number,
+  quantity: number
+): number {
+  const notional = entryPrice * quantity;
+  if (!Number.isFinite(notional) || notional <= 0) {
+    return 0;
+  }
+
+  return (pnl / notional) * 100;
+}

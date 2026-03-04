@@ -1,10 +1,5 @@
 import { useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import {
-  getBacktest,
-  deleteBacktest,
-  getAllBacktests,
-} from "../../services/backtest.service";
 
 import EquityCurveChart from "../../components/charts/EquityCurveChart";
 import CandlestickChart from "../../components/charts/CandlestickChart";
@@ -15,7 +10,11 @@ import Button from "../../components/ui/Button";
 import { exportStructuredBacktestPdf } from "../../utils/exportBacktestPdf";
 
 import ListView, { type ListColumn } from "../../components/ui/ListView";
-import { useApi } from "../../hooks/useApi";
+import {
+  useBacktest,
+  useBacktests,
+  useDeleteBacktestMutation,
+} from "../../data/backtests";
 
 import type {
   BacktestTrade,
@@ -147,32 +146,13 @@ export default function BacktestDetail() {
   >("yearly");
 
   const [selectedPeriod, setSelectedPeriod] = useState<string | null>(null);
-
-  const { data: detailData, error: loadError } = useApi(
-    async () => {
-      if (!id) {
-        throw new Error("Missing backtest id");
-      }
-
-      const [detail, list] = await Promise.all([
-        getBacktest(id),
-        getAllBacktests(),
-      ]);
-
-      return {
-        detail,
-        allIds: list.backtests.map((backtest) => backtest.id),
-      };
-    },
-    [id],
-    {
-      enabled: Boolean(id),
-      fallbackMessage: "Failed to load backtest",
-    }
+  const { data, error: detailError } = useBacktest(id ?? "");
+  const { data: allBacktests, error: listError } = useBacktests();
+  const deleteMutation = useDeleteBacktestMutation();
+  const allIds = useMemo(
+    () => (allBacktests ?? []).map((backtest) => backtest.id),
+    [allBacktests]
   );
-
-  const data = detailData?.detail ?? null;
-  const allIds = detailData?.allIds ?? [];
 
   /* ================= SAFE DATA ================= */
 
@@ -407,7 +387,7 @@ export default function BacktestDetail() {
     setLoadingDelete(true);
 
     try {
-      await deleteBacktest(id!);
+      await deleteMutation.mutate(id!);
       navigate("/backtests");
     } finally {
       setLoadingDelete(false);
@@ -430,7 +410,9 @@ export default function BacktestDetail() {
 
   /* ================= UI ================= */
 
-  if (loadError) return <div className="p-6 text-red-400">{loadError}</div>;
+  if (detailError || listError) {
+    return <div className="p-6 text-red-400">{detailError || listError}</div>;
+  }
 
   if (!data || !run)
     return <div className="p-6 text-slate-400">Loading...</div>;

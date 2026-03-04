@@ -1,17 +1,14 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { getAlgorithms } from "../../services/algorithm.service";
 import type { Algorithm } from "@quantlab/contracts";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
 import Button from "../../components/ui/Button";
-import { useApi } from "../../hooks/useApi";
+import { useAlgorithms } from "../../data/algorithms";
 
 export default function AlgorithmsList() {
   const navigate = useNavigate();
-  const { data, loading } = useApi(getAlgorithms, [], {
-    fallbackMessage: "Failed to load algorithms",
-  });
-  const algorithms = useMemo(() => data?.algorithms ?? [], [data]);
+  const { data, loading } = useAlgorithms();
+  const algorithms = useMemo(() => data ?? [], [data]);
 
   const columns: ListColumn<Algorithm>[] = [
     {

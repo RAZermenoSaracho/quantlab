@@ -7,6 +7,7 @@ import type {
   TradeExecution,
 } from "@quantlab/contracts";
 import { connectSocket } from "../services/socket.service";
+import { useEventSubscription } from "./useEventSubscription";
 
 type Handlers = {
   onTick?: (payload: PaperTick) => void;
@@ -34,43 +35,77 @@ export function usePaperRunEvents(runId: string, handlers: Handlers) {
     const onConnect = () => setBackendConnected(true);
     const onDisconnect = () => setBackendConnected(false);
 
+    setBackendConnected(socket.connected);
     socket.emit("join_paper_run", runId);
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
-
-    const onTick = (payload: PaperTick) => {
-      handlersRef.current.onTick?.(payload);
-    };
-    const onTradeExecution = (payload: TradeExecution) => {
-      handlersRef.current.onTradeExecution?.(payload);
-    };
-    const onRunUpdate = (payload: PaperRunUpdateEvent) => {
-      handlersRef.current.onRunUpdate?.(payload);
-    };
-    const onRunStatus = (payload: PaperRunStatusEvent) => {
-      handlersRef.current.onRunStatus?.(payload);
-    };
-    const onRunError = (payload: PaperRunErrorEvent) => {
-      handlersRef.current.onRunError?.(payload);
-    };
-
-    socket.on("paper_tick", onTick);
-    socket.on("trade_execution", onTradeExecution);
-    socket.on("paper_run_update", onRunUpdate);
-    socket.on("paper_run_status", onRunStatus);
-    socket.on("paper_run_error", onRunError);
 
     return () => {
       socket.emit("leave_paper_run", runId);
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
-      socket.off("paper_tick", onTick);
-      socket.off("trade_execution", onTradeExecution);
-      socket.off("paper_run_update", onRunUpdate);
-      socket.off("paper_run_status", onRunStatus);
-      socket.off("paper_run_error", onRunError);
     };
   }, [runId]);
+
+  useEventSubscription(
+    "paper_tick",
+    (payload: PaperTick) => {
+      if (payload.run_id !== runId) {
+        return;
+      }
+
+      handlersRef.current.onTick?.(payload);
+    },
+    Boolean(runId)
+  );
+
+  useEventSubscription(
+    "trade_execution",
+    (payload: TradeExecution) => {
+      if (payload.run_id !== runId) {
+        return;
+      }
+
+      handlersRef.current.onTradeExecution?.(payload);
+    },
+    Boolean(runId)
+  );
+
+  useEventSubscription(
+    "paper_run_update",
+    (payload: PaperRunUpdateEvent) => {
+      if (payload.run_id !== runId) {
+        return;
+      }
+
+      handlersRef.current.onRunUpdate?.(payload);
+    },
+    Boolean(runId)
+  );
+
+  useEventSubscription(
+    "paper_run_status",
+    (payload: PaperRunStatusEvent) => {
+      if (payload.run_id !== runId) {
+        return;
+      }
+
+      handlersRef.current.onRunStatus?.(payload);
+    },
+    Boolean(runId)
+  );
+
+  useEventSubscription(
+    "paper_run_error",
+    (payload: PaperRunErrorEvent) => {
+      if (payload.run_id !== runId) {
+        return;
+      }
+
+      handlersRef.current.onRunError?.(payload);
+    },
+    Boolean(runId)
+  );
 
   return { backendConnected };
 }

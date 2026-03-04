@@ -33,6 +33,17 @@ _PAPER_WS_LOG_EVERY = int(os.getenv("PAPER_WS_LOG_EVERY", "25"))
 _STRATEGY_CRASH_IS_FATAL = os.getenv("PAPER_STRATEGY_FATAL", "0") == "1"
 
 
+def _calculate_realized_pnl(
+    side: str,
+    entry_price: float,
+    exit_price: float,
+    quantity: float,
+) -> float:
+    if str(side).upper() == "SHORT":
+        return (float(entry_price) - float(exit_price)) * float(quantity)
+    return (float(exit_price) - float(entry_price)) * float(quantity)
+
+
 def _get_http_client() -> httpx.AsyncClient:
     global _http_client
     if _http_client is None or _http_client.is_closed:
@@ -295,7 +306,7 @@ class PaperSession:
         indicator_series = compute_indicator_series(self.candles, self.config)
 
         # Equity (what strategy should see as "balance" per your paper design)
-        current_equity = self.quote_balance + (self.base_balance * price if self.base_balance > 0 else 0.0)
+        current_equity = self.quote_balance + (self.base_balance * price)
 
         ctx = build_context(
             index=len(self.candles) - 1,
@@ -353,7 +364,7 @@ class PaperSession:
         # ==================================================
         # EMIT BALANCE SNAPSHOT
         # ==================================================
-        equity = self.quote_balance + (self.base_balance * price if self.base_balance > 0 else 0.0)
+        equity = self.quote_balance + (self.base_balance * price)
 
         await emit_event(
             self.run_id,
@@ -406,27 +417,43 @@ class PaperSession:
             return
 
         slippage_bps = float(getattr(self.config, "slippage_bps", 0.0))
-        effective_price = price * (1 + slippage_bps / 10_000)
 
-        gross_qty = capital_to_use / effective_price
-        fee_qty = gross_qty * self.fee_rate
-        net_qty = gross_qty - fee_qty
+        if side == "SHORT":
+            effective_price = price * (1 - slippage_bps / 10_000)
+            gross_qty = capital_to_use / effective_price
+            fee_quote = capital_to_use * self.fee_rate
+            net_quote = capital_to_use - fee_quote
 
-        self.base_balance += net_qty
-        self.quote_balance -= capital_to_use
+            self.base_balance -= gross_qty
+            self.quote_balance += net_quote
+
+            position_qty = gross_qty
+            entry_fee_quote = fee_quote
+        else:
+            effective_price = price * (1 + slippage_bps / 10_000)
+            gross_qty = capital_to_use / effective_price
+            fee_qty = gross_qty * self.fee_rate
+            net_qty = gross_qty - fee_qty
+
+            self.base_balance += net_qty
+            self.quote_balance -= capital_to_use
+
+            position_qty = net_qty
+            entry_fee_quote = capital_to_use - (position_qty * effective_price)
 
         self.position = {
             "side": side,
             "entry_price": float(effective_price),
-            "quantity": float(net_qty),
+            "quantity": float(position_qty),
             "opened_at": int(timestamp),
+            "entry_fee_quote": float(entry_fee_quote),
         }
 
         logger.info(
             "[PaperTrading][%s] OPEN %s qty=%.6f entry=%.4f used=%.2f quote=%.2f base=%.6f",
             self.run_id,
             side,
-            net_qty,
+            position_qty,
             effective_price,
             capital_to_use,
             self.quote_balance,
@@ -443,7 +470,7 @@ class PaperSession:
                 "side": side,
                 "entry_price": float(effective_price),
                 "exit_price": None,
-                "quantity": float(net_qty),
+                "quantity": float(position_qty),
                 "pnl": 0.0,
                 "opened_at": int(timestamp),
                 "closed_at": None,
@@ -457,18 +484,28 @@ class PaperSession:
         quantity = float(self.position["quantity"])
         entry_price = float(self.position["entry_price"])
         side = str(self.position["side"]).upper()
+        entry_fee_quote = float(self.position.get("entry_fee_quote", 0.0))
 
         if side == "LONG":
-            pnl = (price - entry_price) * quantity
+            gross_quote = quantity * price
+            fee_quote = gross_quote * self.fee_rate
+            net_quote = gross_quote - fee_quote
+
+            self.quote_balance += net_quote
+            self.base_balance = 0.0
         else:
-            pnl = (entry_price - price) * quantity
+            gross_quote = quantity * price
+            fee_quote = gross_quote * self.fee_rate
+            total_cover_cost = gross_quote + fee_quote
 
-        gross_quote = quantity * price
-        fee_quote = gross_quote * self.fee_rate
-        net_quote = gross_quote - fee_quote
+            self.quote_balance -= total_cover_cost
+            self.base_balance += quantity
 
-        self.quote_balance += net_quote
-        self.base_balance = 0.0
+        pnl = (
+            _calculate_realized_pnl(side, entry_price, price, quantity)
+            - entry_fee_quote
+            - fee_quote
+        )
 
         trade = {
             "side": side,
