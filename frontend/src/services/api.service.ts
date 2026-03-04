@@ -1,10 +1,13 @@
-const API_BASE =
-  import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+// frontend/src/services/api.service.ts
+import type { ApiResponse } from "@quantlab/contracts";
+
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 type QueryParams = Record<string, string | number | undefined>;
 
 function buildQuery(params?: QueryParams) {
   if (!params) return "";
+
   const query = new URLSearchParams();
 
   Object.entries(params).forEach(([key, value]) => {
@@ -16,14 +19,21 @@ function buildQuery(params?: QueryParams) {
   return `?${query.toString()}`;
 }
 
+function isApiResponse<T>(x: unknown): x is ApiResponse<T> {
+  return (
+    typeof x === "object" &&
+    x !== null &&
+    "success" in x &&
+    typeof (x as any).success === "boolean"
+  );
+}
+
 async function request<T>(
   endpoint: string,
   options: RequestInit = {},
   params?: QueryParams
 ): Promise<T> {
-
   const token = localStorage.getItem("token");
-
   const url = `${API_BASE}${endpoint}${buildQuery(params)}`;
 
   const res = await fetch(url, {
@@ -35,30 +45,44 @@ async function request<T>(
     },
   });
 
-  const data = await res.json().catch(() => ({}));
+  const raw = await res.json().catch(() => null);
 
-  if (!res.ok) {
-    throw new Error(
-      data?.error?.message ||
-      data?.detail ||
-      "Request failed"
-    );
+  /*
+    Preferred contract: ApiResponse<T> = { success: true, data: T } | { success: false, error: ... }.
+    Temporary compatibility: if backend still returns raw JSON (not wrapped), return it when res.ok.
+  */
+  if (!isApiResponse<T>(raw)) {
+    if (!res.ok) {
+      const msg =
+        (raw as any)?.error?.message ||
+        (raw as any)?.detail ||
+        "Request failed";
+      throw new Error(msg);
+    }
+    return raw as T;
   }
 
-  return data;
+  const json = raw;
+
+  if (!res.ok || !json.success) {
+    const msg = (json as any)?.error?.message || "Request failed";
+    throw new Error(msg);
+  }
+
+  return json.data;
 }
 
 export default {
   get: <T>(endpoint: string, params?: QueryParams) =>
     request<T>(endpoint, {}, params),
 
-  post: <T>(endpoint: string, body: any) =>
+  post: <T>(endpoint: string, body: unknown) =>
     request<T>(endpoint, {
       method: "POST",
       body: JSON.stringify(body),
     }),
 
-  put: <T>(endpoint: string, body: any) =>
+  put: <T>(endpoint: string, body: unknown) =>
     request<T>(endpoint, {
       method: "PUT",
       body: JSON.stringify(body),

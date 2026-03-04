@@ -1,18 +1,29 @@
-import { Request, Response, NextFunction } from "express";
+import type { Request, Response, NextFunction } from "express";
 import { pool } from "../config/db";
 import {
   startPaperOnEngine,
   stopPaperOnEngine,
 } from "../services/pythonEngine.service";
 import { handlePaperEvent } from "../services/paperEvent.service";
-import { PaperRunDetailResponseSchema, PaperEngineEventSchema} from "@quantlab/contracts";
+import {
+  type ApiResponse,
+  type MessageResponse,
+  type PaperRunDetailResponse,
+  type PaperRunsListResponse,
+  PaperEngineEventSchema,
+  type StartPaperRunRequest,
+  type StartPaperRunResponse,
+  StartPaperRunRequestSchema,
+} from "@quantlab/contracts";
+import { sendError, sendSuccess } from "../utils/apiResponse";
+import { toIsoOrNull } from "../utils/dateUtils";
 
 /* =====================================================
    START PAPER RUN
 ===================================================== */
 export async function startPaperRun(
   req: Request,
-  res: Response,
+  res: Response<ApiResponse<StartPaperRunResponse>>,
   next: NextFunction
 ) {
   const client = await pool.connect();
@@ -25,15 +36,11 @@ export async function startPaperRun(
       timeframe,
       initial_balance,
       fee_rate,
-    } = req.body;
-
-    if (!algorithm_id || !symbol || !timeframe || !initial_balance) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
+    }: StartPaperRunRequest = StartPaperRunRequestSchema.parse(req.body);
 
     const parsedBalance = Number(initial_balance);
     if (!Number.isFinite(parsedBalance) || parsedBalance <= 0) {
-      return res.status(400).json({ error: "Invalid initial_balance" });
+      return sendError(res, "Invalid initial_balance", 400);
     }
 
     const userId = req.user!.id;
@@ -44,7 +51,7 @@ export async function startPaperRun(
     );
 
     if (!algoResult.rowCount) {
-      return res.status(404).json({ error: "Algorithm not found" });
+      return sendError(res, "Algorithm not found", 404);
     }
 
     const code = algoResult.rows[0].code;
@@ -72,7 +79,7 @@ export async function startPaperRun(
 
     await client.query("COMMIT");
 
-    res.status(201).json({ run_id: runId });
+    sendSuccess(res, { run_id: runId }, 201);
 
     // Start engine asynchronously
     startPaperOnEngine({
@@ -103,14 +110,14 @@ export async function startPaperRun(
 ===================================================== */
 export async function stopPaperRun(
   req: Request,
-  res: Response,
+  res: Response<ApiResponse<MessageResponse>>,
   next: NextFunction
 ) {
   try {
     const rawId = req.params.id;
 
     if (!rawId || Array.isArray(rawId)) {
-    return res.status(400).json({ error: "Invalid id parameter" });
+      return sendError(res, "Invalid id parameter", 400);
     }
 
     const runId = rawId;
@@ -122,7 +129,7 @@ export async function stopPaperRun(
     );
 
     if (!runResult.rowCount) {
-      return res.status(404).json({ error: "Paper run not found" });
+      return sendError(res, "Paper run not found", 404);
     }
 
     await stopPaperOnEngine(runId);
@@ -135,7 +142,7 @@ export async function stopPaperRun(
       [runId]
     );
 
-    return res.json({ message: "Paper run stopped" });
+    return sendSuccess(res, { message: "Paper run stopped" });
 
   } catch (err) {
     next(err);
@@ -147,7 +154,7 @@ export async function stopPaperRun(
 ===================================================== */
 export async function receivePaperEvent(
   req: Request,
-  res: Response,
+  res: Response<ApiResponse<Record<string, never>>>,
   next: NextFunction
 ) {
   try {
@@ -155,7 +162,7 @@ export async function receivePaperEvent(
 
     await handlePaperEvent(event);
 
-    return res.json({ success: true });
+    return sendSuccess(res, {});
   } catch (err) {
     next(err);
   }
@@ -169,7 +176,7 @@ export async function receivePaperEvent(
 ===================================================== */
 export async function getPaperRunById(
   req: Request,
-  res: Response,
+  res: Response<ApiResponse<PaperRunDetailResponse>>,
   next: NextFunction
 ) {
   try {
@@ -194,7 +201,7 @@ export async function getPaperRunById(
     );
 
     if (!runResult.rowCount) {
-      return res.status(404).json({ error: "Paper run not found" });
+      return sendError(res, "Paper run not found", 404);
     }
 
     const rawRun = runResult.rows[0];
@@ -269,8 +276,8 @@ export async function getPaperRunById(
 
       engine_session_id: rawRun.engine_session_id ?? null,
 
-      started_at: rawRun.started_at?.toISOString?.() ?? null,
-      updated_at: rawRun.updated_at?.toISOString?.() ?? null,
+      started_at: toIsoOrNull(rawRun.started_at),
+      updated_at: toIsoOrNull(rawRun.updated_at),
     };
 
     /* =========================
@@ -289,7 +296,9 @@ export async function getPaperRunById(
         pnl,
         pnl_percent,
         opened_at,
-        closed_at
+        closed_at,
+        created_at,
+        forced_close
       FROM trades
       WHERE run_id = $1 AND run_type = 'PAPER'
       ORDER BY created_at ASC
@@ -304,7 +313,7 @@ export async function getPaperRunById(
     const normalizedTrades = tradesResult.rows.map((t) => ({
       id: t.id,
       run_id: t.run_id,
-      run_type: t.run_type,
+      run_type: "PAPER" as const,
 
       side: t.side,
 
@@ -316,10 +325,10 @@ export async function getPaperRunById(
       pnl: t.pnl != null ? Number(t.pnl) : null,
       pnl_percent: t.pnl_percent != null ? Number(t.pnl_percent) : null,
 
-      opened_at: t.opened_at?.toISOString?.() ?? null,
-      closed_at: t.closed_at?.toISOString?.() ?? null,
+      opened_at: toIsoOrNull(t.opened_at),
+      closed_at: toIsoOrNull(t.closed_at),
 
-      created_at: t.created_at?.toISOString?.() ?? null,
+      created_at: toIsoOrNull(t.created_at),
 
       forced_close: Boolean(t.forced_close),
     }));
@@ -328,12 +337,12 @@ export async function getPaperRunById(
        STRICT CONTRACT VALIDATION
     ========================= */
 
-    const response = PaperRunDetailResponseSchema.parse({
+    const response: PaperRunDetailResponse = {
       run: normalizedRun,
       trades: normalizedTrades,
-    });
+    };
 
-    return res.json(response);
+    return sendSuccess(res, response);
   } catch (err) {
     next(err);
   }
@@ -344,7 +353,7 @@ export async function getPaperRunById(
 ===================================================== */
 export async function getAllPaperRuns(
   req: Request,
-  res: Response,
+  res: Response<ApiResponse<PaperRunsListResponse>>,
   next: NextFunction
 ) {
   try {
@@ -354,6 +363,8 @@ export async function getAllPaperRuns(
       `
       SELECT
         p.id,
+        p.user_id,
+        p.algorithm_id,
         p.symbol,
         p.timeframe,
         p.status,
@@ -375,10 +386,10 @@ export async function getAllPaperRuns(
       ...r,
       initial_balance: Number(r.initial_balance),
       current_balance: Number(r.current_balance),
-      started_at: r.started_at?.toISOString?.() ?? null,
+      started_at: toIsoOrNull(r.started_at),
     }));
 
-    return res.json({ runs: normalizedRuns });
+    return sendSuccess(res, { runs: normalizedRuns });
   } catch (err) {
     next(err);
   }
@@ -389,7 +400,7 @@ export async function getAllPaperRuns(
 ===================================================== */
 export async function deletePaperRun(
   req: Request,
-  res: Response,
+  res: Response<ApiResponse<MessageResponse>>,
   next: NextFunction
 ) {
   try {
@@ -404,10 +415,10 @@ export async function deletePaperRun(
     );
 
     if (!result.rowCount) {
-      return res.status(404).json({ error: "Paper run not found" });
+      return sendError(res, "Paper run not found", 404);
     }
 
-    return res.json({ message: "Paper run deleted" });
+    return sendSuccess(res, { message: "Paper run deleted" });
 
   } catch (err) {
     next(err);

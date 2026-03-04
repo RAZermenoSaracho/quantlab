@@ -1,25 +1,34 @@
 import api from "./api.service";
-import type { Exchange, Symbol } from "@quantlab/contracts";
 
-export function getExchanges() {
-  return api.get<{ exchanges: Exchange[] }>(
-    "/exchanges"
-  );
+import type {
+  ExchangesListResponse,
+  SymbolsListResponse,
+  DefaultFeeRateResponse,
+} from "@quantlab/contracts";
+
+/* ==============================
+   EXCHANGES
+============================== */
+
+export function getExchanges(): Promise<ExchangesListResponse> {
+  return api.get<ExchangesListResponse>("/exchanges");
 }
+
+/* ==============================
+   SYMBOLS
+============================== */
 
 export function getSymbols(
   exchange: string,
   query: string
-) {
-  return api.get<{ symbols: Symbol[] }>(
-    "/market/symbols",
-    { exchange, query }
-  );
+): Promise<SymbolsListResponse> {
+  return api.get<SymbolsListResponse>("/market/symbols", { exchange, query });
 }
 
-export function getDefaultFeeRate(exchange: string) {
-  return api.get<{ default_fee_rate: number }>(
-    "/market/fee-rate",
-    { exchange }
-  );
+/* ==============================
+   DEFAULT FEE RATE
+============================== */
+
+export function getDefaultFeeRate(exchange: string): Promise<DefaultFeeRateResponse> {
+  return api.get<DefaultFeeRateResponse>("/market/fee-rate", { exchange });
 }

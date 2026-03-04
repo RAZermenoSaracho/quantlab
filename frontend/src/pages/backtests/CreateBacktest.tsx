@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { getAlgorithms } from "../../services/algorithm.service";
 import { createBacktest, getBacktestStatus } from "../../services/backtest.service";
@@ -10,14 +10,19 @@ import {
 import DateSection from "../../components/backtests/DateSection";
 import ProgressBar from "../../components/ui/ProgressBar";
 import Button from "../../components/ui/Button";
-import type { CreateBacktestRequest } from "@quantlab/contracts";
+import type {
+  Algorithm,
+  CreateBacktestRequest,
+  Exchange,
+  Symbol,
+} from "@quantlab/contracts";
 
 export default function CreateBacktest() {
   const navigate = useNavigate();
 
-  const [algorithms, setAlgorithms] = useState<any[]>([]);
-  const [exchanges, setExchanges] = useState<any[]>([]);
-  const [symbols, setSymbols] = useState<any[]>([]);
+  const [algorithms, setAlgorithms] = useState<Algorithm[]>([]);
+  const [exchanges, setExchanges] = useState<Exchange[]>([]);
+  const [symbols, setSymbols] = useState<Symbol[]>([]);
   const [symbolQuery, setSymbolQuery] = useState("");
 
   const [form, setForm] = useState<CreateBacktestRequest>({
@@ -46,7 +51,7 @@ export default function CreateBacktest() {
   useEffect(() => {
     async function load() {
       const data = await getAlgorithms();
-      setAlgorithms(data);
+      setAlgorithms(data.algorithms);
     }
     load();
   }, []);
@@ -57,7 +62,7 @@ export default function CreateBacktest() {
   useEffect(() => {
     async function load() {
       const data = await getExchanges();
-      setExchanges(data.exchanges || []);
+      setExchanges(data.exchanges);
     }
     load();
   }, []);
@@ -87,7 +92,7 @@ export default function CreateBacktest() {
 
     const timeout = setTimeout(async () => {
       const data = await getSymbols(form.exchange, symbolQuery);
-      setSymbols(data.symbols || []);
+      setSymbols(data.symbols);
     }, 300);
 
     return () => clearTimeout(timeout);
@@ -172,8 +177,8 @@ export default function CreateBacktest() {
 
       setRunId(newRunId);
 
-    } catch (err: any) {
-      setError(err.message || "Failed to create backtest.");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to create backtest.");
       setIsRunning(false);
     } finally {
       setLoading(false);
@@ -394,7 +399,15 @@ export default function CreateBacktest() {
    UI COMPONENTS
 ============================== */
 
-function Card({ title, description, children }: any) {
+function Card({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
   return (
     <div className="bg-slate-800/60 border border-slate-700 rounded-2xl p-8 space-y-6 shadow-sm">
       <div className="space-y-2">
@@ -406,7 +419,7 @@ function Card({ title, description, children }: any) {
   );
 }
 
-function Field({ label, children }: any) {
+function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="space-y-3">
       <label className="text-sm font-medium text-slate-300">{label}</label>
@@ -415,7 +428,7 @@ function Field({ label, children }: any) {
   );
 }
 
-function Hint({ children }: any) {
+function Hint({ children }: { children: ReactNode }) {
   return (
     <p className="text-xs text-slate-500 mt-1">{children}</p>
   );

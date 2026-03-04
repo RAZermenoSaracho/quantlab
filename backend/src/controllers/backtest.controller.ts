@@ -1,38 +1,50 @@
-import { Request, Response, NextFunction } from "express";
+import type { Request, Response, NextFunction } from "express";
 import { pool } from "../config/db";
 import { runBacktestOnEngine, getEngineProgress } from "../services/backtestEngine.service";
 import { getExchangeById } from "../services/exchangeCatalog.service";
-import { toDateFromEngineTs } from "../utils/dateUtils";
+import { toDateFromEngineTs, toIsoOrNull } from "../utils/dateUtils";
 import { normalizeTradeSide } from "../utils/tradeUtils";
-import { BacktestDetailResponseSchema, BacktestsListResponseSchema, CreateBacktestSchema } from "@quantlab/contracts";
+import {
+  type ApiResponse,
+  type BacktestDetailResponse,
+  type BacktestStatusResponse,
+  type BacktestsListResponse,
+  type CreateBacktestRequest,
+  CreateBacktestRequestSchema,
+  type CreateBacktestResponse,
+  type MessageResponse,
+} from "@quantlab/contracts";
+import { sendError, sendSuccess } from "../utils/apiResponse";
+
+type RunBacktestPayload = Omit<CreateBacktestRequest, "algorithm_id"> & {
+  code: string;
+  initial_balance: number;
+  fee_rate: number;
+};
 
 /* ==============================
    CREATE
 ============================== */
 export async function createBacktest(
   req: Request,
-  res: Response,
+  res: Response<ApiResponse<CreateBacktestResponse>>,
   next: NextFunction
 ) {
   const client = await pool.connect();
 
   try {
-    const payload = CreateBacktestSchema.parse(req.body);
-
-    if (payload instanceof Error) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
+    const payload = CreateBacktestRequestSchema.parse(req.body);
 
     const parsedBalance = Number(payload.initial_balance);
     if (!Number.isFinite(parsedBalance) || parsedBalance <= 0) {
-      return res.status(400).json({ error: "Invalid initial_balance" });
+      return sendError(res, "Invalid initial_balance", 400);
     }
 
     const userId = req.user!.id;
 
     const exchangeMeta = getExchangeById(payload.exchange);
     if (!exchangeMeta) {
-      return res.status(400).json({ error: "Unsupported exchange" });
+      return sendError(res, "Unsupported exchange", 400);
     }
 
     const finalFeeRate =
@@ -46,7 +58,7 @@ export async function createBacktest(
     );
 
     if (!algoResult.rowCount) {
-      return res.status(404).json({ error: "Algorithm not found" });
+      return sendError(res, "Algorithm not found", 404);
     }
 
     const code = algoResult.rows[0].code;
@@ -76,7 +88,7 @@ export async function createBacktest(
 
     await client.query("COMMIT");
 
-    res.status(201).json({ run_id: runId });
+    sendSuccess(res, { run_id: runId }, 201);
 
     runBacktestWorker(runId, {
       code,
@@ -97,7 +109,7 @@ export async function createBacktest(
   }
 }
 
-async function runBacktestWorker(runId: string, payload: any) {
+async function runBacktestWorker(runId: string, payload: RunBacktestPayload) {
   const client = await pool.connect();
 
   try {
@@ -217,7 +229,7 @@ async function runBacktestWorker(runId: string, payload: any) {
 ============================== */
 export async function getBacktestById(
   req: Request,
-  res: Response,
+  res: Response<ApiResponse<BacktestDetailResponse>>,
   next: NextFunction
 ) {
   try {
@@ -238,7 +250,7 @@ export async function getBacktestById(
     );
 
     if (!runResult.rowCount) {
-      return res.status(404).json({ error: "Backtest not found" });
+      return sendError(res, "Backtest not found", 404);
     }
 
     const rawRun = runResult.rows[0];
@@ -302,21 +314,32 @@ export async function getBacktestById(
           : null,
     };
 
-    return res.json(
-      BacktestDetailResponseSchema.parse({
-        run,
-        metrics: metricsResult.rows[0] || null,
-        analysis: run.analysis || null,
-        trades: tradesResult.rows,
-        equity_curve: run.equity_curve || [],
-        candles: run.candles || [],
-        candles_count: run.candles_count || 0,
-        candles_start_ts: run.candles_start_ts,
-        candles_end_ts: run.candles_end_ts,
-        open_positions_at_end: run.open_positions_at_end || 0,
-        had_forced_close: run.had_forced_close || false,
-      })
-    );
+    const response: BacktestDetailResponse = {
+      run,
+      metrics: metricsResult.rows[0] || null,
+      analysis: run.analysis || null,
+      trades: tradesResult.rows.map((trade) => ({
+        ...trade,
+        entry_price: Number(trade.entry_price),
+        exit_price:
+          trade.exit_price != null ? Number(trade.exit_price) : null,
+        quantity: Number(trade.quantity),
+        pnl: Number(trade.pnl),
+        pnl_percent: Number(trade.pnl_percent),
+        opened_at: toIsoOrNull(trade.opened_at) ?? new Date().toISOString(),
+        closed_at: toIsoOrNull(trade.closed_at),
+        created_at: toIsoOrNull(trade.created_at),
+      })),
+      equity_curve: run.equity_curve || [],
+      candles: run.candles || [],
+      candles_count: run.candles_count || 0,
+      candles_start_ts: run.candles_start_ts,
+      candles_end_ts: run.candles_end_ts,
+      open_positions_at_end: run.open_positions_at_end || 0,
+      had_forced_close: run.had_forced_close || false,
+    };
+
+    return sendSuccess(res, response);
 
   } catch (err) {
     next(err);
@@ -326,7 +349,11 @@ export async function getBacktestById(
 /* ==============================
    GET ALL
 ============================== */
-export async function getAllBacktests(req: Request, res: Response, next: NextFunction) {
+export async function getAllBacktests(
+  req: Request,
+  res: Response<ApiResponse<BacktestsListResponse>>,
+  next: NextFunction
+) {
   try {
     const userId = req.user!.id;
 
@@ -379,11 +406,9 @@ export async function getAllBacktests(req: Request, res: Response, next: NextFun
           : row.created_at,
     }));
 
-    return res.json(
-      BacktestsListResponseSchema.parse({
-        backtests: normalized,
-      })
-    );
+    return sendSuccess(res, {
+      backtests: normalized,
+    });
 
   } catch (err) {
     next(err);
@@ -393,7 +418,11 @@ export async function getAllBacktests(req: Request, res: Response, next: NextFun
 /* ==============================
    DELETE
 ============================== */
-export async function deleteBacktest(req: Request, res: Response, next: NextFunction) {
+export async function deleteBacktest(
+  req: Request,
+  res: Response<ApiResponse<MessageResponse>>,
+  next: NextFunction
+) {
   try {
     const { id } = req.params;
     const userId = req.user!.id;
@@ -406,28 +435,31 @@ export async function deleteBacktest(req: Request, res: Response, next: NextFunc
     );
 
     if (!result.rowCount) {
-      return res.status(404).json({ error: "Backtest not found" });
+      return sendError(res, "Backtest not found", 404);
     }
 
-    return res.json({ message: "Backtest deleted" });
+    return sendSuccess(res, { message: "Backtest deleted" });
 
   } catch (err) {
     next(err);
   }
 }
 
-export async function getBacktestStatus(req: Request, res: Response) {
+export async function getBacktestStatus(
+  req: Request,
+  res: Response<ApiResponse<BacktestStatusResponse>>
+) {
   const rawId = req.params.id;
 
   if (!rawId || Array.isArray(rawId)) {
-    return res.status(400).json({ error: "Invalid id parameter" });
+    return sendError(res, "Invalid id parameter", 400);
   }
 
   const id = rawId;
 
   const engineProgress = await getEngineProgress(id);
 
-  return res.json({
+  return sendSuccess(res, {
     status: engineProgress.progress >= 100 ? "COMPLETED" : "RUNNING",
     progress: engineProgress.progress,
   });

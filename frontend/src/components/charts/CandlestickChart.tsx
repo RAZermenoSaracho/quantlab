@@ -25,7 +25,7 @@ type Trade = {
   closed_at?: string | null;
 };
 
-function toUnixSeconds(ts: any): UTCTimestamp | null {
+function toUnixSeconds(ts: unknown): UTCTimestamp | null {
   if (ts == null) return null;
 
   if (typeof ts === "number") {
@@ -44,6 +44,10 @@ function toUnixSeconds(ts: any): UTCTimestamp | null {
   return Math.floor(d.getTime() / 1000) as UTCTimestamp;
 }
 
+type MarkerApi = {
+  setMarkers: (markers: SeriesMarker<UTCTimestamp>[]) => void;
+};
+
 export default function CandlestickChart({
   candles,
   trades,
@@ -53,11 +57,12 @@ export default function CandlestickChart({
   trades: Trade[];
   height?: number;
 }) {
+  const resolvedHeight = Math.max(height, 320);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
-  const markersRef = useRef<any>(null);
+  const markersRef = useRef<MarkerApi | null>(null);
   const roRef = useRef<ResizeObserver | null>(null);
 
   /* ================= TRANSFORM DATA ================= */
@@ -125,7 +130,7 @@ export default function CandlestickChart({
     const initialWidth = Math.max(el.clientWidth, 300);
 
     const chart = createChart(el, {
-      height,
+      height: resolvedHeight,
       width: initialWidth,
       layout: {
         background: { type: ColorType.Solid, color: "#0b1220" },
@@ -182,7 +187,7 @@ export default function CandlestickChart({
       seriesRef.current = null;
       markersRef.current = null;
     };
-  }, [height]);
+  }, [resolvedHeight]);
 
   /* ================= UPDATE DATA ================= */
 
@@ -206,7 +211,7 @@ export default function CandlestickChart({
   /* ================= RENDER ================= */
 
   return (
-    <div className="relative w-full min-w-0" style={{ height }}>
+    <div className="relative w-full min-w-0" style={{ height: resolvedHeight }}>
       {!candles?.length && (
         <div className="absolute inset-0 flex items-center justify-center text-slate-500 text-sm">
           Waiting for candles...

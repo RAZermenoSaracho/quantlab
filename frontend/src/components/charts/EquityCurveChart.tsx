@@ -19,6 +19,8 @@ type Props = {
   equity: EquityPoint[];
 };
 
+const CHART_HEIGHT = 320;
+
 function formatDate(ts: number) {
   return new Date(ts).toLocaleDateString();
 }
@@ -30,7 +32,10 @@ function formatFullDate(ts: number) {
 export default function EquityCurveChart({ equity }: Props) {
   if (!equity?.length) {
     return (
-      <div className="h-80 flex items-center justify-center text-slate-500">
+      <div
+        className="flex items-center justify-center text-slate-500"
+        style={{ height: CHART_HEIGHT }}
+      >
         No equity data.
       </div>
     );
@@ -41,13 +46,7 @@ export default function EquityCurveChart({ equity }: Props) {
   const positive = final >= initial;
 
   return (
-    <div
-      className="w-full"
-      style={{
-        height: 320,
-        minWidth: 0,
-      }}
-    >
+    <div className="w-full min-w-0" style={{ height: CHART_HEIGHT }}>
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={equity}>
           <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" />
@@ -77,7 +76,7 @@ export default function EquityCurveChart({ equity }: Props) {
             labelFormatter={(value) =>
               `Date: ${formatFullDate(Number(value))}`
             }
-            formatter={(value: any) => [
+            formatter={(value: number | string | undefined) => [
               `${Number(value).toFixed(2)} USDT`,
               "Equity",
             ]}

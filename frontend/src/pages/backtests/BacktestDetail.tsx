@@ -17,12 +17,13 @@ import { exportStructuredBacktestPdf } from "../../utils/exportBacktestPdf";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
 
 import type {
+  BacktestTrade,
   EquityPoint,
   BacktestRun,
   BacktestAnalysis,
   BacktestDetailResponse,
-  PaperTrade,
 } from "@quantlab/contracts";
+import { formatDateTime } from "../../utils/date";
 
 /* ================= UTILITIES ================= */
 
@@ -111,13 +112,20 @@ function groupReturns(
     .filter(Boolean) as { period: string; returnPct: number }[];
 }
 
-function safeDate(x: any) {
+function safeDate(x: unknown) {
   if (!x) return null;
-  const d = new Date(x);
+  const d =
+    x instanceof Date
+      ? x
+      : typeof x === "string" || typeof x === "number"
+      ? new Date(x)
+      : null;
+
+  if (!d) return null;
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-function periodDays(start: any, end: any) {
+function periodDays(start: unknown, end: unknown) {
   const s = safeDate(start);
   const e = safeDate(end);
   if (!s || !e) return null;
@@ -166,7 +174,7 @@ export default function BacktestDetail() {
   const run: BacktestRun | null = data?.run ?? null;
   const metrics = data?.metrics ?? {};
   const analysis: BacktestAnalysis | null = data?.analysis ?? null;
-  const trades: PaperTrade[] = data?.trades ?? [];
+  const trades: BacktestTrade[] = data?.trades ?? [];
 
   const equity_curve_raw = data?.equity_curve ?? [];
   
@@ -295,7 +303,7 @@ export default function BacktestDetail() {
 
   /* ================= TRADE TABLE ================= */
 
-  const tradeColumns: ListColumn<PaperTrade>[] = useMemo(
+  const tradeColumns: ListColumn<BacktestTrade>[] = useMemo(
     () => [
       {
         key: "side",
@@ -334,19 +342,13 @@ export default function BacktestDetail() {
       {
         key: "opened",
         header: "Opened",
-        render: (t) =>
-          t.opened_at
-            ? t.opened_at.slice(0, 19).replace("T", " ")
-            : "-",
+        render: (t) => formatDateTime(t.opened_at),
       },
 
       {
         key: "closed",
         header: "Closed",
-        render: (t) =>
-          t.closed_at
-            ? t.closed_at.slice(0, 19).replace("T", " ")
-            : "-",
+        render: (t) => formatDateTime(t.closed_at),
       },
 
       {
@@ -452,7 +454,7 @@ export default function BacktestDetail() {
           </p>
 
           <p className="text-slate-500 text-xs">
-            {run.start_date?.slice(0, 10)} → {run.end_date?.slice(0, 10)}
+            {formatDateTime(run.start_date)} → {formatDateTime(run.end_date)}
           </p>
 
           <p className="text-slate-500 text-xs mt-1">
@@ -659,7 +661,9 @@ export default function BacktestDetail() {
             value={returnPeriod}
             onChange={(e) => {
               setSelectedPeriod(null);
-              setReturnPeriod(e.target.value as any);
+              setReturnPeriod(
+                e.target.value as "yearly" | "monthly" | "weekly" | "daily"
+              );
             }}
             className="bg-slate-900 text-white px-3 py-1 rounded"
           >

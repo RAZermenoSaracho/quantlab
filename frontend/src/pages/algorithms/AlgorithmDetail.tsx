@@ -9,14 +9,49 @@ import {
   getAlgorithmRuns,
 } from "../../services/algorithm.service";
 
-import type { Algorithm } from "@quantlab/contracts";
+import type { Algorithm, BacktestRun, PaperRun } from "@quantlab/contracts";
 import DetailNavigator from "../../components/navigation/DetailNavigator";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
 import AlgorithmWorkspace from "../../components/algorithms/AlgorithmWorkspace";
 import Button from "../../components/ui/Button";
+import { formatDateTime } from "../../utils/date";
 
 type Tab = "overview" | "backtests" | "paper";
+
+type AlgorithmBacktestRun = Pick<
+  BacktestRun,
+  | "id"
+  | "symbol"
+  | "timeframe"
+  | "status"
+  | "created_at"
+  | "total_return_percent"
+  | "total_return_usdt"
+> & {
+  exchange?: string;
+};
+
+type AlgorithmPaperRun = Pick<
+  PaperRun,
+  | "id"
+  | "symbol"
+  | "timeframe"
+  | "status"
+  | "current_balance"
+  | "started_at"
+> & {
+  exchange?: string;
+};
+
+type AlgorithmRunsResponse = {
+  backtests: AlgorithmBacktestRun[];
+  paperRuns: AlgorithmPaperRun[];
+};
+
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
 
 export default function AlgorithmDetail() {
   const { id } = useParams<{ id: string }>();
@@ -24,8 +59,8 @@ export default function AlgorithmDetail() {
 
   const [allIds, setAllIds] = useState<string[]>([]);
   const [algorithm, setAlgorithm] = useState<Algorithm | null>(null);
-  const [backtests, setBacktests] = useState<any[]>([]);
-  const [paperRuns, setPaperRuns] = useState<any[]>([]);
+  const [backtests, setBacktests] = useState<AlgorithmBacktestRun[]>([]);
+  const [paperRuns, setPaperRuns] = useState<AlgorithmPaperRun[]>([]);
 
   const [activeTab, setActiveTab] = useState<Tab>("overview");
 
@@ -38,11 +73,11 @@ export default function AlgorithmDetail() {
   const [notesHtml, setNotesHtml] = useState("");
   const [code, setCode] = useState("");
 
-  /* ================= LOAD ================= */
-
   useEffect(() => {
     async function load() {
-      if (!id) return;
+      if (!id) {
+        return;
+      }
 
       setLoading(true);
       setError(null);
@@ -51,19 +86,18 @@ export default function AlgorithmDetail() {
         const [algo, list, runs] = await Promise.all([
           getAlgorithmById(id),
           getAlgorithms(),
-          getAlgorithmRuns(id),
+          getAlgorithmRuns(id) as Promise<AlgorithmRunsResponse>,
         ]);
 
         setAlgorithm(algo);
         setName(algo.name);
         setNotesHtml(algo.notes_html || "");
         setCode(algo.code);
-
-        setBacktests(runs.backtests || []);
-        setPaperRuns(runs.paperRuns || []);
-        setAllIds(list.map((item: any) => item.id));
-      } catch (err: any) {
-        setError(err.message || "Failed to load algorithm");
+        setBacktests(runs.backtests);
+        setPaperRuns(runs.paperRuns);
+        setAllIds(list.algorithms.map((item) => item.id));
+      } catch (err: unknown) {
+        setError(getErrorMessage(err, "Failed to load algorithm"));
       } finally {
         setLoading(false);
       }
@@ -71,8 +105,6 @@ export default function AlgorithmDetail() {
 
     load();
   }, [id]);
-
-  /* ================= EARLY RETURNS ================= */
 
   if (loading) {
     return (
@@ -91,19 +123,15 @@ export default function AlgorithmDetail() {
   }
 
   if (!algorithm) {
-    return (
-      <div className="p-6 text-red-400">
-        Algorithm not found.
-      </div>
-    );
+    return <div className="p-6 text-red-400">Algorithm not found.</div>;
   }
 
   const isGithub = Boolean(algorithm.github_url);
 
-  /* ================= ACTIONS ================= */
-
   async function handleSave() {
-    if (!id) return;
+    if (!id) {
+      return;
+    }
 
     setSaving(true);
     setError(null);
@@ -117,30 +145,35 @@ export default function AlgorithmDetail() {
 
       setAlgorithm(updated);
       setEditing(false);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, "Failed to save algorithm"));
     } finally {
       setSaving(false);
     }
   }
 
   async function handleRefresh() {
-    if (!id) return;
+    if (!id) {
+      return;
+    }
 
     setSaving(true);
+
     try {
       const updated = await refreshAlgorithmFromGithub(id);
       setAlgorithm(updated);
       setCode(updated.code);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, "Failed to refresh algorithm"));
     } finally {
       setSaving(false);
     }
   }
 
   async function handleDelete() {
-    if (!id) return;
+    if (!id) {
+      return;
+    }
 
     await deleteAlgorithm(id);
 
@@ -151,24 +184,22 @@ export default function AlgorithmDetail() {
 
     if (nextId && allIds.length > 1) {
       navigate(`/algorithms/${nextId}`);
-    } else {
-      navigate("/algorithms");
+      return;
     }
+
+    navigate("/algorithms");
   }
 
-  /* ================= BACKTEST COLUMNS ================= */
-
-  const backtestColumns: ListColumn<any>[] = [
+  const backtestColumns: ListColumn<AlgorithmBacktestRun>[] = [
     {
       key: "market",
       header: "Market",
       render: (bt) => (
         <div>
-          <div className="text-white font-medium">
-            {bt.symbol}
-          </div>
+          <div className="text-white font-medium">{bt.symbol}</div>
           <div className="text-xs text-slate-500">
-            {bt.timeframe} • {bt.exchange}
+            {bt.timeframe}
+            {bt.exchange ? ` • ${bt.exchange}` : ""}
           </div>
         </div>
       ),
@@ -193,25 +224,51 @@ export default function AlgorithmDetail() {
     {
       key: "created",
       header: "Created",
-      render: (bt) =>
-        new Date(bt.created_at).toLocaleDateString(),
+      render: (bt) => formatDateTime(bt.created_at),
     },
   ];
 
-  /* ================= UI ================= */
+  const paperColumns: ListColumn<AlgorithmPaperRun>[] = [
+    {
+      key: "market",
+      header: "Market",
+      render: (run) => (
+        <div>
+          <div className="text-white font-medium">{run.symbol}</div>
+          <div className="text-xs text-slate-500">
+            {run.timeframe}
+            {run.exchange ? ` • ${run.exchange}` : ""}
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: "equity",
+      header: "Equity",
+      render: (run) => {
+        const equity = Number(run.current_balance ?? 0);
+        return <span className="text-slate-300">${equity.toFixed(2)}</span>;
+      },
+    },
+    {
+      key: "status",
+      header: "Status",
+      render: (run) => <StatusBadge status={run.status} />,
+    },
+    {
+      key: "started",
+      header: "Started",
+      render: (run) => (run.started_at ? formatDateTime(run.started_at) : "—"),
+    },
+  ];
 
   return (
     <div className="max-w-[1600px] mx-auto px-8 py-10 space-y-10">
-
-      {/* HEADER */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-lg">
         <div className="flex flex-col lg:flex-row justify-between gap-8">
-
           <div>
             {!editing ? (
-              <h1 className="text-4xl font-bold text-white">
-                {algorithm.name}
-              </h1>
+              <h1 className="text-4xl font-bold text-white">{algorithm.name}</h1>
             ) : (
               <input
                 className="text-4xl font-bold bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white w-full"
@@ -221,16 +278,12 @@ export default function AlgorithmDetail() {
             )}
 
             <p className="text-xs text-slate-500 mt-3">
-              Last updated: {new Date(algorithm.updated_at).toLocaleString()}
+              Last updated: {formatDateTime(algorithm.updated_at)}
             </p>
           </div>
 
           <div className="flex items-center gap-4 flex-wrap">
-            <DetailNavigator
-              ids={allIds}
-              currentId={id!}
-              basePath="/algorithms"
-            />
+            <DetailNavigator ids={allIds} currentId={id!} basePath="/algorithms" />
 
             {isGithub && !editing && (
               <Button
@@ -245,11 +298,7 @@ export default function AlgorithmDetail() {
             )}
 
             {!editing ? (
-              <Button
-                variant="PRIMARY"
-                size="md"
-                onClick={() => setEditing(true)}
-              >
+              <Button variant="PRIMARY" size="md" onClick={() => setEditing(true)}>
                 Edit
               </Button>
             ) : (
@@ -264,18 +313,13 @@ export default function AlgorithmDetail() {
               </Button>
             )}
 
-            <Button
-              variant="DELETE"
-              size="md"
-              onClick={handleDelete}
-            >
+            <Button variant="DELETE" size="md" onClick={handleDelete}>
               Delete
             </Button>
           </div>
         </div>
       </div>
 
-      {/* TABS */}
       <div className="flex gap-8 border-b border-slate-800 text-sm">
         {(["overview", "backtests", "paper"] as Tab[]).map((tab) => (
           <Button
@@ -291,16 +335,10 @@ export default function AlgorithmDetail() {
         ))}
       </div>
 
-      {/* TAB CONTENT */}
-
       {activeTab === "overview" && (
         <div className="space-y-10">
-
-          {/* NOTES */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8">
-            <h2 className="text-lg font-semibold text-white mb-4">
-              Strategy Notes
-            </h2>
+            <h2 className="text-lg font-semibold text-white mb-4">Strategy Notes</h2>
 
             {editing ? (
               <textarea
@@ -319,7 +357,6 @@ export default function AlgorithmDetail() {
             )}
           </div>
 
-          {/* WORKSPACE */}
           <AlgorithmWorkspace
             code={code}
             onChange={setCode}
@@ -345,53 +382,12 @@ export default function AlgorithmDetail() {
         <ListView
           title="Paper Runs"
           description="Live and past simulated trading sessions."
-          columns={[
-            {
-              key: "market",
-              header: "Market",
-              render: (run) => (
-                <div>
-                  <div className="text-white font-medium">
-                    {run.symbol}
-                  </div>
-                  <div className="text-xs text-slate-500">
-                    {run.timeframe} • {run.exchange}
-                  </div>
-                </div>
-              ),
-            },
-            {
-              key: "equity",
-              header: "Equity",
-              render: (run) => {
-                const equity = Number(run.current_balance ?? 0);
-                return (
-                  <span className="text-slate-300">
-                    ${equity.toFixed(2)}
-                  </span>
-                );
-              },
-            },
-            {
-              key: "status",
-              header: "Status",
-              render: (run) => <StatusBadge status={run.status} />,
-            },
-            {
-              key: "started",
-              header: "Started",
-              render: (run) =>
-                run.started_at
-                  ? new Date(run.started_at).toLocaleDateString()
-                  : "—",
-            },
-          ]}
+          columns={paperColumns}
           data={paperRuns}
           emptyMessage="No paper runs yet."
           onRowClick={(run) => navigate(`/paper/${run.id}`)}
         />
       )}
-
     </div>
   );
 }

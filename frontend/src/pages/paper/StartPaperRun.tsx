@@ -11,15 +11,20 @@ import Button from "../../components/ui/Button";
 import FormCard from "../../components/ui/FormCard";
 import Field from "../../components/ui/Field";
 import Hint from "../../components/ui/Hint";
-import type { Algorithm, StartPaperRunRequest } from "@quantlab/contracts";
+import type {
+  Algorithm,
+  Exchange,
+  StartPaperRunRequest,
+  Symbol,
+} from "@quantlab/contracts";
 
 export default function StartPaperRun() {
 
   const navigate = useNavigate();
 
   const [algorithms, setAlgorithms] = useState<Algorithm[]>([]);
-  const [exchanges, setExchanges] = useState<any[]>([]);
-  const [symbols, setSymbols] = useState<any[]>([]);
+  const [exchanges, setExchanges] = useState<Exchange[]>([]);
+  const [symbols, setSymbols] = useState<Symbol[]>([]);
   const [symbolQuery, setSymbolQuery] = useState("");
 
   const [loading, setLoading] = useState(false);
@@ -42,7 +47,7 @@ export default function StartPaperRun() {
 
       try {
         const data = await getAlgorithms();
-        setAlgorithms(data ?? []);
+        setAlgorithms(data.algorithms);
       } catch (err) {
         console.error("Failed to load algorithms:", err);
         setAlgorithms([]);
@@ -62,7 +67,7 @@ export default function StartPaperRun() {
     async function load() {
 
       const data = await getExchanges();
-      setExchanges(data.exchanges || []);
+      setExchanges(data.exchanges);
 
     }
 
@@ -105,7 +110,7 @@ export default function StartPaperRun() {
 
       const data = await getSymbols(form.exchange, symbolQuery);
 
-      setSymbols(data.symbols || []);
+      setSymbols(data.symbols);
 
     }, 300);
 
@@ -138,9 +143,8 @@ export default function StartPaperRun() {
 
       navigate(`/paper/${res.run_id}`);
 
-    } catch (err: any) {
-
-      setError(err.message || "Failed to start paper run.");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to start paper run.");
 
     } finally {
 

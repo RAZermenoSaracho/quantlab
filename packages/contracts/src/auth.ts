@@ -1,3 +1,4 @@
+// packages/contracts/src/auth.ts
 import { z } from "zod";
 
 /* =========================
@@ -14,10 +15,11 @@ export const LoginRequestSchema = z.object({
   password: z.string().min(1),
 });
 
-export type AuthUser = z.infer<typeof AuthUserSchema>
+export type RegisterRequest = z.infer<typeof RegisterRequestSchema>;
+export type LoginRequest = z.infer<typeof LoginRequestSchema>;
 
 /* =========================
-   RESPONSE
+   DOMAIN
 ========================= */
 
 export const AuthUserSchema = z.object({
@@ -25,15 +27,21 @@ export const AuthUserSchema = z.object({
   email: z.string().email(),
 });
 
+export type AuthUser = z.infer<typeof AuthUserSchema>;
+
+/* =========================
+   RESPONSES
+========================= */
+
 export const AuthResponseSchema = z.object({
   user: AuthUserSchema,
   token: z.string(),
 });
 
-/* =========================
-   TYPES
-========================= */
-
-export type RegisterRequest = z.infer<typeof RegisterRequestSchema>;
-export type LoginRequest = z.infer<typeof LoginRequestSchema>;
 export type AuthResponse = z.infer<typeof AuthResponseSchema>;
+
+export const MeResponseSchema = z.object({
+  user: AuthUserSchema,
+});
+
+export type MeResponse = z.infer<typeof MeResponseSchema>;

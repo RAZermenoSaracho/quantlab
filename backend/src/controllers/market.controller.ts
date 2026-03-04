@@ -1,21 +1,27 @@
-import { Request, Response, NextFunction } from "express";
+import type { Request, Response, NextFunction } from "express";
 import { getBinanceSymbols } from "../services/binance.service";
 import { getSupportedExchanges } from "../services/exchangeCatalog.service";
+import type {
+  ApiResponse,
+  DefaultFeeRateResponse,
+  SymbolsListResponse,
+} from "@quantlab/contracts";
+import { sendError, sendSuccess } from "../utils/apiResponse";
 
 export async function getSymbols(
   req: Request,
-  res: Response,
+  res: Response<ApiResponse<SymbolsListResponse>>,
   next: NextFunction
 ) {
   try {
     const { exchange, query } = req.query;
 
     if (!exchange || typeof exchange !== "string") {
-      return res.status(400).json({ error: "exchange is required" });
+      return sendError(res, "exchange is required", 400);
     }
 
     if (exchange !== "binance") {
-      return res.status(400).json({ error: "Unsupported exchange" });
+      return sendError(res, "Unsupported exchange", 400);
     }
 
     const symbols = await getBinanceSymbols();
@@ -26,7 +32,11 @@ export async function getSymbols(
         )
       : symbols;
 
-    return res.json({ symbols: filtered.slice(0, 100) }); // limit results
+    return sendSuccess(res, {
+      symbols: filtered.slice(0, 100).map((item) => ({
+        symbol: item.symbol,
+      })),
+    });
   } catch (err) {
     next(err);
   }
@@ -34,28 +44,26 @@ export async function getSymbols(
 
 export function getFeeRate(
   req: Request,
-  res: Response,
+  res: Response<ApiResponse<DefaultFeeRateResponse>>,
   next: NextFunction
 ) {
   try {
     const { exchange } = req.query;
 
     if (!exchange || typeof exchange !== "string") {
-      return res.status(400).json({ error: "exchange is required" });
+      return sendError(res, "exchange is required", 400);
     }
 
     const catalog = getSupportedExchanges();
     const ex = catalog.find(e => e.id === exchange);
 
     if (!ex) {
-      return res.status(400).json({ error: "Unsupported exchange" });
+      return sendError(res, "Unsupported exchange", 400);
     }
 
-    return res.json({
-      exchange: ex.id,
+    return sendSuccess(res, {
       default_fee_rate: ex.default_fee_rate
     });
-
   } catch (err) {
     next(err);
   }

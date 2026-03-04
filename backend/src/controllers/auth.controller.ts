@@ -1,17 +1,24 @@
 import type { Request, Response, NextFunction } from "express";
 import bcrypt from "bcrypt";
+import jwt, { type SignOptions } from "jsonwebtoken";
 import { pool } from "../config/db";
-import jwt, { SignOptions } from "jsonwebtoken";
 import { env } from "../config/env";
 
 import {
+  type ApiResponse,
+  type AuthResponse,
+  type MeResponse,
   RegisterRequestSchema,
   LoginRequestSchema,
-  AuthResponseSchema,
   AuthUserSchema,
+  AuthResponseSchema,
+  MeResponseSchema,
 } from "@quantlab/contracts";
+import { sendError, sendSuccess } from "../utils/apiResponse";
 
-function signToken(payload: { id: string; email: string }) {
+type JwtPayload = { id: string; email: string };
+
+function signToken(payload: JwtPayload) {
   const options: SignOptions = {
     expiresIn: env.JWT_EXPIRES_IN as SignOptions["expiresIn"],
   };
@@ -25,20 +32,18 @@ function signToken(payload: { id: string; email: string }) {
 
 export async function register(
   req: Request,
-  res: Response,
+  res: Response<ApiResponse<AuthResponse>>,
   next: NextFunction
 ) {
   try {
-    // 🔥 VALIDATE INPUT WITH CONTRACT
     const { email, password } = RegisterRequestSchema.parse(req.body);
 
-    const existing = await pool.query(
-      "SELECT id FROM users WHERE email = $1",
-      [email]
-    );
+    const existing = await pool.query("SELECT id FROM users WHERE email = $1", [
+      email,
+    ]);
 
     if (existing.rowCount && existing.rowCount > 0) {
-      return res.status(409).json({ error: "Email already in use" });
+      return sendError(res, "Email already in use", 409);
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
@@ -48,20 +53,15 @@ export async function register(
       [email, passwordHash]
     );
 
-    const user = created.rows[0];
+    const safeUser = AuthUserSchema.parse(created.rows[0]);
+    const token = signToken({ id: safeUser.id, email: safeUser.email });
 
-    // 🔥 VALIDATE USER STRUCTURE
-    const safeUser = AuthUserSchema.parse(user);
-
-    const token = signToken(safeUser);
-
-    const response = {
+    const response = AuthResponseSchema.parse({
       user: safeUser,
       token,
-    };
+    });
 
-    // 🔥 VALIDATE OUTPUT WITH CONTRACT
-    return res.status(201).json(AuthResponseSchema.parse(response));
+    return sendSuccess(res, response, 201);
   } catch (err) {
     return next(err);
   }
@@ -73,11 +73,10 @@ export async function register(
 
 export async function login(
   req: Request,
-  res: Response,
+  res: Response<ApiResponse<AuthResponse>>,
   next: NextFunction
 ) {
   try {
-    // 🔥 VALIDATE INPUT
     const { email, password } = LoginRequestSchema.parse(req.body);
 
     const found = await pool.query(
@@ -86,30 +85,29 @@ export async function login(
     );
 
     if (!found.rowCount) {
-      return res.status(401).json({ error: "Invalid credentials" });
+      return sendError(res, "Invalid credentials", 401);
     }
 
-    const user = found.rows[0];
-
-    const ok = await bcrypt.compare(password, user.password_hash);
-
-    if (!ok) {
-      return res.status(401).json({ error: "Invalid credentials" });
-    }
-
-    const safeUser = AuthUserSchema.parse({
-      id: user.id,
-      email: user.email,
-    });
-
-    const token = signToken(safeUser);
-
-    const response = {
-      user: safeUser,
-      token,
+    const row = found.rows[0] as {
+      id: string;
+      email: string;
+      password_hash: string;
     };
 
-    return res.json(AuthResponseSchema.parse(response));
+    const ok = await bcrypt.compare(password, row.password_hash);
+    if (!ok) {
+      return sendError(res, "Invalid credentials", 401);
+    }
+
+    const safeUser = AuthUserSchema.parse({ id: row.id, email: row.email });
+    const token = signToken({ id: safeUser.id, email: safeUser.email });
+
+    const response = AuthResponseSchema.parse({
+      user: safeUser,
+      token,
+    });
+
+    return sendSuccess(res, response);
   } catch (err) {
     return next(err);
   }
@@ -119,14 +117,18 @@ export async function login(
    ME
 ========================= */
 
-export async function me(req: Request, res: Response) {
-  const user = (req as any).user as { id: string; email: string } | undefined;
+export async function me(req: Request, res: Response<ApiResponse<MeResponse>>) {
+  const user = req.user;
 
   if (!user) {
-    return res.status(401).json({ error: "Unauthorized" });
+    return sendError(res, "Unauthorized", 401);
   }
 
   const safeUser = AuthUserSchema.parse(user);
 
-  return res.json({ user: safeUser });
+  const response = MeResponseSchema.parse({
+    user: safeUser,
+  });
+
+  return sendSuccess(res, response);
 }

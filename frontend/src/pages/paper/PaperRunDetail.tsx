@@ -15,6 +15,20 @@ import EquityCurveChart from "../../components/charts/EquityCurveChart";
 import StatusIndicator from "../../components/paper/StatusIndicator";
 import Button from "../../components/ui/Button";
 import KpiCard from "../../components/ui/KpiCard";
+import { formatDateTime } from "../../utils/date";
+
+type RunStreamUpdate = Partial<PaperRun> & {
+  run_id: string;
+  equity?: number;
+};
+
+type RunIdEvent = {
+  run_id: string;
+};
+
+type StreamCandle = Candle & {
+  run_id?: string;
+};
 
 export default function PaperRunDetail() {
   const { id } = useParams<{ id: string }>();
@@ -73,19 +87,13 @@ export default function PaperRunDetail() {
       {
         key: "opened",
         header: "Opened",
-        render: (t) =>
-          t.opened_at
-            ? t.opened_at.slice(0, 19).replace("T", " ")
-            : "-",
+        render: (t) => formatDateTime(t.opened_at),
       },
 
       {
         key: "closed",
         header: "Closed",
-        render: (t) =>
-          t.closed_at
-            ? t.closed_at.slice(0, 19).replace("T", " ")
-            : "-",
+        render: (t) => formatDateTime(t.closed_at),
       },
 
       {
@@ -148,8 +156,8 @@ export default function PaperRunDetail() {
       if (cancelled) return;
 
       setRun(detail.run);
-      setTrades(detail.trades ?? []);
-      setAllIds((list.runs ?? []).map((r) => r.id));
+      setTrades(detail.trades);
+      setAllIds(list.runs.map((r) => r.id));
 
       const seedEquity = Number(
         detail.run?.equity ?? detail.run?.quote_balance ?? 0
@@ -167,8 +175,8 @@ export default function PaperRunDetail() {
     const onConnect = () => setBackendConnected(true);
     const onDisconnect = () => setBackendConnected(false);
 
-    const onCandle = (candle: Candle) => {
-      if ((candle as any)?.run_id !== runId) return;
+    const onCandle = (candle: StreamCandle) => {
+      if (candle.run_id && candle.run_id !== runId) return;
 
       setExchangeStreaming(true);
 
@@ -180,7 +188,7 @@ export default function PaperRunDetail() {
       });
     };
 
-    const onUpdate = (data: any) => {
+    const onUpdate = (data: RunStreamUpdate) => {
       if (data?.run_id !== runId) return;
 
       setRun((prev) => (prev ? { ...prev, ...data } : prev));
@@ -197,11 +205,11 @@ export default function PaperRunDetail() {
     };
 
     const onTrade = (trade: PaperTrade) => {
-      if ((trade as any)?.run_id !== runId) return;
+      if (trade.run_id !== runId) return;
       setTrades((prev) => [trade, ...prev]);
     };
 
-    const onStopped = (data: any) => {
+    const onStopped = (data: RunIdEvent) => {
       if (data?.run_id !== runId) return;
       setRun((prev) => (prev ? { ...prev, status: "STOPPED" } : prev));
     };
@@ -672,4 +680,3 @@ export default function PaperRunDetail() {
     </div>
   );
 }
-

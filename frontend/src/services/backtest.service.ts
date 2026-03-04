@@ -12,9 +12,7 @@ import type {
    GET ONE
 ============================== */
 
-export function getBacktest(
-  id: string
-): Promise<BacktestDetailResponse> {
+export function getBacktest(id: string): Promise<BacktestDetailResponse> {
   return api.get<BacktestDetailResponse>(`/backtests/${id}`);
 }
 
@@ -33,32 +31,21 @@ export function getAllBacktests(): Promise<BacktestsListResponse> {
 export function createBacktest(
   payload: CreateBacktestRequest
 ): Promise<CreateBacktestResponse> {
-  return api.post<CreateBacktestResponse>(
-    "/backtests",
-    payload
-  );
+  return api.post<CreateBacktestResponse>("/backtests", payload);
 }
 
 /* ==============================
    DELETE
 ============================== */
 
-export function deleteBacktest(
-  id: string
-): Promise<{ message: string }> {
-  return api.del<{ message: string }>(
-    `/backtests/${id}`
-  );
+export function deleteBacktest(id: string): Promise<{ message: string }> {
+  return api.del<{ message: string }>(`/backtests/${id}`);
 }
 
 /* ==============================
    STATUS
 ============================== */
 
-export function getBacktestStatus(
-  runId: string
-): Promise<BacktestStatusResponse> {
-  return api.get<BacktestStatusResponse>(
-    `/backtests/${runId}/status`
-  );
+export function getBacktestStatus(runId: string): Promise<BacktestStatusResponse> {
+  return api.get<BacktestStatusResponse>(`/backtests/${runId}/status`);
 }

@@ -18,25 +18,19 @@ export function startPaperRun(
 
 /* ================= STOP ================= */
 
-export function stopPaperRun(
-  runId: string
-): Promise<MessageResponse> {
+export function stopPaperRun(runId: string): Promise<MessageResponse> {
   return api.post<MessageResponse>(`/paper/stop/${runId}`, {});
 }
 
 /* ================= DELETE ================= */
 
-export function deletePaperRun(
-  runId: string
-): Promise<MessageResponse> {
+export function deletePaperRun(runId: string): Promise<MessageResponse> {
   return api.del<MessageResponse>(`/paper/${runId}`);
 }
 
 /* ================= GET ONE ================= */
 
-export function getPaperRunById(
-  runId: string
-): Promise<PaperRunDetailResponse> {
+export function getPaperRunById(runId: string): Promise<PaperRunDetailResponse> {
   return api.get<PaperRunDetailResponse>(`/paper/${runId}`);
 }
 

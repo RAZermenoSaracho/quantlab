@@ -14,7 +14,7 @@ export default function AlgorithmsList() {
     async function load() {
       try {
         const data = await getAlgorithms();
-        setAlgorithms(data);
+        setAlgorithms(data.algorithms);
       } catch (err) {
         console.error(err);
       } finally {

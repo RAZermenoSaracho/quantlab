@@ -1,8 +1,7 @@
 import { io, Socket } from "socket.io-client";
 
 const SOCKET_BASE =
-  import.meta.env.VITE_API_URL?.replace("/api", "") ||
-  "http://localhost:5000";
+  import.meta.env.VITE_API_URL?.replace("/api", "") || "http://localhost:5000";
 
 let socket: Socket | null = null;
 
@@ -17,17 +16,15 @@ export function connectSocket(): Socket {
 
   socket = io(SOCKET_BASE, {
     transports: ["websocket"],
-    auth: {
-      token,
-    },
+    auth: { token },
   });
 
   socket.on("connect", () => {
-    console.log("🟢 Socket connected:", socket?.id);
+    console.log("Socket connected:", socket?.id);
   });
 
   socket.on("disconnect", () => {
-    console.log("🔴 Socket disconnected");
+    console.log("Socket disconnected");
   });
 
   socket.on("connect_error", (err) => {
@@ -50,8 +47,7 @@ export function getSocket(): Socket | null {
 ===================================================== */
 
 export function disconnectSocket() {
-  if (socket) {
-    socket.disconnect();
-    socket = null;
-  }
+  if (!socket) return;
+  socket.disconnect();
+  socket = null;
 }

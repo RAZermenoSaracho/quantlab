@@ -5,6 +5,7 @@ import ListView, { type ListColumn } from "../../components/ui/ListView";
 import type { PaperRun } from "@quantlab/contracts";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import Button from "../../components/ui/Button";
+import { formatDateTime } from "../../utils/date";
 
 export default function PaperRunsList() {
   const [runs, setRuns] = useState<PaperRun[]>([]);
@@ -15,7 +16,7 @@ export default function PaperRunsList() {
     async function fetchRuns() {
       try {
         const res = await getAllPaperRuns();
-        setRuns(res?.runs ?? []);
+        setRuns(res.runs);
       } finally {
         setLoading(false);
       }
@@ -45,9 +46,7 @@ export default function PaperRunsList() {
       key: "started",
       header: "Started",
       render: (item) =>
-        item.started_at
-          ? new Date(item.started_at).toLocaleString()
-          : "—",
+        item.started_at ? formatDateTime(item.started_at) : "—",
     },
   ];
 
