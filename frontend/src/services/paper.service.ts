@@ -1,48 +1,47 @@
 import api from "./api.service";
-import type { PaperRun } from "@quantlab/contracts";
-import type { PaperRunDetailResponse } from "@quantlab/contracts";
 
-export interface StartPaperPayload {
-  algorithm_id: string;
-  exchange?: string;
-  symbol: string;
-  timeframe: string;
-  initial_balance: number;
-  fee_rate?: number;
-  // algorithm_name: NO lo usa tu backend, no lo mandes
-}
+import type {
+  PaperRunDetailResponse,
+  PaperRunsListResponse,
+  StartPaperRunRequest,
+  StartPaperRunResponse,
+  MessageResponse,
+} from "@quantlab/contracts";
 
 /* ================= START ================= */
 
-export async function startPaperRun(payload: StartPaperPayload) {
-  // backend: { run_id: string }
-  return api.post<{ run_id: string }>("/paper/start", payload);
+export function startPaperRun(
+  payload: StartPaperRunRequest
+): Promise<StartPaperRunResponse> {
+  return api.post<StartPaperRunResponse>("/paper/start", payload);
 }
 
 /* ================= STOP ================= */
 
-export async function stopPaperRun(runId: string) {
-  // backend: { message: string }
-  return api.post<{ message: string }>(`/paper/stop/${runId}`, {});
+export function stopPaperRun(
+  runId: string
+): Promise<MessageResponse> {
+  return api.post<MessageResponse>(`/paper/stop/${runId}`, {});
 }
 
 /* ================= DELETE ================= */
 
-export async function deletePaperRun(runId: string) {
-  // backend: { message: string }
-  return api.del<{ message: string }>(`/paper/${runId}`);
+export function deletePaperRun(
+  runId: string
+): Promise<MessageResponse> {
+  return api.del<MessageResponse>(`/paper/${runId}`);
 }
 
 /* ================= GET ONE ================= */
 
-export async function getPaperRunById(runId: string) {
-  // backend: { run, trades }
+export function getPaperRunById(
+  runId: string
+): Promise<PaperRunDetailResponse> {
   return api.get<PaperRunDetailResponse>(`/paper/${runId}`);
 }
 
 /* ================= GET ALL ================= */
 
-export async function getAllPaperRuns() {
-  // backend: { runs: PaperRun[] }
-  return api.get<{ runs: PaperRun[] }>("/paper");
+export function getAllPaperRuns(): Promise<PaperRunsListResponse> {
+  return api.get<PaperRunsListResponse>("/paper");
 }

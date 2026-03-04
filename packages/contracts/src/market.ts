@@ -23,6 +23,32 @@ export const SymbolSchema = z.object({
 export type Symbol = z.infer<typeof SymbolSchema>;
 
 /* =========================
+   Candle
+========================= */
+
+export const CandleSchema = z.object({
+  timestamp: z.number(),
+  open: z.number(),
+  high: z.number(),
+  low: z.number(),
+  close: z.number(),
+  volume: z.number(),
+});
+
+export type Candle = z.infer<typeof CandleSchema>;
+
+/* =========================
+   Equity Point
+========================= */
+
+export const EquityPointSchema = z.object({
+  timestamp: z.number(),
+  equity: z.number(),
+});
+
+export type EquityPoint = z.infer<typeof EquityPointSchema>;
+
+/* =========================
    Responses
 ========================= */
 

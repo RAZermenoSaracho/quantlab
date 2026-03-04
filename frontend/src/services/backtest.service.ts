@@ -1,27 +1,27 @@
-// src/services/backtest.service.ts
-
 import api from "./api.service";
-import type { BacktestRun } from "@quantlab/contracts";
-import type { CreateBacktestDto } from "@quantlab/contracts";
 
-/* ==============================
-   TYPES
-============================== */
-
-export interface BacktestsListResponse {
-  backtests: BacktestRun[];
-}
+import type {
+  BacktestsListResponse,
+  BacktestDetailResponse,
+  CreateBacktestRequest,
+  CreateBacktestResponse,
+  BacktestStatusResponse,
+} from "@quantlab/contracts";
 
 /* ==============================
    GET ONE
 ============================== */
-export function getBacktest(id: string) {
-  return api.get<any>(`/backtests/${id}`);
+
+export function getBacktest(
+  id: string
+): Promise<BacktestDetailResponse> {
+  return api.get<BacktestDetailResponse>(`/backtests/${id}`);
 }
 
 /* ==============================
    GET ALL
 ============================== */
+
 export function getAllBacktests(): Promise<BacktestsListResponse> {
   return api.get<BacktestsListResponse>("/backtests");
 }
@@ -29,8 +29,11 @@ export function getAllBacktests(): Promise<BacktestsListResponse> {
 /* ==============================
    CREATE
 ============================== */
-export function createBacktest(payload: CreateBacktestDto) {
-  return api.post<{ run_id: string }>(
+
+export function createBacktest(
+  payload: CreateBacktestRequest
+): Promise<CreateBacktestResponse> {
+  return api.post<CreateBacktestResponse>(
     "/backtests",
     payload
   );
@@ -39,17 +42,23 @@ export function createBacktest(payload: CreateBacktestDto) {
 /* ==============================
    DELETE
 ============================== */
-export function deleteBacktest(id: string) {
+
+export function deleteBacktest(
+  id: string
+): Promise<{ message: string }> {
   return api.del<{ message: string }>(
     `/backtests/${id}`
   );
 }
 
 /* ==============================
-   GET STATUS
+   STATUS
 ============================== */
-export function getBacktestStatus(runId: string) {
-  return api.get<{ status: string; progress: number }>(
+
+export function getBacktestStatus(
+  runId: string
+): Promise<BacktestStatusResponse> {
+  return api.get<BacktestStatusResponse>(
     `/backtests/${runId}/status`
   );
 }

@@ -9,23 +9,12 @@ import {
 import { connectSocket } from "../../services/socket.service";
 import DetailNavigator from "../../components/navigation/DetailNavigator";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
-import type { PaperRun, PaperTrade } from "@quantlab/contracts";
+import type { Candle, EquityPoint, PaperRun, PaperTrade } from "@quantlab/contracts";
 import CandlestickChart from "../../components/charts/CandlestickChart";
 import EquityCurveChart from "../../components/charts/EquityCurveChart";
 import StatusIndicator from "../../components/paper/StatusIndicator";
 import Button from "../../components/ui/Button";
 import KpiCard from "../../components/ui/KpiCard";
-
-type Candle = {
-  run_id: string;
-  timestamp: number | string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-};
-
-type EquityPoint = { timestamp: number; equity: number };
 
 export default function PaperRunDetail() {
   const { id } = useParams<{ id: string }>();
@@ -47,28 +36,64 @@ export default function PaperRunDetail() {
 
   const tradeColumns: ListColumn<PaperTrade>[] = useMemo(
     () => [
-      { key: "side", header: "Side", render: (t) => t.side },
+      {
+        key: "side",
+        header: "Side",
+        render: (t) => (
+          <span className="flex items-center gap-2">
+            {t.side}
+            {t.forced_close && (
+              <span className="text-xs bg-amber-700 text-white px-2 py-0.5 rounded">
+                Forced
+              </span>
+            )}
+          </span>
+        ),
+      },
+
       {
         key: "quantity",
         header: "Qty",
         render: (t) => Number(t.quantity ?? 0).toFixed(4),
       },
+
       {
         key: "entry",
         header: "Entry",
         render: (t) => Number(t.entry_price ?? 0).toFixed(2),
       },
+
       {
         key: "exit",
         header: "Exit",
         render: (t) =>
           t.exit_price != null ? Number(t.exit_price).toFixed(2) : "-",
       },
+
+      {
+        key: "opened",
+        header: "Opened",
+        render: (t) =>
+          t.opened_at
+            ? t.opened_at.slice(0, 19).replace("T", " ")
+            : "-",
+      },
+
+      {
+        key: "closed",
+        header: "Closed",
+        render: (t) =>
+          t.closed_at
+            ? t.closed_at.slice(0, 19).replace("T", " ")
+            : "-",
+      },
+
       {
         key: "pnl",
         header: "PnL",
         render: (t) => {
           const pnl = Number(t.pnl ?? 0);
+
           return (
             <span
               className={
@@ -78,6 +103,26 @@ export default function PaperRunDetail() {
               }
             >
               {pnl.toFixed(2)}
+            </span>
+          );
+        },
+      },
+
+      {
+        key: "pnl_percent",
+        header: "PnL %",
+        render: (t) => {
+          const pct = Number(t.pnl_percent ?? 0);
+
+          return (
+            <span
+              className={
+                pct >= 0
+                  ? "text-emerald-300"
+                  : "text-red-300"
+              }
+            >
+              {pct ? `${pct.toFixed(2)}%` : "-"}
             </span>
           );
         },

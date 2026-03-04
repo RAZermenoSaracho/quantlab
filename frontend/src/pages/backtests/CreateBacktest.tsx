@@ -10,17 +10,7 @@ import {
 import DateSection from "../../components/backtests/DateSection";
 import ProgressBar from "../../components/ui/ProgressBar";
 import Button from "../../components/ui/Button";
-
-type FormState = {
-  algorithm_id: string;
-  exchange: string;
-  symbol: string;
-  timeframe: string;
-  initial_balance: number;
-  start_date: string;
-  end_date: string;
-  fee_rate?: number;
-};
+import type { CreateBacktestRequest } from "@quantlab/contracts";
 
 export default function CreateBacktest() {
   const navigate = useNavigate();
@@ -30,7 +20,7 @@ export default function CreateBacktest() {
   const [symbols, setSymbols] = useState<any[]>([]);
   const [symbolQuery, setSymbolQuery] = useState("");
 
-  const [form, setForm] = useState<FormState>({
+  const [form, setForm] = useState<CreateBacktestRequest>({
     algorithm_id: "",
     exchange: "binance",
     symbol: "",

@@ -14,19 +14,15 @@ import KpiCard from "../../components/ui/KpiCard";
 import Button from "../../components/ui/Button";
 import { exportStructuredBacktestPdf } from "../../utils/exportBacktestPdf";
 
-type BacktestDetailPayload = {
-  run: any;
-  metrics?: any;
-  analysis?: any;
-  trades: any[];
-  equity_curve: any[];
-  candles?: any[];
-  candles_count?: number;
-  candles_start_ts?: number;
-  candles_end_ts?: number;
-  open_positions_at_end?: number;
-  had_forced_close?: boolean;
-};
+import ListView, { type ListColumn } from "../../components/ui/ListView";
+
+import type {
+  EquityPoint,
+  BacktestRun,
+  BacktestAnalysis,
+  BacktestDetailResponse,
+  PaperTrade,
+} from "@quantlab/contracts";
 
 /* ================= UTILITIES ================= */
 
@@ -73,7 +69,7 @@ function computeDrawdown(equity: number[]) {
 }
 
 function groupReturns(
-  equityRaw: any[],
+  equityRaw: EquityPoint[],
   period: "yearly" | "monthly" | "weekly" | "daily"
 ) {
   const grouped: Record<string, number[]> = {};
@@ -135,7 +131,7 @@ export default function BacktestDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
-  const [data, setData] = useState<BacktestDetailPayload | null>(null);
+  const [data, setData] = useState<BacktestDetailResponse | null>(null);
   const [allIds, setAllIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loadingDelete, setLoadingDelete] = useState(false);
@@ -159,41 +155,63 @@ export default function BacktestDetail() {
       ]);
 
       setData(detail);
-      setAllIds(list.backtests.map((b: any) => b.id));
+      setAllIds(list.backtests.map((b: BacktestRun) => b.id));
     }
 
     load().catch(() => setError("Failed to load backtest"));
   }, [id]);
 
-  /* ================= SAFE FALLBACK DATA ================= */
+  /* ================= SAFE DATA ================= */
 
-  const run = data?.run ?? {};
+  const run: BacktestRun | null = data?.run ?? null;
   const metrics = data?.metrics ?? {};
-  const analysis = data?.analysis ?? {};
-  const trades = data?.trades ?? [];
+  const analysis: BacktestAnalysis | null = data?.analysis ?? null;
+  const trades: PaperTrade[] = data?.trades ?? [];
+
+  const equity_curve_raw = data?.equity_curve ?? [];
+  
+  const candles = useMemo(
+    () =>
+      (data?.candles ?? []).map((c) => ({
+        ...c,
+        timestamp:
+          typeof c.timestamp === "string"
+            ? new Date(c.timestamp).getTime()
+            : c.timestamp,
+      })),
+    [data?.candles]
+  );
+
+  const candlesCount = data?.candles_count ?? candles.length ?? 0;
 
   const openPositionsAtEnd = Number(data?.open_positions_at_end ?? 0);
   const hadForcedClose = Boolean(data?.had_forced_close ?? false);
 
-  const forcedCloseCount = trades.filter(
-    (t: any) => t.forced_close === true
-  ).length;
+  const forcedCloseCount = trades.filter((t) => t.forced_close).length;
 
-  const equity_curve = data?.equity_curve ?? [];
-  const candles = data?.candles ?? [];
-  const candlesCount = data?.candles_count ?? candles.length ?? 0;
+  /* ================= DERIVED ================= */
 
-  /* ================= DERIVED DATA ================= */
+  const equity_curve = useMemo(
+    () =>
+      equity_curve_raw.map((p) => ({
+        timestamp:
+          typeof p.timestamp === "string"
+            ? new Date(p.timestamp).getTime()
+            : p.timestamp,
+        equity: Number(p.equity ?? 0),
+      })),
+    [equity_curve_raw]
+  );
 
   const equity = useMemo(
-    () => equity_curve.map((p: any) => Number(p.equity ?? 0)),
+    () => equity_curve.map((p) => Number(p.equity ?? 0)),
     [equity_curve]
   );
 
   const returns = useMemo(() => computeReturns(equity), [equity]);
 
   const derived = useMemo(() => {
-    const initial = Number(run.initial_balance ?? 0);
+    const initial = Number(run?.initial_balance ?? 0);
     const final = equity[equity.length - 1] ?? initial;
 
     const netProfit = final - initial;
@@ -211,7 +229,7 @@ export default function BacktestDetail() {
       volatility: vol,
       maxDD: computeDrawdown(equity),
     };
-  }, [equity, returns, run.initial_balance]);
+  }, [equity, returns, run?.initial_balance]);
 
   const netProfit =
     analysis?.summary?.net_profit ??
@@ -225,7 +243,7 @@ export default function BacktestDetail() {
 
   const sharpe =
     analysis?.risk?.sharpe ??
-    metrics?.sharpe_ratio ?? // your DB uses sharpe_ratio
+    metrics?.sharpe_ratio ??
     derived.sharpe;
 
   const volatility =
@@ -237,43 +255,32 @@ export default function BacktestDetail() {
     derived.maxDD;
 
   const totalTrades = Number(metrics?.total_trades ?? trades.length ?? 0);
+
   const winRate =
     Number(metrics?.win_rate_percent ?? 0) ||
     (trades.length
-      ? (trades.filter((t: any) => Number(t.pnl ?? 0) > 0).length / trades.length) *
+      ? (trades.filter((t) => Number(t.pnl ?? 0) > 0).length / trades.length) *
         100
       : 0);
 
   const wins = useMemo(
-    () => trades.filter((t: any) => Number(t.pnl ?? 0) > 0),
+    () => trades.filter((t) => Number(t.pnl ?? 0) > 0),
     [trades]
   );
+
   const losses = useMemo(
-    () => trades.filter((t: any) => Number(t.pnl ?? 0) < 0),
+    () => trades.filter((t) => Number(t.pnl ?? 0) < 0),
     [trades]
   );
 
-  const avgWin = useMemo(
-    () => mean(wins.map((t: any) => Number(t.pnl ?? 0))),
-    [wins]
-  );
-  const avgLoss = useMemo(
-    () => mean(losses.map((t: any) => Number(t.pnl ?? 0))),
-    [losses]
-  );
+  const avgWin = mean(wins.map((t) => Number(t.pnl ?? 0)));
+  const avgLoss = mean(losses.map((t) => Number(t.pnl ?? 0)));
 
-  const expectancy = useMemo(() => {
-    const n = trades.length;
-    if (!n) return 0;
-    return Number(netProfit ?? 0) / n;
-  }, [netProfit, trades.length]);
+  const expectancy = trades.length ? Number(netProfit ?? 0) / trades.length : 0;
 
-  const rr = useMemo(() => {
-    const l = Math.abs(avgLoss);
-    return l ? avgWin / l : 0;
-  }, [avgWin, avgLoss]);
+  const rr = Math.abs(avgLoss) ? avgWin / Math.abs(avgLoss) : 0;
 
-  const days = periodDays(run.start_date, run.end_date);
+  const days = periodDays(run?.start_date, run?.end_date);
 
   const periodReturns = useMemo(
     () => groupReturns(equity_curve, returnPeriod),
@@ -286,12 +293,112 @@ export default function BacktestDetail() {
     ? periodReturns.find((p) => p.period === selectedPeriod)?.returnPct ?? null
     : null;
 
+  /* ================= TRADE TABLE ================= */
+
+  const tradeColumns: ListColumn<PaperTrade>[] = useMemo(
+    () => [
+      {
+        key: "side",
+        header: "Side",
+        render: (t) => (
+          <span className="flex items-center gap-2">
+            {t.side}
+            {t.forced_close && (
+              <span className="text-xs bg-amber-700 text-white px-2 py-0.5 rounded">
+                Forced
+              </span>
+            )}
+          </span>
+        ),
+      },
+
+      {
+        key: "quantity",
+        header: "Qty",
+        render: (t) => Number(t.quantity ?? 0).toFixed(4),
+      },
+
+      {
+        key: "entry",
+        header: "Entry",
+        render: (t) => Number(t.entry_price ?? 0).toFixed(2),
+      },
+
+      {
+        key: "exit",
+        header: "Exit",
+        render: (t) =>
+          t.exit_price != null ? Number(t.exit_price).toFixed(2) : "-",
+      },
+
+      {
+        key: "opened",
+        header: "Opened",
+        render: (t) =>
+          t.opened_at
+            ? t.opened_at.slice(0, 19).replace("T", " ")
+            : "-",
+      },
+
+      {
+        key: "closed",
+        header: "Closed",
+        render: (t) =>
+          t.closed_at
+            ? t.closed_at.slice(0, 19).replace("T", " ")
+            : "-",
+      },
+
+      {
+        key: "pnl",
+        header: "PnL",
+        render: (t) => {
+          const pnl = Number(t.pnl ?? 0);
+
+          return (
+            <span
+              className={
+                pnl >= 0
+                  ? "text-emerald-400 font-semibold"
+                  : "text-red-400 font-semibold"
+              }
+            >
+              {pnl.toFixed(2)}
+            </span>
+          );
+        },
+      },
+
+      {
+        key: "pnl_percent",
+        header: "PnL %",
+        render: (t) => {
+          const pct = Number(t.pnl_percent ?? 0);
+
+          return (
+            <span
+              className={
+                pct >= 0
+                  ? "text-emerald-300"
+                  : "text-red-300"
+              }
+            >
+              {pct ? `${pct.toFixed(2)}%` : "-"}
+            </span>
+          );
+        },
+      },
+    ],
+    []
+  );
+
   /* ================= ACTIONS ================= */
 
   async function handleDelete() {
     if (!confirm("Delete backtest?")) return;
 
     setLoadingDelete(true);
+
     try {
       await deleteBacktest(id!);
       navigate("/backtests");
@@ -309,31 +416,27 @@ export default function BacktestDetail() {
         metrics,
         trades,
       });
-
-    } catch (err) {
-      console.error(err);
     } finally {
       setLoadingPdf(false);
     }
   }
 
-  /* ================= CONDITIONAL UI ================= */
-
-  if (error) {
-    return <div className="p-6 text-red-400">{error}</div>;
-  }
-
-  if (!data) {
-    return <div className="p-6 text-slate-400">Loading...</div>;
-  }
-
   /* ================= UI ================= */
+
+  if (error) return <div className="p-6 text-red-400">{error}</div>;
+
+  if (!data || !run)
+    return <div className="p-6 text-slate-400">Loading...</div>;
 
   return (
     <div id="backtest-report" className="space-y-8">
+
       {/* HEADER */}
+
       <div className="flex justify-between items-start">
+
         <div>
+
           <h1 className="text-2xl font-bold text-white">
             {run.symbol} — {run.timeframe}
           </h1>
@@ -357,10 +460,17 @@ export default function BacktestDetail() {
             {run.fee_rate != null ? Number(run.fee_rate).toFixed(4) : "—"} •{" "}
             {days != null ? `Period: ${days} days` : "Period: —"}
           </p>
+
         </div>
 
         <div className="flex gap-3 items-center">
-          <DetailNavigator ids={allIds} currentId={id!} basePath="/backtests" />
+
+          <DetailNavigator
+            ids={allIds}
+            currentId={id!}
+            basePath="/backtests"
+          />
+
           <StatusBadge status={run.status} />
 
           <Button
@@ -382,14 +492,18 @@ export default function BacktestDetail() {
           >
             Delete
           </Button>
+
         </div>
+
       </div>
+
+      {/* WARNING */}
 
       {hadForcedClose && (
         <div className="bg-amber-900/40 border border-amber-600 text-amber-300 px-4 py-3 rounded-lg text-sm">
-          ⚠ Strategy ended with <strong>{openPositionsAtEnd}</strong> open position
-          {openPositionsAtEnd > 1 ? "s" : ""}.  
-          They were automatically closed at the last candle for reporting purposes.
+          ⚠ Strategy ended with <strong>{openPositionsAtEnd}</strong> open
+          position{openPositionsAtEnd > 1 ? "s" : ""}. They were automatically
+          closed at the last candle for reporting purposes.
         </div>
       )}
 
@@ -594,86 +708,16 @@ export default function BacktestDetail() {
         <EquityCurveChart equity={equity_curve} />
       </div>
 
-      {/* TRADES TABLE */}
-      <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
-        <div className="px-4 py-3 bg-slate-900 flex items-center justify-between">
-          <h3 className="text-white font-semibold text-sm">Trades</h3>
-          <span className="text-xs text-slate-400">{trades.length} total</span>
-        </div>
+      {/* TRADES */}
 
-        <table className="w-full text-sm">
-          <thead className="bg-slate-900 text-slate-400 uppercase text-xs">
-            <tr>
-              <th className="px-4 py-3 text-left">#</th>
-              <th className="px-4 py-3 text-left">Side</th>
-              <th className="px-4 py-3 text-left">Qty</th>
-              <th className="px-4 py-3 text-left">Entry</th>
-              <th className="px-4 py-3 text-left">Exit</th>
-              <th className="px-4 py-3 text-left">Opened</th>
-              <th className="px-4 py-3 text-left">Closed</th>
-              <th className="px-4 py-3 text-left">PnL</th>
-              <th className="px-4 py-3 text-left">PnL %</th>
-            </tr>
-          </thead>
+      <ListView
+        title="Trades"
+        description="Executed trades during the backtest"
+        columns={tradeColumns}
+        data={trades}
+        emptyMessage="No trades generated for this run."
+      />
 
-          <tbody>
-            {trades.map((t: any, i: number) => {
-              const pnl = Number(t.pnl ?? t.net_pnl ?? 0);
-              const pnlPct = Number(t.pnl_percent ?? 0);
-
-              return (
-                <tr
-                  key={i}
-                  className="border-t border-slate-700 hover:bg-slate-900"
-                >
-                  <td className="px-4 py-3 text-slate-500">{i + 1}</td>
-                  <td className="px-4 py-3 flex items-center gap-2">
-                    {t.side}
-                    {t.forced_close && (
-                      <span className="text-xs bg-amber-700 text-white px-2 py-0.5 rounded">
-                        Forced
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">{Number(t.quantity ?? 0).toFixed(4)}</td>
-                  <td className="px-4 py-3">{Number(t.entry_price ?? 0).toFixed(2)}</td>
-                  <td className="px-4 py-3">
-                    {t.exit_price != null ? Number(t.exit_price).toFixed(2) : "-"}
-                  </td>
-                  <td className="px-4 py-3 text-slate-400">
-                    {t.opened_at?.slice(0, 19)?.replace("T", " ") ?? "-"}
-                  </td>
-                  <td className="px-4 py-3 text-slate-400">
-                    {t.closed_at?.slice(0, 19)?.replace("T", " ") ?? "-"}
-                  </td>
-                  <td
-                    className={`px-4 py-3 font-semibold ${
-                      pnl >= 0 ? "text-green-400" : "text-red-400"
-                    }`}
-                  >
-                    {pnl.toFixed(2)}
-                  </td>
-                  <td
-                    className={`px-4 py-3 ${
-                      pnlPct >= 0 ? "text-green-300" : "text-red-300"
-                    }`}
-                  >
-                    {pnlPct ? `${pnlPct.toFixed(2)}%` : "-"}
-                  </td>
-                </tr>
-              );
-            })}
-
-            {!trades.length && (
-              <tr>
-                <td colSpan={9} className="px-4 py-6 text-center text-slate-400">
-                  No trades generated for this run.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
     </div>
   );
 }

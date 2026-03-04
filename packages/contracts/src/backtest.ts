@@ -73,24 +73,50 @@ export const BacktestRunSchema = z.object({
 export type BacktestRun = z.infer<typeof BacktestRunSchema>;
 
 /* =========================
-   DTO
+   Trade
 ========================= */
 
-export const CreateBacktestSchema = z.object({
+export const BacktestTradeSchema = z.object({
+  side: z.enum(["LONG", "SHORT"]),
+  entry_price: z.number(),
+  exit_price: z.number().nullable(),
+  quantity: z.number(),
+  pnl: z.number(),
+  pnl_percent: z.number(),
+  opened_at: z.string(),
+  closed_at: z.string().nullable(),
+  forced_close: z.boolean().optional(),
+});
+
+export type BacktestTrade = z.infer<typeof BacktestTradeSchema>;
+
+/* =========================
+   Create Backtest
+========================= */
+
+export const CreateBacktestRequestSchema = z.object({
   algorithm_id: z.string().uuid(),
   exchange: z.string(),
   symbol: z.string(),
   timeframe: z.string(),
-  initial_balance: z.number(),
+  initial_balance: z.number().positive(),
   start_date: z.string(),
   end_date: z.string(),
   fee_rate: z.number().optional(),
 });
 
-export type CreateBacktestDto = z.infer<typeof CreateBacktestSchema>;
+export type CreateBacktestRequest =
+  z.infer<typeof CreateBacktestRequestSchema>;
+
+export const CreateBacktestResponseSchema = z.object({
+  run_id: z.string().uuid(),
+});
+
+export type CreateBacktestResponse =
+  z.infer<typeof CreateBacktestResponseSchema>;
 
 /* =========================
-   Responses
+   List Response
 ========================= */
 
 export const BacktestsListResponseSchema = z.object({
@@ -102,20 +128,42 @@ export type BacktestsListResponse = z.infer<
 >;
 
 /* =========================
-   Backtest Detail Response
+   Backtest Status
+========================= */
+
+export const BacktestStatusResponseSchema = z.object({
+  status: BacktestStatusSchema,
+  progress: z.number(),
+});
+
+export type BacktestStatusResponse =
+  z.infer<typeof BacktestStatusResponseSchema>;
+
+/* =========================
+   Backtest Detail
 ========================= */
 
 export const BacktestDetailResponseSchema = z.object({
   run: BacktestRunSchema,
+
   metrics: z.any().nullable(),
+
   analysis: BacktestAnalysisSchema.nullable(),
+
   trades: z.array(z.any()),
+
   equity_curve: z.array(z.any()),
+
   candles: z.array(z.any()),
+
   candles_count: z.number(),
+
   candles_start_ts: z.number().nullable(),
+
   candles_end_ts: z.number().nullable(),
+
   open_positions_at_end: z.number(),
+
   had_forced_close: z.boolean(),
 });
 

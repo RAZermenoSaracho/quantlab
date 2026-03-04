@@ -5,6 +5,7 @@ import {
   stopPaperOnEngine,
 } from "../services/pythonEngine.service";
 import { handlePaperEvent } from "../services/paperEvent.service";
+import { PaperRunDetailResponseSchema, PaperEngineEventSchema} from "@quantlab/contracts";
 
 /* =====================================================
    START PAPER RUN
@@ -150,12 +151,11 @@ export async function receivePaperEvent(
   next: NextFunction
 ) {
   try {
-    const event = req.body;
+    const event = PaperEngineEventSchema.parse(req.body);
 
     await handlePaperEvent(event);
 
     return res.json({ success: true });
-
   } catch (err) {
     next(err);
   }
@@ -163,6 +163,9 @@ export async function receivePaperEvent(
 
 /* =====================================================
    GET ONE PAPER RUN
+===================================================== */
+/* =====================================================
+   GET ONE PAPER RUN (STRICT + NORMALIZED)
 ===================================================== */
 export async function getPaperRunById(
   req: Request,
@@ -173,14 +176,20 @@ export async function getPaperRunById(
     const runId = req.params.id;
     const userId = req.user!.id;
 
+    /* =========================
+       FETCH RUN
+    ========================= */
+
     const runResult = await pool.query(
-      `SELECT 
+      `
+      SELECT 
         r.*,
         a.name AS algorithm_name,
         a.notes_html AS algorithm_description
       FROM paper_runs r
       JOIN algorithms a ON a.id = r.algorithm_id
-      WHERE r.id = $1 AND r.user_id = $2`,
+      WHERE r.id = $1 AND r.user_id = $2
+      `,
       [runId, userId]
     );
 
@@ -188,19 +197,143 @@ export async function getPaperRunById(
       return res.status(404).json({ error: "Paper run not found" });
     }
 
+    const rawRun = runResult.rows[0];
+
+    /* =========================
+       NORMALIZE POSITION JSON
+    ========================= */
+
+    let normalizedPosition = null;
+
+    if (rawRun.position) {
+      const pos = rawRun.position;
+
+      normalizedPosition = {
+        side: pos.side,
+        quantity: Number(pos.quantity),
+        entry_price: Number(pos.entry_price),
+        opened_at:
+          pos.opened_at != null
+            ? new Date(pos.opened_at).toISOString()
+            : null,
+      };
+    }
+
+    /* =========================
+       NORMALIZE RUN
+    ========================= */
+
+    const normalizedRun = {
+      id: rawRun.id,
+      user_id: rawRun.user_id,
+      algorithm_id: rawRun.algorithm_id,
+
+      algorithm_name: rawRun.algorithm_name ?? null,
+      algorithm_description: rawRun.algorithm_description ?? null,
+
+      exchange: rawRun.exchange,
+      symbol: rawRun.symbol,
+      timeframe: rawRun.timeframe,
+
+      status: rawRun.status,
+
+      initial_balance: Number(rawRun.initial_balance),
+      current_balance: Number(rawRun.current_balance),
+
+      quote_balance:
+        rawRun.quote_balance != null
+          ? Number(rawRun.quote_balance)
+          : null,
+
+      base_balance:
+        rawRun.base_balance != null
+          ? Number(rawRun.base_balance)
+          : null,
+
+      equity:
+        rawRun.equity != null
+          ? Number(rawRun.equity)
+          : null,
+
+      last_price:
+        rawRun.last_price != null
+          ? Number(rawRun.last_price)
+          : null,
+
+      fee_rate:
+        rawRun.fee_rate != null
+          ? Number(rawRun.fee_rate)
+          : null,
+
+      position: normalizedPosition,
+
+      engine_session_id: rawRun.engine_session_id ?? null,
+
+      started_at: rawRun.started_at?.toISOString?.() ?? null,
+      updated_at: rawRun.updated_at?.toISOString?.() ?? null,
+    };
+
+    /* =========================
+       FETCH TRADES (NO SELECT *)
+    ========================= */
+
     const tradesResult = await pool.query(
-      `SELECT *
-       FROM trades
-       WHERE run_id = $1 AND run_type = 'PAPER'
-       ORDER BY created_at ASC`,
+      `
+      SELECT
+        id,
+        run_id,
+        side,
+        entry_price,
+        exit_price,
+        quantity,
+        pnl,
+        pnl_percent,
+        opened_at,
+        closed_at
+      FROM trades
+      WHERE run_id = $1 AND run_type = 'PAPER'
+      ORDER BY created_at ASC
+      `,
       [runId]
     );
 
-    return res.json({
-      run: runResult.rows[0],
-      trades: tradesResult.rows,
+    /* =========================
+       NORMALIZE TRADES
+    ========================= */
+
+    const normalizedTrades = tradesResult.rows.map((t) => ({
+      id: t.id,
+      run_id: t.run_id,
+      run_type: t.run_type,
+
+      side: t.side,
+
+      entry_price: Number(t.entry_price),
+      exit_price: t.exit_price != null ? Number(t.exit_price) : null,
+
+      quantity: Number(t.quantity),
+
+      pnl: t.pnl != null ? Number(t.pnl) : null,
+      pnl_percent: t.pnl_percent != null ? Number(t.pnl_percent) : null,
+
+      opened_at: t.opened_at?.toISOString?.() ?? null,
+      closed_at: t.closed_at?.toISOString?.() ?? null,
+
+      created_at: t.created_at?.toISOString?.() ?? null,
+
+      forced_close: Boolean(t.forced_close),
+    }));
+
+    /* =========================
+       STRICT CONTRACT VALIDATION
+    ========================= */
+
+    const response = PaperRunDetailResponseSchema.parse({
+      run: normalizedRun,
+      trades: normalizedTrades,
     });
 
+    return res.json(response);
   } catch (err) {
     next(err);
   }
@@ -238,8 +371,14 @@ export async function getAllPaperRuns(
       [userId]
     );
 
-    return res.json({ runs: result.rows });
+    const normalizedRuns = result.rows.map((r) => ({
+      ...r,
+      initial_balance: Number(r.initial_balance),
+      current_balance: Number(r.current_balance),
+      started_at: r.started_at?.toISOString?.() ?? null,
+    }));
 
+    return res.json({ runs: normalizedRuns });
   } catch (err) {
     next(err);
   }

@@ -53,8 +53,8 @@ CREATE TYPE paper_status AS ENUM (
 );
 
 CREATE TYPE trade_side AS ENUM (
-    'BUY',
-    'SELL'
+    'LONG',
+    'SHORT'
 );
 
 CREATE TYPE trade_type AS ENUM (

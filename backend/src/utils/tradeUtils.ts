@@ -1,20 +1,33 @@
-export type DbTradeSide = "BUY" | "SELL";
+import { PaperTradeSide } from "@quantlab/contracts";
 
-export function normalizeTradeSide(trade: any): DbTradeSide {
-  const raw = String(trade?.side ?? "").toUpperCase().trim();
+/**
+ * Canonical trade side for QuantLab is LONG | SHORT.
+ * This function tolerates legacy inputs (BUY/SELL) but always returns LONG/SHORT.
+ */
+export function normalizeTradeSide(input: unknown): PaperTradeSide {
+  const raw = String((input as any)?.side ?? input ?? "")
+    .toUpperCase()
+    .trim();
 
-  // Engine might send LONG/SHORT or BUY/SELL
-  if (raw === "LONG" || raw === "BUY") return "BUY";
-  if (raw === "SHORT" || raw === "SELL") return "SELL";
+  if (raw === "LONG" || raw === "BUY") return "LONG";
+  if (raw === "SHORT" || raw === "SELL") return "SHORT";
 
-  // fallback heuristic
-  const entry = Number(trade?.entry_price ?? 0);
-  const exit = Number(trade?.exit_price ?? 0);
+  // Hard fallback: don't guess by prices; default to LONG to avoid DB errors.
+  // Better to log upstream if this happens.
+  return "LONG";
+}
 
-  if (Number.isFinite(entry) && Number.isFinite(exit)) {
-    return entry < exit ? "BUY" : "SELL";
-  }
+/**
+ * Strong variant that throws if side is not recognizable.
+ * Use this if you prefer failing fast at the boundary.
+ */
+export function assertTradeSide(input: unknown): PaperTradeSide {
+  const raw = String((input as any)?.side ?? input ?? "")
+    .toUpperCase()
+    .trim();
 
-  // safest default
-  return "BUY";
+  if (raw === "LONG" || raw === "BUY") return "LONG";
+  if (raw === "SHORT" || raw === "SELL") return "SHORT";
+
+  throw new Error(`Invalid trade side: ${raw}`);
 }

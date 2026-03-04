@@ -364,7 +364,7 @@ class PaperSession:
                 "equity": float(equity),
                 "last_price": float(price),
                 "position": self.position,
-                "timestamp": int(timestamp),
+                # "timestamp": int(timestamp),
             },
         )
 
