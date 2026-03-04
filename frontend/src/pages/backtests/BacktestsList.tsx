@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { getAllBacktests } from "../../services/backtest.service";
 import type { BacktestRun } from "@quantlab/contracts";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import Button from "../../components/ui/Button";
+import { useApi } from "../../hooks/useApi";
 
 function fmtPct(x?: number) {
   if (!x && x !== 0) return "—";
@@ -17,18 +18,11 @@ function fmtMoney(x?: number) {
 }
 
 export default function BacktestsList() {
-  const [backtests, setBacktests] = useState<BacktestRun[]>([]);
-  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
-
-  useEffect(() => {
-    async function load() {
-      const data = await getAllBacktests();
-      setBacktests(data.backtests);
-      setLoading(false);
-    }
-    load();
-  }, []);
+  const { data, loading } = useApi(getAllBacktests, [], {
+    fallbackMessage: "Failed to load backtests",
+  });
+  const backtests = useMemo(() => data?.backtests ?? [], [data]);
 
   const columns: ListColumn<BacktestRun>[] = [
     {

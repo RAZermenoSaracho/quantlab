@@ -2,8 +2,10 @@ import api from "./api.service";
 
 import type {
   Algorithm,
+  AlgorithmRunsResponse,
   AlgorithmsListResponse,
   CreateAlgorithmDto,
+  MessageResponse,
   UpdateAlgorithmDto,
 } from "@quantlab/contracts";
 
@@ -54,19 +56,14 @@ export function refreshAlgorithmFromGithub(id: string): Promise<Algorithm> {
    DELETE
 ============================== */
 
-export function deleteAlgorithm(id: string): Promise<{ message: string }> {
-  return api.del<{ message: string }>(`/algorithms/${id}`);
+export function deleteAlgorithm(id: string): Promise<MessageResponse> {
+  return api.del<MessageResponse>(`/algorithms/${id}`);
 }
 
 /* ==============================
    GET RUNS
 ============================== */
 
-export function getAlgorithmRuns(
-  id: string
-): Promise<{
-  backtests: any[];
-  paperRuns: any[];
-}> {
-  return api.get<{ backtests: any[]; paperRuns: any[] }>(`/algorithms/${id}/runs`);
+export function getAlgorithmRuns(id: string): Promise<AlgorithmRunsResponse> {
+  return api.get<AlgorithmRunsResponse>(`/algorithms/${id}/runs`);
 }

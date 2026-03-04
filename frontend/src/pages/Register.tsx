@@ -3,6 +3,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthProvider";
 import OAuthButton from "../components/ui/OAuthButton";
 import Button from "../components/ui/Button";
+import { registerUser } from "../services/auth.service";
 
 const BACKEND_URL = "http://localhost:5000";
 
@@ -28,24 +29,11 @@ export default function Register() {
     setLoading(true);
 
     try {
-      const res = await fetch(`${BACKEND_URL}/api/auth/register`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ email, password }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || "Registration failed");
-      }
-
+      const data = await registerUser({ email, password });
       login(data.token, data.user);
       navigate("/dashboard");
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Registration failed");
     } finally {
       setLoading(false);
     }

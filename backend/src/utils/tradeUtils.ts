@@ -1,13 +1,24 @@
 import { PaperTradeSide } from "@quantlab/contracts";
 
+type TradeSideInput = {
+  side?: unknown;
+};
+
+function readTradeSide(input: unknown): string {
+  const normalized =
+    typeof input === "object" && input !== null && "side" in input
+      ? (input as TradeSideInput).side
+      : input;
+
+  return String(normalized ?? "").toUpperCase().trim();
+}
+
 /**
  * Canonical trade side for QuantLab is LONG | SHORT.
  * This function tolerates legacy inputs (BUY/SELL) but always returns LONG/SHORT.
  */
 export function normalizeTradeSide(input: unknown): PaperTradeSide {
-  const raw = String((input as any)?.side ?? input ?? "")
-    .toUpperCase()
-    .trim();
+  const raw = readTradeSide(input);
 
   if (raw === "LONG" || raw === "BUY") return "LONG";
   if (raw === "SHORT" || raw === "SELL") return "SHORT";
@@ -22,9 +33,7 @@ export function normalizeTradeSide(input: unknown): PaperTradeSide {
  * Use this if you prefer failing fast at the boundary.
  */
 export function assertTradeSide(input: unknown): PaperTradeSide {
-  const raw = String((input as any)?.side ?? input ?? "")
-    .toUpperCase()
-    .trim();
+  const raw = readTradeSide(input);
 
   if (raw === "LONG" || raw === "BUY") return "LONG";
   if (raw === "SHORT" || raw === "SELL") return "SHORT";

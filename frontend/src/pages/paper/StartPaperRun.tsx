@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { startPaperRun } from "../../services/paper.service";
 import { getAlgorithms } from "../../services/algorithm.service";
@@ -17,15 +17,14 @@ import type {
   StartPaperRunRequest,
   Symbol,
 } from "@quantlab/contracts";
+import { useApi } from "../../hooks/useApi";
 
 export default function StartPaperRun() {
 
   const navigate = useNavigate();
 
-  const [algorithms, setAlgorithms] = useState<Algorithm[]>([]);
-  const [exchanges, setExchanges] = useState<Exchange[]>([]);
-  const [symbols, setSymbols] = useState<Symbol[]>([]);
   const [symbolQuery, setSymbolQuery] = useState("");
+  const [debouncedSymbolQuery, setDebouncedSymbolQuery] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,46 +37,52 @@ export default function StartPaperRun() {
     initial_balance: 1000,
   });
 
-  /* =====================================
-     Load algorithms
-  ===================================== */
-
-  useEffect(() => {
-    async function load() {
-
-      try {
-        const data = await getAlgorithms();
-        setAlgorithms(data.algorithms);
-      } catch (err) {
-        console.error("Failed to load algorithms:", err);
-        setAlgorithms([]);
-      }
-
+  const { data: algorithmsData } = useApi(getAlgorithms, [], {
+    fallbackMessage: "Failed to load algorithms",
+  });
+  const { data: exchangesData } = useApi(getExchanges, [], {
+    fallbackMessage: "Failed to load exchanges",
+  });
+  const { data: symbolsData } = useApi(
+    () => getSymbols(form.exchange, debouncedSymbolQuery),
+    [form.exchange, debouncedSymbolQuery],
+    {
+      enabled: Boolean(debouncedSymbolQuery),
+      initialData: { symbols: [] },
+      fallbackMessage: "Failed to load symbols",
     }
-
-    load();
-  }, []);
-
-  /* =====================================
-     Load exchanges
-  ===================================== */
-
-  useEffect(() => {
-
-    async function load() {
-
-      const data = await getExchanges();
-      setExchanges(data.exchanges);
-
-    }
-
-    load();
-
-  }, []);
+  );
+  const algorithms = useMemo<Algorithm[]>(
+    () => algorithmsData?.algorithms ?? [],
+    [algorithmsData]
+  );
+  const exchanges = useMemo<Exchange[]>(
+    () => exchangesData?.exchanges ?? [],
+    [exchangesData]
+  );
+  const symbols = useMemo<Symbol[]>(
+    () => symbolsData?.symbols ?? [],
+    [symbolsData]
+  );
 
   /* =====================================
      Load default fee when exchange changes
   ===================================== */
+
+  useEffect(() => {
+    if (!symbolQuery) {
+      setDebouncedSymbolQuery("");
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setDebouncedSymbolQuery(symbolQuery);
+    }, 300);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [symbolQuery]);
 
   useEffect(() => {
 
@@ -97,26 +102,6 @@ export default function StartPaperRun() {
     loadFee();
 
   }, [form.exchange]);
-
-  /* =====================================
-     Symbol search (debounced)
-  ===================================== */
-
-  useEffect(() => {
-
-    if (!symbolQuery) return;
-
-    const timeout = setTimeout(async () => {
-
-      const data = await getSymbols(form.exchange, symbolQuery);
-
-      setSymbols(data.symbols);
-
-    }, 300);
-
-    return () => clearTimeout(timeout);
-
-  }, [symbolQuery, form.exchange]);
 
   /* =====================================
      Submit
@@ -296,7 +281,6 @@ export default function StartPaperRun() {
                         });
 
                         setSymbolQuery(s.symbol);
-                        setSymbols([]);
 
                       }}
                       className="px-4 py-2 hover:bg-slate-800 cursor-pointer text-white"

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   getBacktest,
@@ -15,13 +15,13 @@ import Button from "../../components/ui/Button";
 import { exportStructuredBacktestPdf } from "../../utils/exportBacktestPdf";
 
 import ListView, { type ListColumn } from "../../components/ui/ListView";
+import { useApi } from "../../hooks/useApi";
 
 import type {
   BacktestTrade,
   EquityPoint,
   BacktestRun,
   BacktestAnalysis,
-  BacktestDetailResponse,
 } from "@quantlab/contracts";
 import { formatDateTime } from "../../utils/date";
 
@@ -139,9 +139,6 @@ export default function BacktestDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
-  const [data, setData] = useState<BacktestDetailResponse | null>(null);
-  const [allIds, setAllIds] = useState<string[]>([]);
-  const [error, setError] = useState<string | null>(null);
   const [loadingDelete, setLoadingDelete] = useState(false);
   const [loadingPdf, setLoadingPdf] = useState(false);
 
@@ -151,23 +148,31 @@ export default function BacktestDetail() {
 
   const [selectedPeriod, setSelectedPeriod] = useState<string | null>(null);
 
-  /* ================= LOAD DATA ================= */
-
-  useEffect(() => {
-    async function load() {
-      if (!id) return;
+  const { data: detailData, error: loadError } = useApi(
+    async () => {
+      if (!id) {
+        throw new Error("Missing backtest id");
+      }
 
       const [detail, list] = await Promise.all([
         getBacktest(id),
         getAllBacktests(),
       ]);
 
-      setData(detail);
-      setAllIds(list.backtests.map((b: BacktestRun) => b.id));
+      return {
+        detail,
+        allIds: list.backtests.map((backtest) => backtest.id),
+      };
+    },
+    [id],
+    {
+      enabled: Boolean(id),
+      fallbackMessage: "Failed to load backtest",
     }
+  );
 
-    load().catch(() => setError("Failed to load backtest"));
-  }, [id]);
+  const data = detailData?.detail ?? null;
+  const allIds = detailData?.allIds ?? [];
 
   /* ================= SAFE DATA ================= */
 
@@ -425,7 +430,7 @@ export default function BacktestDetail() {
 
   /* ================= UI ================= */
 
-  if (error) return <div className="p-6 text-red-400">{error}</div>;
+  if (loadError) return <div className="p-6 text-red-400">{loadError}</div>;
 
   if (!data || !run)
     return <div className="p-6 text-slate-400">Loading...</div>;

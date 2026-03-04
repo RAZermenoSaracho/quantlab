@@ -1,4 +1,12 @@
-export default function Field({ label, children }: any) {
+import type { ReactNode } from "react";
+
+export default function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
 
   return (
     <div className="space-y-3">

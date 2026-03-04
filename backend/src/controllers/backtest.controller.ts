@@ -458,9 +458,10 @@ export async function getBacktestStatus(
   const id = rawId;
 
   const engineProgress = await getEngineProgress(id);
+  const progress = engineProgress;
 
   return sendSuccess(res, {
-    status: engineProgress.progress >= 100 ? "COMPLETED" : "RUNNING",
-    progress: engineProgress.progress,
+    status: progress >= 100 ? "COMPLETED" : "RUNNING",
+    progress,
   });
 }

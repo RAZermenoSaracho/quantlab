@@ -4,6 +4,22 @@ import type { ApiResponse } from "@quantlab/contracts";
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 type QueryParams = Record<string, string | number | undefined>;
+type ErrorLike = {
+  error?: {
+    message?: string;
+  };
+  detail?: string;
+};
+
+function readErrorMessage(value: unknown): string | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const candidate = value as ErrorLike;
+
+  return candidate.error?.message || candidate.detail || null;
+}
 
 function buildQuery(params?: QueryParams) {
   if (!params) return "";
@@ -24,7 +40,7 @@ function isApiResponse<T>(x: unknown): x is ApiResponse<T> {
     typeof x === "object" &&
     x !== null &&
     "success" in x &&
-    typeof (x as any).success === "boolean"
+    typeof (x as { success: unknown }).success === "boolean"
   );
 }
 
@@ -53,10 +69,7 @@ async function request<T>(
   */
   if (!isApiResponse<T>(raw)) {
     if (!res.ok) {
-      const msg =
-        (raw as any)?.error?.message ||
-        (raw as any)?.detail ||
-        "Request failed";
+      const msg = readErrorMessage(raw) || "Request failed";
       throw new Error(msg);
     }
     return raw as T;
@@ -65,7 +78,7 @@ async function request<T>(
   const json = raw;
 
   if (!res.ok || !json.success) {
-    const msg = (json as any)?.error?.message || "Request failed";
+    const msg = readErrorMessage(json) || "Request failed";
     throw new Error(msg);
   }
 

@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { BacktestRunSchema } from "./backtest";
+import { PaperRunSchema } from "./paper";
 
 /* =========================
    Algorithm Entity
@@ -49,3 +51,37 @@ export const AlgorithmsListResponseSchema = z.object({
 export type AlgorithmsListResponse = z.infer<
   typeof AlgorithmsListResponseSchema
 >;
+
+export const AlgorithmBacktestRunSchema = BacktestRunSchema.pick({
+  id: true,
+  symbol: true,
+  timeframe: true,
+  status: true,
+  created_at: true,
+  total_return_percent: true,
+  total_return_usdt: true,
+}).extend({
+  exchange: z.string().optional(),
+});
+
+export type AlgorithmBacktestRun = z.infer<typeof AlgorithmBacktestRunSchema>;
+
+export const AlgorithmPaperRunSchema = PaperRunSchema.pick({
+  id: true,
+  symbol: true,
+  timeframe: true,
+  status: true,
+  current_balance: true,
+  started_at: true,
+}).extend({
+  exchange: z.string().optional(),
+});
+
+export type AlgorithmPaperRun = z.infer<typeof AlgorithmPaperRunSchema>;
+
+export const AlgorithmRunsResponseSchema = z.object({
+  backtests: z.array(AlgorithmBacktestRunSchema),
+  paperRuns: z.array(AlgorithmPaperRunSchema),
+});
+
+export type AlgorithmRunsResponse = z.infer<typeof AlgorithmRunsResponseSchema>;

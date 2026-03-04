@@ -1,15 +1,21 @@
 import { io, Socket } from "socket.io-client";
+import type {
+  ClientToServerEvents,
+  ServerToClientEvents,
+} from "@quantlab/contracts";
 
 const SOCKET_BASE =
   import.meta.env.VITE_API_URL?.replace("/api", "") || "http://localhost:5000";
 
-let socket: Socket | null = null;
+export type QuantlabSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
+
+let socket: QuantlabSocket | null = null;
 
 /* =====================================================
    CONNECT
 ===================================================== */
 
-export function connectSocket(): Socket {
+export function connectSocket(): QuantlabSocket {
   if (socket) return socket;
 
   const token = localStorage.getItem("token");
@@ -38,7 +44,7 @@ export function connectSocket(): Socket {
    GET INSTANCE
 ===================================================== */
 
-export function getSocket(): Socket | null {
+export function getSocket(): QuantlabSocket | null {
   return socket;
 }
 

@@ -1,5 +1,14 @@
+import type { ReactNode } from "react";
 
-export default function FormCard({ title, description, children }: any) {
+export default function FormCard({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
 
   return (
     <div className="bg-slate-800/60 border border-slate-700 rounded-2xl p-8 space-y-6 shadow-sm">

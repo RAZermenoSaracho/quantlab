@@ -1,15 +1,19 @@
 import { pool } from "../config/db";
 import { emitPaperEvent } from "./websocketManager.service";
 import { normalizeTradeSide } from "../utils/tradeUtils";
-import { toDateFromEngineTs } from "../utils/dateUtils";
+import { toDateFromEngineTs, toIsoOrNull } from "../utils/dateUtils";
 
 import {
   PaperEngineEvent,
+  PaperRunErrorEventSchema,
+  PaperRunStatusEventSchema,
+  PaperRunUpdateEventSchema,
+  PaperTickSchema,
   PaperTradeEventSchema,
   PaperBalanceEventSchema,
   PaperStatusEventSchema,
   PaperPositionEventSchema,
-  PaperErrorEventSchema,
+  TradeExecutionSchema,
 } from "@quantlab/contracts";
 
 import type { z } from "zod";
@@ -32,10 +36,6 @@ type PaperStatusPayload = z.infer<
 
 type PaperPositionPayload = z.infer<
   typeof PaperPositionEventSchema
->["payload"];
-
-type PaperErrorPayload = z.infer<
-  typeof PaperErrorEventSchema
 >["payload"];
 
 /* =====================================================
@@ -62,10 +62,14 @@ export async function handlePaperEvent(
       return handleErrorEvent(event.run_id, event.payload);
 
     case "candle":
-      return emitPaperEvent(event.run_id, "candle", {
-        run_id: event.run_id,
-        ...event.payload,
-      });
+      return emitPaperEvent(
+        event.run_id,
+        "paper_tick",
+        PaperTickSchema.parse({
+          run_id: event.run_id,
+          ...event.payload,
+        })
+      );
   }
 }
 
@@ -126,10 +130,22 @@ async function handleTradeEvent(
 
     await client.query("COMMIT");
 
-    emitPaperEvent(runId, "trade", {
-      run_id: runId,
-      ...trade,
-    });
+    await emitPaperEvent(
+      runId,
+      "trade_execution",
+      TradeExecutionSchema.parse({
+        run_id: runId,
+        side: dbSide,
+        entry_price: entryPrice,
+        exit_price: exitPrice,
+        quantity,
+        pnl,
+        pnl_percent: computedPnlPercent,
+        opened_at: toIsoOrNull(openedAt),
+        closed_at: toIsoOrNull(closedAt),
+        forced_close: forcedClose,
+      })
+    );
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;
@@ -184,14 +200,28 @@ async function handleBalanceEvent(
 
     await client.query("COMMIT");
 
-    emitPaperEvent(runId, "update", {
-      run_id: runId,
-      quote_balance: quoteBalance,
-      base_balance: baseBalance,
-      equity,
-      last_price: lastPrice,
-      position: payload.position ?? null,
-    });
+    await emitPaperEvent(
+      runId,
+      "paper_run_update",
+      PaperRunUpdateEventSchema.parse({
+        run_id: runId,
+        quote_balance: quoteBalance,
+        base_balance: baseBalance,
+        equity,
+        last_price: lastPrice,
+        position:
+          payload.position != null
+            ? {
+                ...payload.position,
+                opened_at: toIsoOrNull(
+                  payload.position.opened_at != null
+                    ? toDateFromEngineTs(payload.position.opened_at)
+                    : undefined
+                ),
+              }
+            : null,
+      })
+    );
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;
@@ -208,7 +238,21 @@ async function handlePositionEvent(
   runId: string,
   payload: PaperPositionPayload
 ) {
-  emitPaperEvent(runId, "position", payload);
+  await emitPaperEvent(
+    runId,
+    "paper_run_update",
+    PaperRunUpdateEventSchema.parse({
+      run_id: runId,
+      position: {
+        ...payload,
+        opened_at: toIsoOrNull(
+          payload.opened_at != null
+            ? toDateFromEngineTs(payload.opened_at)
+            : undefined
+        ),
+      },
+    })
+  );
 }
 
 /* =====================================================
@@ -234,7 +278,14 @@ async function handleStatusEvent(
 
     await client.query("COMMIT");
 
-    emitPaperEvent(runId, "status", payload);
+    await emitPaperEvent(
+      runId,
+      "paper_run_status",
+      PaperRunStatusEventSchema.parse({
+        run_id: runId,
+        status: payload.status,
+      })
+    );
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;
@@ -249,7 +300,14 @@ async function handleStatusEvent(
 
 async function handleErrorEvent(
   runId: string,
-  payload: PaperErrorPayload
+  payload: { message: string }
 ) {
-  emitPaperEvent(runId, "error", payload);
+  await emitPaperEvent(
+    runId,
+    "paper_run_error",
+    PaperRunErrorEventSchema.parse({
+      run_id: runId,
+      message: payload.message,
+    })
+  );
 }

@@ -1,61 +1,73 @@
 import axios from "axios";
 import { env } from "../config/env";
+import {
+  BacktestEngineRequestSchema,
+  BacktestEngineResponseSchema,
+  BacktestProgressEngineResponseSchema,
+  type BacktestEngineRequest,
+  type BacktestEngineResult,
+} from "@quantlab/contracts";
+
+type EngineErrorPayload = {
+  detail?: string;
+  error?: {
+    message?: string;
+  };
+};
+
+function handleEngineError(error: unknown): never {
+  if (axios.isAxiosError(error)) {
+    const payload = error.response?.data as EngineErrorPayload | undefined;
+
+    throw new Error(
+      payload?.detail ||
+      payload?.error?.message ||
+      "Engine error"
+    );
+  }
+
+  if (error instanceof Error) {
+    throw error;
+  }
+
+  throw new Error("Engine unavailable");
+}
 
 export async function runBacktestOnEngine(
   runId: string,
-  payload: {
-    code: string;
-    exchange: string;
-    symbol: string;
-    timeframe: string;
-    initial_balance: number;
-    start_date: string;
-    end_date: string;
-    fee_rate?: number;
-  }) {
+  payload: Omit<BacktestEngineRequest, "run_id">
+): Promise<BacktestEngineResult> {
   try {
+    const request = BacktestEngineRequestSchema.parse({
+      ...payload,
+      run_id: runId,
+    });
+
     const response = await axios.post(
       `${env.ENGINE_URL}/backtests`,
-      {
-        ...payload,
-        run_id: runId,
-      },
+      request
     );
 
-    const data = response.data;
+    const parsed = BacktestEngineResponseSchema.parse(response.data);
 
-    // Log raw response in debug mode
-    console.debug("Engine raw response:", data);
-
-    if (!data) {
-      throw new Error("Engine returned empty response");
+    if (!parsed.success) {
+      throw new Error(parsed.error.message);
     }
 
-    if (data.success === false) {
-      throw new Error(data.error || "Engine reported failure");
-    }
-
-    // Normalize wrapper
-    if (data.success && data.data) {
-      return data.data;
-    }
-
-    return data;
-
-  } catch (error: any) {
-    if (error.response) {
-      console.error("Engine error response:", error.response.data);
-      throw new Error(error.response.data.detail || "Engine error");
-    }
-
-    console.error("Engine connection error:", error.message);
-    throw new Error("Engine unavailable");
+    return parsed.data;
+  } catch (error: unknown) {
+    handleEngineError(error);
   }
 }
 
-export async function getEngineProgress(runId: string) {
-  const res = await axios.get(
-    `${env.ENGINE_URL}/backtest-progress/${runId}`
-  );
-  return res.data;
+export async function getEngineProgress(runId: string): Promise<number> {
+  try {
+    const res = await axios.get(
+      `${env.ENGINE_URL}/backtest-progress/${runId}`
+    );
+
+    return BacktestProgressEngineResponseSchema.parse(res.data).progress;
+  } catch (error: unknown) {
+    handleEngineError(error);
+  }
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   getAlgorithms,
@@ -9,13 +9,14 @@ import {
   getAlgorithmRuns,
 } from "../../services/algorithm.service";
 
-import type { Algorithm, BacktestRun, PaperRun } from "@quantlab/contracts";
+import type { BacktestRun, PaperRun } from "@quantlab/contracts";
 import DetailNavigator from "../../components/navigation/DetailNavigator";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
 import AlgorithmWorkspace from "../../components/algorithms/AlgorithmWorkspace";
 import Button from "../../components/ui/Button";
 import { formatDateTime } from "../../utils/date";
+import { useApi } from "../../hooks/useApi";
 
 type Tab = "overview" | "backtests" | "paper";
 
@@ -44,11 +45,6 @@ type AlgorithmPaperRun = Pick<
   exchange?: string;
 };
 
-type AlgorithmRunsResponse = {
-  backtests: AlgorithmBacktestRun[];
-  paperRuns: AlgorithmPaperRun[];
-};
-
 function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
@@ -57,56 +53,70 @@ export default function AlgorithmDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
-  const [allIds, setAllIds] = useState<string[]>([]);
-  const [algorithm, setAlgorithm] = useState<Algorithm | null>(null);
-  const [backtests, setBacktests] = useState<AlgorithmBacktestRun[]>([]);
-  const [paperRuns, setPaperRuns] = useState<AlgorithmPaperRun[]>([]);
-
   const [activeTab, setActiveTab] = useState<Tab>("overview");
 
   const [editing, setEditing] = useState(false);
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const [name, setName] = useState("");
   const [notesHtml, setNotesHtml] = useState("");
   const [code, setCode] = useState("");
 
-  useEffect(() => {
-    async function load() {
+  const {
+    data: detailData,
+    loading: detailLoading,
+    error: detailError,
+    setData: setDetailData,
+  } = useApi(
+    async () => {
       if (!id) {
-        return;
+        throw new Error("Missing algorithm id");
       }
 
-      setLoading(true);
-      setError(null);
+      const [algorithm, list, runs] = await Promise.all([
+        getAlgorithmById(id),
+        getAlgorithms(),
+        getAlgorithmRuns(id),
+      ]);
 
-      try {
-        const [algo, list, runs] = await Promise.all([
-          getAlgorithmById(id),
-          getAlgorithms(),
-          getAlgorithmRuns(id) as Promise<AlgorithmRunsResponse>,
-        ]);
+      return {
+        algorithm,
+        allIds: list.algorithms.map((item) => item.id),
+        runs,
+      };
+    },
+    [id],
+    {
+      enabled: Boolean(id),
+      fallbackMessage: "Failed to load algorithm",
+    }
+  );
 
-        setAlgorithm(algo);
-        setName(algo.name);
-        setNotesHtml(algo.notes_html || "");
-        setCode(algo.code);
-        setBacktests(runs.backtests);
-        setPaperRuns(runs.paperRuns);
-        setAllIds(list.algorithms.map((item) => item.id));
-      } catch (err: unknown) {
-        setError(getErrorMessage(err, "Failed to load algorithm"));
-      } finally {
-        setLoading(false);
-      }
+  const algorithm = detailData?.algorithm ?? null;
+  const allIds = detailData?.allIds ?? [];
+  const backtests = useMemo(
+    () => detailData?.runs.backtests ?? [],
+    [detailData]
+  );
+  const paperRuns = useMemo(
+    () => detailData?.runs.paperRuns ?? [],
+    [detailData]
+  );
+
+  useEffect(() => {
+    if (!algorithm) {
+      return;
     }
 
-    load();
-  }, [id]);
+    setName(algorithm.name);
+    setNotesHtml(algorithm.notes_html || "");
+    setCode(algorithm.code);
+  }, [algorithm]);
 
-  if (loading) {
+  const error = actionError || detailError;
+
+  if (detailLoading) {
     return (
       <div className="p-6 text-slate-400 animate-pulse">
         Loading algorithm...
@@ -134,7 +144,7 @@ export default function AlgorithmDetail() {
     }
 
     setSaving(true);
-    setError(null);
+    setActionError(null);
 
     try {
       const updated = await updateAlgorithm(id, {
@@ -143,10 +153,17 @@ export default function AlgorithmDetail() {
         code,
       });
 
-      setAlgorithm(updated);
+      setDetailData((current) =>
+        current
+          ? {
+              ...current,
+              algorithm: updated,
+            }
+          : current
+      );
       setEditing(false);
     } catch (err: unknown) {
-      setError(getErrorMessage(err, "Failed to save algorithm"));
+      setActionError(getErrorMessage(err, "Failed to save algorithm"));
     } finally {
       setSaving(false);
     }
@@ -158,13 +175,21 @@ export default function AlgorithmDetail() {
     }
 
     setSaving(true);
+    setActionError(null);
 
     try {
       const updated = await refreshAlgorithmFromGithub(id);
-      setAlgorithm(updated);
+      setDetailData((current) =>
+        current
+          ? {
+              ...current,
+              algorithm: updated,
+            }
+          : current
+      );
       setCode(updated.code);
     } catch (err: unknown) {
-      setError(getErrorMessage(err, "Failed to refresh algorithm"));
+      setActionError(getErrorMessage(err, "Failed to refresh algorithm"));
     } finally {
       setSaving(false);
     }

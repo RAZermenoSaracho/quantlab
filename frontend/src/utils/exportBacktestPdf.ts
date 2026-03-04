@@ -1,4 +1,21 @@
 import jsPDF from "jspdf";
+import type {
+  BacktestMetrics,
+  BacktestRun,
+  BacktestTrade,
+} from "@quantlab/contracts";
+
+type ExportBacktestRun = BacktestRun & {
+  candles_count?: number;
+};
+
+type ExportBacktestMetrics = BacktestMetrics & {
+  candles_count?: number;
+};
+
+type ExportBacktestTrade = BacktestTrade & {
+  net_pnl?: number;
+};
 
 /* ==============================
    Helpers: Export charts as images
@@ -54,18 +71,18 @@ function getCanvasDataUrl(selector: string): string | null {
   }
 }
 
-function safeText(x: any) {
+function safeText(x: unknown) {
   if (x == null) return "-";
   return String(x);
 }
 
-function fmtNum(x: any, d = 2) {
+function fmtNum(x: unknown, d = 2) {
   const n = Number(x);
   if (!Number.isFinite(n)) return "-";
   return n.toFixed(d);
 }
 
-function fmtPct(x: any, d = 2) {
+function fmtPct(x: unknown, d = 2) {
   const n = Number(x);
   if (!Number.isFinite(n)) return "-";
   return `${n.toFixed(d)}%`;
@@ -82,9 +99,9 @@ export async function exportStructuredBacktestPdf({
   openPositionsAtEnd,
   hadForcedClose,
 }: {
-  run: any;
-  metrics: any;
-  trades: any[];
+  run: ExportBacktestRun | null;
+  metrics: ExportBacktestMetrics;
+  trades: ExportBacktestTrade[];
   openPositionsAtEnd?: number;
   hadForcedClose?: boolean;
 }) {
@@ -116,7 +133,7 @@ export async function exportStructuredBacktestPdf({
     y += 6;
   };
 
-  const row = (label: string, value: any) => {
+  const row = (label: string, value: unknown) => {
     pdf.setFont("helvetica", "bold");
     pdf.text(label, margin, y);
     pdf.setFont("helvetica", "normal");

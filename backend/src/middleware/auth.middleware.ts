@@ -1,16 +1,18 @@
 import type { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
+import type { ApiError } from "@quantlab/contracts";
 import { env } from "../config/env";
+import { sendError } from "../utils/apiResponse";
 
 export function requireAuth(
   req: Request,
-  res: Response,
+  res: Response<ApiError>,
   next: NextFunction
 ) {
   const header = req.headers.authorization;
 
   if (!header?.startsWith("Bearer ")) {
-    return res.status(401).json({ error: "Missing or invalid Authorization header" });
+    return sendError(res, "Missing or invalid Authorization header", 401);
   }
 
   const token = header.slice("Bearer ".length);
@@ -24,6 +26,6 @@ export function requireAuth(
     req.user = { id: decoded.id, email: decoded.email };
     next();
   } catch {
-    return res.status(401).json({ error: "Invalid or expired token" });
+    return sendError(res, "Invalid or expired token", 401);
   }
 }

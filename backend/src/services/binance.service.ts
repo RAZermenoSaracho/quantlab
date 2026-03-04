@@ -1,4 +1,5 @@
 import axios from "axios";
+import type { Symbol } from "@quantlab/contracts";
 
 type BinanceSymbol = {
   symbol: string;
@@ -6,14 +7,22 @@ type BinanceSymbol = {
   quoteAsset: string;
 };
 
+type BinanceExchangeInfoResponse = {
+  symbols: Array<
+    BinanceSymbol & {
+      status: string;
+    }
+  >;
+};
+
 const BINANCE_BASE_URL = "https://api.binance.com";
 
-let cachedSymbols: BinanceSymbol[] | null = null;
+let cachedSymbols: Symbol[] | null = null;
 let cacheTimestamp: number | null = null;
 
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-export async function getBinanceSymbols(): Promise<BinanceSymbol[]> {
+export async function getBinanceSymbols(): Promise<Symbol[]> {
   const now = Date.now();
 
   // Return cache if valid
@@ -25,16 +34,14 @@ export async function getBinanceSymbols(): Promise<BinanceSymbol[]> {
     return cachedSymbols;
   }
 
-  const response = await axios.get(
+  const response = await axios.get<BinanceExchangeInfoResponse>(
     `${BINANCE_BASE_URL}/api/v3/exchangeInfo`
   );
 
-  const symbols: BinanceSymbol[] = response.data.symbols
-    .filter((s: any) => s.status === "TRADING")
-    .map((s: any) => ({
+  const symbols: Symbol[] = response.data.symbols
+    .filter((s) => s.status === "TRADING")
+    .map((s) => ({
       symbol: s.symbol,
-      baseAsset: s.baseAsset,
-      quoteAsset: s.quoteAsset,
     }));
 
   cachedSymbols = symbols;

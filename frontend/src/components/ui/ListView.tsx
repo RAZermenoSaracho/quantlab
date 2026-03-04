@@ -1,4 +1,5 @@
 import React from "react";
+import type { ListData } from "../../types/ui";
 
 export type ListColumn<T> = {
   key: string;
@@ -11,7 +12,7 @@ type ListViewProps<T> = {
   title?: string;
   description?: string;
   columns: ListColumn<T>[];
-  data: T[];
+  data: ListData<T>;
   loading?: boolean;
   emptyMessage?: string;
   onRowClick?: (item: T) => void;

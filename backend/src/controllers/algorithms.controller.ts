@@ -5,6 +5,7 @@ import { fetchGithubFile } from "../services/github.service";
 
 import {
   type Algorithm,
+  type AlgorithmRunsResponse,
   type AlgorithmsListResponse,
   type ApiResponse,
   type BacktestRun,
@@ -19,33 +20,6 @@ import { sendError, sendSuccess } from "../utils/apiResponse";
 type AlgorithmRow = Omit<Algorithm, "created_at" | "updated_at"> & {
   created_at: Date | string;
   updated_at: Date | string;
-};
-
-type AlgorithmRunsResponse = {
-  backtests: Array<
-    Pick<
-      BacktestRun,
-      | "id"
-      | "symbol"
-      | "timeframe"
-      | "status"
-      | "created_at"
-      | "total_return_percent"
-      | "total_return_usdt"
-    >
-  >;
-  paperRuns: Array<
-    Pick<
-      PaperRun,
-      | "id"
-      | "symbol"
-      | "timeframe"
-      | "status"
-      | "initial_balance"
-      | "current_balance"
-      | "started_at"
-    >
-  >;
 };
 
 function toIsoString(value: Date | string): string {

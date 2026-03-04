@@ -37,8 +37,8 @@ export default function CreateAlgorithm() {
       });
 
       navigate(`/algorithms/${algo.id}`);
-    } catch (err: any) {
-      setError(err.message || "Failed to create algorithm.");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to create algorithm.");
     } finally {
       setLoading(false);
     }

@@ -6,29 +6,27 @@ import {
   getPaperRunById,
   stopPaperRun,
 } from "../../services/paper.service";
-import { connectSocket } from "../../services/socket.service";
 import DetailNavigator from "../../components/navigation/DetailNavigator";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
-import type { Candle, EquityPoint, PaperRun, PaperTrade } from "@quantlab/contracts";
+import type {
+  Candle,
+  EquityPoint,
+  PaperRun,
+  PaperTrade,
+  PaperRunErrorEvent,
+  PaperRunStatusEvent,
+  PaperRunUpdateEvent,
+  PaperTick,
+  TradeExecution,
+} from "@quantlab/contracts";
 import CandlestickChart from "../../components/charts/CandlestickChart";
 import EquityCurveChart from "../../components/charts/EquityCurveChart";
 import StatusIndicator from "../../components/paper/StatusIndicator";
 import Button from "../../components/ui/Button";
 import KpiCard from "../../components/ui/KpiCard";
 import { formatDateTime } from "../../utils/date";
-
-type RunStreamUpdate = Partial<PaperRun> & {
-  run_id: string;
-  equity?: number;
-};
-
-type RunIdEvent = {
-  run_id: string;
-};
-
-type StreamCandle = Candle & {
-  run_id?: string;
-};
+import { useApi } from "../../hooks/useApi";
+import { usePaperRunEvents } from "../../hooks/usePaperRunEvents";
 
 export default function PaperRunDetail() {
   const { id } = useParams<{ id: string }>();
@@ -43,8 +41,30 @@ export default function PaperRunDetail() {
 
   const [candles, setCandles] = useState<Candle[]>([]);
   const [equityCurve, setEquityCurve] = useState<EquityPoint[]>([]);
-  const [backendConnected, setBackendConnected] = useState(false);
   const [exchangeStreaming, setExchangeStreaming] = useState(false);
+
+  const { data: initialData, error: loadError } = useApi(
+    async () => {
+      if (!runId) {
+        throw new Error("Invalid run.");
+      }
+
+      const [detail, list] = await Promise.all([
+        getPaperRunById(runId),
+        getAllPaperRuns(),
+      ]);
+
+      return {
+        detail,
+        allIds: list.runs.map((item) => item.id),
+      };
+    },
+    [runId],
+    {
+      enabled: Boolean(runId),
+      fallbackMessage: "Failed to load paper run",
+    }
+  );
 
   /* ================= TRADE TABLE ================= */
 
@@ -139,61 +159,49 @@ export default function PaperRunDetail() {
     []
   );
 
-  /* ================= LOAD DATA ================= */
-
   useEffect(() => {
-    if (!runId) return;
-
-    let cancelled = false;
-    const socket = connectSocket();
-
-    async function load() {
-      const [detail, list] = await Promise.all([
-        getPaperRunById(runId),
-        getAllPaperRuns(),
-      ]);
-
-      if (cancelled) return;
-
-      setRun(detail.run);
-      setTrades(detail.trades);
-      setAllIds(list.runs.map((r) => r.id));
-
-      const seedEquity = Number(
-        detail.run?.equity ?? detail.run?.quote_balance ?? 0
-      );
-
-      if (Number.isFinite(seedEquity)) {
-        setEquityCurve([{ timestamp: Date.now(), equity: seedEquity }]);
-      }
+    if (!initialData) {
+      return;
     }
 
-    load();
+    setRun(initialData.detail.run);
+    setTrades(initialData.detail.trades);
+    setAllIds(initialData.allIds);
 
-    socket.emit("join_paper_run", runId);
+    const seedEquity = Number(
+      initialData.detail.run.equity ?? initialData.detail.run.quote_balance ?? 0
+    );
 
-    const onConnect = () => setBackendConnected(true);
-    const onDisconnect = () => setBackendConnected(false);
+    if (Number.isFinite(seedEquity)) {
+      setEquityCurve([{ timestamp: Date.now(), equity: seedEquity }]);
+    }
+  }, [initialData]);
 
-    const onCandle = (candle: StreamCandle) => {
-      if (candle.run_id && candle.run_id !== runId) return;
-
+  const { backendConnected } = usePaperRunEvents(runId, {
+    onTick: (candle: PaperTick) => {
       setExchangeStreaming(true);
-
       setCandles((prev) => {
-        const ts = String(candle.timestamp);
-        const exists = prev.some((c) => String(c.timestamp) === ts);
-        if (exists) return prev;
-        return [...prev, candle];
+        const exists = prev.some((item) => item.timestamp === candle.timestamp);
+        if (exists) {
+          return prev;
+        }
+
+        const nextCandle: Candle = {
+          timestamp: candle.timestamp,
+          open: candle.open,
+          high: candle.high,
+          low: candle.low,
+          close: candle.close,
+          volume: candle.volume,
+        };
+
+        return [...prev, nextCandle];
       });
-    };
-
-    const onUpdate = (data: RunStreamUpdate) => {
-      if (data?.run_id !== runId) return;
-
+    },
+    onRunUpdate: (data: PaperRunUpdateEvent) => {
       setRun((prev) => (prev ? { ...prev, ...data } : prev));
 
-      if (data?.equity != null) {
+      if (data.equity != null) {
         const eq = Number(data.equity);
         if (Number.isFinite(eq)) {
           setEquityCurve((prev) => {
@@ -202,36 +210,33 @@ export default function PaperRunDetail() {
           });
         }
       }
-    };
+    },
+    onTradeExecution: (trade: TradeExecution) => {
+      const nextTrade: PaperTrade = {
+        id: `${trade.run_id}:${trade.opened_at ?? Date.now()}`,
+        run_id: trade.run_id,
+        run_type: "PAPER",
+        side: trade.side,
+        entry_price: trade.entry_price,
+        exit_price: trade.exit_price ?? null,
+        quantity: trade.quantity,
+        pnl: trade.pnl ?? null,
+        pnl_percent: trade.pnl_percent ?? null,
+        opened_at: trade.opened_at ?? null,
+        closed_at: trade.closed_at ?? null,
+        created_at: trade.closed_at ?? trade.opened_at ?? null,
+        forced_close: trade.forced_close,
+      };
 
-    const onTrade = (trade: PaperTrade) => {
-      if (trade.run_id !== runId) return;
-      setTrades((prev) => [trade, ...prev]);
-    };
-
-    const onStopped = (data: RunIdEvent) => {
-      if (data?.run_id !== runId) return;
+      setTrades((prev) => [nextTrade, ...prev]);
+    },
+    onRunStatus: (data: PaperRunStatusEvent) => {
+      setRun((prev) => (prev ? { ...prev, status: data.status } : prev));
+    },
+    onRunError: (_data: PaperRunErrorEvent) => {
       setRun((prev) => (prev ? { ...prev, status: "STOPPED" } : prev));
-    };
-
-    socket.on("connect", onConnect);
-    socket.on("disconnect", onDisconnect);
-    socket.on("candle", onCandle);
-    socket.on("update", onUpdate);
-    socket.on("trade", onTrade);
-    socket.on("stopped", onStopped);
-
-    return () => {
-      cancelled = true;
-      socket.emit("leave_paper_run", runId);
-      socket.off("connect", onConnect);
-      socket.off("disconnect", onDisconnect);
-      socket.off("candle", onCandle);
-      socket.off("update", onUpdate);
-      socket.off("trade", onTrade);
-      socket.off("stopped", onStopped);
-    };
-  }, [runId]);
+    },
+  });
 
   /* ================= ACTIONS ================= */
 
@@ -258,6 +263,7 @@ export default function PaperRunDetail() {
   /* ================= UI GUARDS ================= */
 
   if (!runId) return <div className="p-6 text-slate-400">Invalid run.</div>;
+  if (loadError) return <div className="p-6 text-red-400">{loadError}</div>;
   if (!run) return <div className="p-6 text-slate-400">Loading...</div>;
 
   const isRunning = run.status === "ACTIVE";

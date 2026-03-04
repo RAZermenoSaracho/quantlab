@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { getAlgorithms } from "../../services/algorithm.service";
 import { createBacktest, getBacktestStatus } from "../../services/backtest.service";
@@ -11,19 +11,16 @@ import DateSection from "../../components/backtests/DateSection";
 import ProgressBar from "../../components/ui/ProgressBar";
 import Button from "../../components/ui/Button";
 import type {
-  Algorithm,
   CreateBacktestRequest,
-  Exchange,
-  Symbol,
 } from "@quantlab/contracts";
+import { useApi } from "../../hooks/useApi";
+import { usePolling } from "../../hooks/usePolling";
 
 export default function CreateBacktest() {
   const navigate = useNavigate();
 
-  const [algorithms, setAlgorithms] = useState<Algorithm[]>([]);
-  const [exchanges, setExchanges] = useState<Exchange[]>([]);
-  const [symbols, setSymbols] = useState<Symbol[]>([]);
   const [symbolQuery, setSymbolQuery] = useState("");
+  const [debouncedSymbolQuery, setDebouncedSymbolQuery] = useState("");
 
   const [form, setForm] = useState<CreateBacktestRequest>({
     algorithm_id: "",
@@ -43,33 +40,53 @@ export default function CreateBacktest() {
   const [isRunning, setIsRunning] = useState(false);
 
   const [runId, setRunId] = useState<string | null>(null);
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  /* =====================================
-     Load algorithms
-  ===================================== */
-  useEffect(() => {
-    async function load() {
-      const data = await getAlgorithms();
-      setAlgorithms(data.algorithms);
+  const { data: algorithmsData } = useApi(getAlgorithms, [], {
+    fallbackMessage: "Failed to load algorithms",
+  });
+  const { data: exchangesData } = useApi(getExchanges, [], {
+    fallbackMessage: "Failed to load exchanges",
+  });
+  const { data: symbolsData } = useApi(
+    () => getSymbols(form.exchange, debouncedSymbolQuery),
+    [form.exchange, debouncedSymbolQuery],
+    {
+      enabled: Boolean(debouncedSymbolQuery),
+      initialData: { symbols: [] },
+      fallbackMessage: "Failed to load symbols",
     }
-    load();
-  }, []);
-
-  /* =====================================
-     Load exchanges
-  ===================================== */
-  useEffect(() => {
-    async function load() {
-      const data = await getExchanges();
-      setExchanges(data.exchanges);
-    }
-    load();
-  }, []);
+  );
+  const algorithms = useMemo(
+    () => algorithmsData?.algorithms ?? [],
+    [algorithmsData]
+  );
+  const exchanges = useMemo(
+    () => exchangesData?.exchanges ?? [],
+    [exchangesData]
+  );
+  const symbols = useMemo(
+    () => symbolsData?.symbols ?? [],
+    [symbolsData]
+  );
 
   /* =====================================
      Load default fee when exchange changes
   ===================================== */
+  useEffect(() => {
+    if (!symbolQuery) {
+      setDebouncedSymbolQuery("");
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setDebouncedSymbolQuery(symbolQuery);
+    }, 300);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [symbolQuery]);
+
   useEffect(() => {
     async function loadFee() {
       if (!form.exchange) return;
@@ -84,35 +101,20 @@ export default function CreateBacktest() {
     loadFee();
   }, [form.exchange]);
 
-  /* =====================================
-     Symbol search (debounced)
-  ===================================== */
-  useEffect(() => {
-    if (!symbolQuery) return;
+  usePolling(
+    async () => {
+      if (!runId) {
+        return;
+      }
 
-    const timeout = setTimeout(async () => {
-      const data = await getSymbols(form.exchange, symbolQuery);
-      setSymbols(data.symbols);
-    }, 300);
-
-    return () => clearTimeout(timeout);
-  }, [symbolQuery, form.exchange]);
-
-  useEffect(() => {
-    if (!runId) return;
-
-    pollingRef.current = setInterval(async () => {
       try {
         const statusData = await getBacktestStatus(runId);
         const newProgress = statusData.progress ?? 0;
         setProgress(newProgress);
 
         if (statusData.status === "COMPLETED") {
-          if (pollingRef.current) {
-            clearInterval(pollingRef.current);
-          }
-
           setProgress(100);
+          setRunId(null);
 
           setTimeout(() => {
             navigate(`/backtests/${runId}`);
@@ -120,33 +122,21 @@ export default function CreateBacktest() {
         }
 
         if (statusData.status === "FAILED") {
-          if (pollingRef.current) {
-            clearInterval(pollingRef.current);
-          }
-
+          setRunId(null);
           setIsRunning(false);
           setError("Backtest failed.");
         }
 
       } catch (err) {
         console.error("❌ Polling error:", err);
-
-        if (pollingRef.current) {
-          clearInterval(pollingRef.current);
-        }
-
+        setRunId(null);
         setIsRunning(false);
         setError("Failed to fetch progress.");
       }
-    }, 500);
-
-    return () => {
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-      }
-    };
-
-  }, [runId, navigate]);
+    },
+    500,
+    Boolean(runId)
+  );
 
   /* =====================================
      Submit
@@ -294,7 +284,6 @@ export default function CreateBacktest() {
                       onClick={() => {
                         setForm({ ...form, symbol: s.symbol });
                         setSymbolQuery(s.symbol);
-                        setSymbols([]);
                       }}
                       className="px-4 py-2 hover:bg-slate-800 cursor-pointer text-white"
                     >

@@ -14,7 +14,7 @@ export function toDateFromEngineTs(ts: unknown): Date {
   return new Date(String(ts));
 }
 
-export function toIsoOrNull(d: any): string | null {
+export function toIsoOrNull(d: Date | string | number | null | undefined): string | null {
   if (!d) return null;
   const dt = d instanceof Date ? d : new Date(d);
   return Number.isNaN(dt.getTime()) ? null : dt.toISOString();

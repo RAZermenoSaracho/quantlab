@@ -3,6 +3,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthProvider";
 import OAuthButton from "../components/ui/OAuthButton";
 import Button from "../components/ui/Button";
+import { loginUser } from "../services/auth.service";
 
 const BACKEND_URL = "http://localhost:5000";
 
@@ -28,25 +29,12 @@ export default function Login() {
     setLoading(true);
 
     try {
-      const res = await fetch(`${BACKEND_URL}/api/auth/login`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ email, password }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || "Login failed");
-      }
-
+      const data = await loginUser({ email, password });
       login(data.token, data.user);
       navigate("/dashboard");
 
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Login failed");
     } finally {
       setLoading(false);
     }

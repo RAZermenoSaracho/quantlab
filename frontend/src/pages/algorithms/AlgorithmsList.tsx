@@ -1,29 +1,17 @@
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { getAlgorithms } from "../../services/algorithm.service";
 import type { Algorithm } from "@quantlab/contracts";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
 import Button from "../../components/ui/Button";
+import { useApi } from "../../hooks/useApi";
 
 export default function AlgorithmsList() {
-  const [algorithms, setAlgorithms] = useState<Algorithm[]>([]);
-  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
-
-  useEffect(() => {
-    async function load() {
-      try {
-        const data = await getAlgorithms();
-        setAlgorithms(data.algorithms);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    load();
-  }, []);
+  const { data, loading } = useApi(getAlgorithms, [], {
+    fallbackMessage: "Failed to load algorithms",
+  });
+  const algorithms = useMemo(() => data?.algorithms ?? [], [data]);
 
   const columns: ListColumn<Algorithm>[] = [
     {
@@ -69,7 +57,7 @@ export default function AlgorithmsList() {
       }
       actions={
         <Button
-          variant="CREATE"
+          variant="PRIMARY"
           size="md"
           onClick={() => navigate("/algorithms/new")}
         >

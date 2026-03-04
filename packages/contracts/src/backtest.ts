@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CandleSchema, EquityPointSchema } from "./market";
 
 /* =========================
    Enums
@@ -90,6 +91,21 @@ export const BacktestTradeSchema = z.object({
 
 export type BacktestTrade = z.infer<typeof BacktestTradeSchema>;
 
+export const BacktestMetricsSchema = z
+  .object({
+    total_return_percent: z.number().optional(),
+    total_return_usdt: z.number().optional(),
+    max_drawdown_percent: z.number().optional(),
+    win_rate_percent: z.number().optional(),
+    profit_factor: z.number().optional(),
+    total_trades: z.number().optional(),
+    sharpe_ratio: z.number().optional(),
+    volatility: z.number().optional(),
+  })
+  .passthrough();
+
+export type BacktestMetrics = z.infer<typeof BacktestMetricsSchema>;
+
 /* =========================
    Create Backtest
 ========================= */
@@ -146,15 +162,15 @@ export type BacktestStatusResponse =
 export const BacktestDetailResponseSchema = z.object({
   run: BacktestRunSchema,
 
-  metrics: z.any().nullable(),
+  metrics: BacktestMetricsSchema.nullable(),
 
   analysis: BacktestAnalysisSchema.nullable(),
 
-  trades: z.array(z.any()),
+  trades: z.array(BacktestTradeSchema),
 
-  equity_curve: z.array(z.any()),
+  equity_curve: z.array(EquityPointSchema),
 
-  candles: z.array(z.any()),
+  candles: z.array(CandleSchema),
 
   candles_count: z.number(),
 
