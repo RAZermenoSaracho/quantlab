@@ -13,6 +13,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@quantlab/contracts": "workspace:*",
     "@types/express-session": "^1.18.2",
     "@types/passport": "^1.0.17",
     "axios": "^1.13.5",
