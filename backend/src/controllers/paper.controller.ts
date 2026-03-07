@@ -15,12 +15,26 @@ import {
   type PaperRunDetailResponse,
   type PaperRunsListResponse,
   PaperEngineEventSchema,
-  type StartPaperRunRequest,
+  MarketTimeframeSchema,
   type StartPaperRunResponse,
-  StartPaperRunRequestSchema,
 } from "@quantlab/contracts";
 import { sendError, sendSuccess } from "../utils/apiResponse";
 import { toIsoOrNull } from "../utils/dateUtils";
+import { z } from "zod";
+
+const StartPaperRunLegacyRequestSchema = z
+  .object({
+    algorithm_id: z.string().uuid().optional(),
+    code: z.string().min(1).optional(),
+    exchange: z.string(),
+    symbol: z.string(),
+    timeframe: MarketTimeframeSchema,
+    initial_balance: z.number(),
+    fee_rate: z.number().optional(),
+  })
+  .refine((value) => Boolean(value.algorithm_id || value.code), {
+    message: "Either algorithm_id or code is required",
+  });
 
 /* =====================================================
    START PAPER RUN
@@ -33,14 +47,15 @@ export async function startPaperRun(
   const client = await pool.connect();
 
   try {
+    const payload = StartPaperRunLegacyRequestSchema.parse(req.body);
+
     const {
-      algorithm_id,
       exchange,
       symbol,
       timeframe,
       initial_balance,
       fee_rate,
-    }: StartPaperRunRequest = StartPaperRunRequestSchema.parse(req.body);
+    } = payload;
 
     const parsedBalance = Number(initial_balance);
     if (!Number.isFinite(parsedBalance) || parsedBalance <= 0) {
@@ -49,15 +64,27 @@ export async function startPaperRun(
 
     const userId = req.user!.id;
 
-    const algoResult = await client.query(
-      `SELECT code FROM algorithms WHERE id = $1 AND user_id = $2`,
-      [algorithm_id, userId]
-    );
+    const algoResult = payload.algorithm_id
+      ? await client.query(
+          `SELECT id, code
+           FROM algorithms
+           WHERE id = $1 AND user_id = $2`,
+          [payload.algorithm_id, userId]
+        )
+      : await client.query(
+          `SELECT id, code
+           FROM algorithms
+           WHERE user_id = $1 AND code = $2
+           ORDER BY updated_at DESC
+           LIMIT 1`,
+          [userId, payload.code]
+        );
 
     if (!algoResult.rowCount) {
       return sendError(res, "Algorithm not found", 404);
     }
 
+    const algorithmId: string = algoResult.rows[0].id;
     const code = algoResult.rows[0].code;
 
     await client.query("BEGIN");
@@ -70,7 +97,7 @@ export async function startPaperRun(
        RETURNING id`,
       [
         userId,
-        algorithm_id,
+        algorithmId,
         exchange ?? "binance",
         fee_rate ?? 0.001,
         symbol,

@@ -3,8 +3,8 @@ import api from "./api.service";
 import type {
   BacktestsListResponse,
   BacktestDetailResponse,
-  CreateBacktestRequest,
-  CreateBacktestResponse,
+  StartBacktestRequest,
+  StartBacktestResponse,
   BacktestStatusResponse,
 } from "@quantlab/contracts";
 
@@ -29,9 +29,9 @@ export function getAllBacktests(): Promise<BacktestsListResponse> {
 ============================== */
 
 export function createBacktest(
-  payload: CreateBacktestRequest
-): Promise<CreateBacktestResponse> {
-  return api.post<CreateBacktestResponse>("/backtests", payload);
+  payload: StartBacktestRequest
+): Promise<StartBacktestResponse> {
+  return api.post<StartBacktestResponse>("/backtests", payload);
 }
 
 /* ==============================

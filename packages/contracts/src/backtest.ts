@@ -125,12 +125,22 @@ export const CreateBacktestRequestSchema = z.object({
 export type CreateBacktestRequest =
   z.infer<typeof CreateBacktestRequestSchema>;
 
+export const StartBacktestRequestSchema = CreateBacktestRequestSchema;
+
+export type StartBacktestRequest =
+  z.infer<typeof StartBacktestRequestSchema>;
+
 export const CreateBacktestResponseSchema = z.object({
   run_id: z.string().uuid(),
 });
 
 export type CreateBacktestResponse =
   z.infer<typeof CreateBacktestResponseSchema>;
+
+export const StartBacktestResponseSchema = CreateBacktestResponseSchema;
+
+export type StartBacktestResponse =
+  z.infer<typeof StartBacktestResponseSchema>;
 
 /* =========================
    List Response
