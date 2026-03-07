@@ -9,29 +9,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-      - name: Setup Node
-        uses: actions/setup-node@v3
+      - uses: actions/setup-node@v3
         with:
           node-version: 20
           cache: npm
 
-      - name: Configure npm for CI stability
-        run: |
-          npm config set fetch-retries 5
-          npm config set fetch-retry-mintimeout 20000
-          npm config set fetch-retry-maxtimeout 120000
-          npm config set maxsockets 3
+      - run: npm ci
 
-      - name: Install dependencies (Linux resolution)
-        run: |
-          npm install --package-lock-only
-          npm ci
+      - run: npm run build --workspace=frontend
 
-      - name: Build frontend
-        run: npm run build --workspace=frontend
-
-      - name: Typecheck backend
-        run: npm run build --workspace=backend
+      - run: npm run build --workspace=backend
