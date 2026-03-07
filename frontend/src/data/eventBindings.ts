@@ -8,8 +8,6 @@ import type {
   PaperRunStatusEvent,
   PaperRunUpdateEvent,
   PaperTick,
-  PaperTrade,
-  TradeExecution,
 } from "@quantlab/contracts";
 import {
   BACKTESTS,
@@ -20,70 +18,6 @@ import {
 import { updateFromEvent, updateQuery } from "./queryClient";
 
 let bindingsRegistered = false;
-
-function getTradeIdentity(payload: TradeExecution): string {
-  return payload.opened_at ?? payload.closed_at ?? new Date().toISOString();
-}
-
-function buildPaperTrade(payload: TradeExecution): PaperTrade {
-  return {
-    id: `${payload.run_id}:${getTradeIdentity(payload)}`,
-    run_id: payload.run_id,
-    run_type: "PAPER",
-    side: payload.side,
-    entry_price: payload.entry_price,
-    exit_price: payload.exit_price ?? null,
-    quantity: payload.quantity,
-    pnl: payload.pnl ?? null,
-    pnl_percent: payload.pnl_percent ?? null,
-    opened_at: payload.opened_at ?? null,
-    closed_at: payload.closed_at ?? null,
-    created_at: payload.closed_at ?? payload.opened_at ?? null,
-    forced_close: payload.forced_close,
-  };
-}
-
-function findExistingTradeIndex(
-  trades: readonly PaperTrade[],
-  payload: TradeExecution
-): number {
-  if (payload.opened_at) {
-    const tradeId = `${payload.run_id}:${payload.opened_at}`;
-    return trades.findIndex((trade) => trade.id === tradeId);
-  }
-
-  return trades.findIndex(
-    (trade) =>
-      trade.run_id === payload.run_id &&
-      trade.closed_at == null &&
-      trade.side === payload.side &&
-      trade.entry_price === payload.entry_price &&
-      trade.quantity === payload.quantity
-  );
-}
-
-function mergePaperTrade(
-  existingTrade: PaperTrade,
-  payload: TradeExecution
-): PaperTrade {
-  return {
-    ...existingTrade,
-    side: payload.side,
-    entry_price: payload.entry_price,
-    exit_price: payload.exit_price ?? existingTrade.exit_price ?? null,
-    quantity: payload.quantity,
-    pnl: payload.pnl ?? existingTrade.pnl ?? null,
-    pnl_percent: payload.pnl_percent ?? existingTrade.pnl_percent ?? null,
-    opened_at: payload.opened_at ?? existingTrade.opened_at ?? null,
-    closed_at: payload.closed_at ?? existingTrade.closed_at ?? null,
-    created_at:
-      existingTrade.created_at ??
-      payload.closed_at ??
-      payload.opened_at ??
-      null,
-    forced_close: payload.forced_close ?? existingTrade.forced_close,
-  };
-}
 
 function updatePaperRunList(
   runId: string,
@@ -193,32 +127,6 @@ function applyPaperTick(payload: PaperTick) {
   }));
 }
 
-function applyTradeExecution(payload: TradeExecution) {
-  updatePaperRunDetail(payload.run_id, (detail) => {
-    const existingIndex = findExistingTradeIndex(detail.trades, payload);
-
-    if (existingIndex >= 0) {
-      const nextTrades = [...detail.trades];
-      nextTrades[existingIndex] = mergePaperTrade(
-        nextTrades[existingIndex],
-        payload
-      );
-
-      return {
-        ...detail,
-        trades: nextTrades,
-      };
-    }
-
-    const trade = buildPaperTrade(payload);
-
-    return {
-      ...detail,
-      trades: [trade, ...detail.trades],
-    };
-  });
-}
-
 function applyBacktestProgress(payload: BacktestProgressEvent) {
   updateQuery<BacktestStatusResponse>(
     backtestStatusKey(payload.run_id),
@@ -268,7 +176,6 @@ export function registerEventBindings() {
   bindingsRegistered = true;
 
   updateFromEvent("paper_tick", applyPaperTick);
-  updateFromEvent("trade_execution", applyTradeExecution);
   updateFromEvent("paper_run_update", applyPaperRunUpdate);
   updateFromEvent("paper_run_status", applyPaperRunStatus);
   updateFromEvent("paper_run_error", applyPaperRunError);

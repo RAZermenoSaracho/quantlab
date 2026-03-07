@@ -2,6 +2,7 @@ import { Server, Socket } from "socket.io";
 import {
   JoinPaperRunSchema,
   LeavePaperRunSchema,
+  PortfolioUpdateEventSchema,
   PaperRunErrorEventSchema,
   PaperRunStatusEventSchema,
   PaperRunUpdateEventSchema,
@@ -19,6 +20,7 @@ type PaperEventSchemaMap = {
   paper_run_update: typeof PaperRunUpdateEventSchema;
   paper_run_status: typeof PaperRunStatusEventSchema;
   paper_run_error: typeof PaperRunErrorEventSchema;
+  portfolio_update: typeof PortfolioUpdateEventSchema;
 };
 
 const paperEventSchemas: PaperEventSchemaMap = {
@@ -27,6 +29,7 @@ const paperEventSchemas: PaperEventSchemaMap = {
   paper_run_update: PaperRunUpdateEventSchema,
   paper_run_status: PaperRunStatusEventSchema,
   paper_run_error: PaperRunErrorEventSchema,
+  portfolio_update: PortfolioUpdateEventSchema,
 };
 
 export function initializeWebsocket(
@@ -93,6 +96,11 @@ export async function emitPaperEvent(
       ioInstance
         .to(room)
         .emit("paper_run_error", PaperRunErrorEventSchema.parse(payload));
+      break;
+    case "portfolio_update":
+      ioInstance
+        .to(room)
+        .emit("portfolio_update", PortfolioUpdateEventSchema.parse(payload));
       break;
   }
 }

@@ -38,17 +38,6 @@ export const CandleSchema = z.object({
 export type Candle = z.infer<typeof CandleSchema>;
 
 /* =========================
-   Equity Point
-========================= */
-
-export const EquityPointSchema = z.object({
-  timestamp: z.number(),
-  equity: z.number(),
-});
-
-export type EquityPoint = z.infer<typeof EquityPointSchema>;
-
-/* =========================
    Responses
 ========================= */
 
@@ -67,6 +56,12 @@ export const SymbolsListResponseSchema = z.object({
 export type SymbolsListResponse = z.infer<
   typeof SymbolsListResponseSchema
 >;
+
+export const CandlesResponseSchema = z.object({
+  candles: z.array(CandleSchema),
+});
+
+export type CandlesResponse = z.infer<typeof CandlesResponseSchema>;
 
 export const DefaultFeeRateResponseSchema = z.object({
   default_fee_rate: z.number(),

@@ -61,6 +61,10 @@ export function connectSocket(): QuantlabSocket {
     emit("paper_run_error", payload);
   });
 
+  socket.on("portfolio_update", (payload) => {
+    emit("portfolio_update", payload);
+  });
+
   socket.on("backtest_progress", (payload) => {
     emit("backtest_progress", payload);
   });

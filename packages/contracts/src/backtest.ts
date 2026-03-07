@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { CandleSchema, EquityPointSchema } from "./market";
+import { CandleSchema } from "./market";
+import { EquityPointSchema } from "./portfolio";
 
 /* =========================
    Enums

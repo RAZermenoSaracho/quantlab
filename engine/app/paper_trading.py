@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import time
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -39,8 +40,6 @@ def _calculate_realized_pnl(
     exit_price: float,
     quantity: float,
 ) -> float:
-    if str(side).upper() == "SHORT":
-        return (float(entry_price) - float(exit_price)) * float(quantity)
     return (float(exit_price) - float(entry_price)) * float(quantity)
 
 
@@ -146,6 +145,8 @@ class PaperSession:
         self.position: Optional[Dict[str, Any]] = None
         self.trades: List[Dict[str, Any]] = []
         self.candles: List[Dict[str, Any]] = []
+        self.realized_pnl = 0.0
+        self.equity_curve: List[Dict[str, float]] = []
 
         self.active = False
         self._stream_task: Optional[asyncio.Task] = None
@@ -194,12 +195,84 @@ class PaperSession:
     # START / STOP
     # ==================================================
 
+    def _compute_unrealized_pnl(self, current_price: Optional[float] = None) -> float:
+        if not self.position:
+            return 0.0
+
+        if current_price is None:
+            current_price = self.last_price
+
+        if current_price is None:
+            return 0.0
+
+        entry_price = float(self.position["entry_price"])
+        quantity = float(self.position["quantity"])
+        return (float(current_price) - entry_price) * quantity
+
+    def portfolio_state(self) -> Dict[str, Any]:
+        unrealized = self._compute_unrealized_pnl()
+        usdt_balance = float(self.quote_balance)
+        btc_balance = max(0.0, float(self.base_balance))
+        mark_price = (
+            float(self.last_price)
+            if self.last_price is not None
+            else (float(self.position["entry_price"]) if self.position else 0.0)
+        )
+        equity = usdt_balance + (btc_balance * mark_price)
+        unrealized = max(0.0, btc_balance) * (
+            mark_price - (float(self.position["entry_price"]) if self.position else mark_price)
+        )
+
+        return {
+            "run_id": self.run_id,
+            "balance": usdt_balance,
+            "usdt_balance": usdt_balance,
+            "btc_balance": btc_balance,
+            "equity": float(equity),
+            "realized_pnl": float(self.realized_pnl),
+            "unrealized_pnl": float(unrealized),
+            "open_positions": 1 if self.position else 0,
+            "trades_count": len(self.trades),
+            "equity_curve": list(self.equity_curve),
+        }
+
+    def _append_equity_point(self, timestamp: int, equity: Optional[float] = None) -> None:
+        point_equity = float(
+            equity
+            if equity is not None
+            else (
+                float(self.quote_balance)
+                + max(0.0, float(self.base_balance))
+                * (
+                    float(self.last_price)
+                    if self.last_price is not None
+                    else (float(self.position["entry_price"]) if self.position else 0.0)
+                )
+            )
+        )
+        point_ts = int(timestamp)
+
+        if self.equity_curve and int(self.equity_curve[-1]["timestamp"]) == point_ts:
+            self.equity_curve[-1]["equity"] = point_equity
+            return
+
+        self.equity_curve.append({
+            "timestamp": point_ts,
+            "equity": point_equity,
+        })
+
+    async def _emit_portfolio_update(self) -> None:
+        await emit_event(self.run_id, "portfolio_update", self.portfolio_state())
+
     async def start(self) -> None:
         if self.active:
             return
 
         self.active = True
         await emit_event(self.run_id, "status", {"status": "ACTIVE"})
+        start_ts = int(time.time() * 1000)
+        self._append_equity_point(start_ts, equity=float(self.initial_balance))
+        await self._emit_portfolio_update()
 
         logger.info(
             "[PaperTrading][%s] START requested. Launching websocket stream symbol=%s timeframe=%s",
@@ -306,7 +379,7 @@ class PaperSession:
         indicator_series = compute_indicator_series(self.candles, self.config)
 
         # Equity (what strategy should see as "balance" per your paper design)
-        current_equity = self.quote_balance + (self.base_balance * price)
+        current_equity = self.quote_balance + (max(0.0, self.base_balance) * price)
 
         ctx = build_context(
             index=len(self.candles) - 1,
@@ -351,20 +424,16 @@ class PaperSession:
         # ==================================================
         # EXECUTE INTENT
         # ==================================================
-        if intent == "CLOSE" and self.position:
+        if intent in ("CLOSE", "SELL", "SHORT") and self.position:
             await self._close_position(price, timestamp)
 
         elif intent in ("BUY", "LONG") and not self.position:
             await self._open_position("LONG", price, timestamp)
 
-        elif intent in ("SELL", "SHORT") and not self.position:
-            # NOTE: remains spot-like accounting; true shorts need margin model.
-            await self._open_position("SHORT", price, timestamp)
-
         # ==================================================
         # EMIT BALANCE SNAPSHOT
         # ==================================================
-        equity = self.quote_balance + (self.base_balance * price)
+        equity = self.quote_balance + (max(0.0, self.base_balance) * price)
 
         await emit_event(
             self.run_id,
@@ -378,6 +447,8 @@ class PaperSession:
                 # "timestamp": int(timestamp),
             },
         )
+        self._append_equity_point(timestamp, equity=float(equity))
+        await self._emit_portfolio_update()
 
         # Optional: auto-stop safety
         if equity <= 0:
@@ -416,30 +487,21 @@ class PaperSession:
         if capital_to_use <= 0:
             return
 
+        if side != "LONG":
+            return
+
         slippage_bps = float(getattr(self.config, "slippage_bps", 0.0))
+        effective_price = price * (1 + slippage_bps / 10_000)
+        gross_qty = capital_to_use / effective_price
+        fee_qty = gross_qty * self.fee_rate
+        net_qty = gross_qty - fee_qty
 
-        if side == "SHORT":
-            effective_price = price * (1 - slippage_bps / 10_000)
-            gross_qty = capital_to_use / effective_price
-            fee_quote = capital_to_use * self.fee_rate
-            net_quote = capital_to_use - fee_quote
+        usdt_spent = gross_qty * effective_price
+        self.base_balance += net_qty
+        self.quote_balance -= usdt_spent
 
-            self.base_balance -= gross_qty
-            self.quote_balance += net_quote
-
-            position_qty = gross_qty
-            entry_fee_quote = fee_quote
-        else:
-            effective_price = price * (1 + slippage_bps / 10_000)
-            gross_qty = capital_to_use / effective_price
-            fee_qty = gross_qty * self.fee_rate
-            net_qty = gross_qty - fee_qty
-
-            self.base_balance += net_qty
-            self.quote_balance -= capital_to_use
-
-            position_qty = net_qty
-            entry_fee_quote = capital_to_use - (position_qty * effective_price)
+        position_qty = net_qty
+        entry_fee_quote = fee_qty * effective_price
 
         self.position = {
             "side": side,
@@ -476,6 +538,8 @@ class PaperSession:
                 "closed_at": None,
             },
         )
+        self._append_equity_point(timestamp)
+        await self._emit_portfolio_update()
 
     async def _close_position(self, price: float, timestamp: int) -> None:
         if not self.position:
@@ -486,23 +550,20 @@ class PaperSession:
         side = str(self.position["side"]).upper()
         entry_fee_quote = float(self.position.get("entry_fee_quote", 0.0))
 
-        if side == "LONG":
-            gross_quote = quantity * price
-            fee_quote = gross_quote * self.fee_rate
-            net_quote = gross_quote - fee_quote
+        if side != "LONG":
+            return
 
-            self.quote_balance += net_quote
-            self.base_balance = 0.0
-        else:
-            gross_quote = quantity * price
-            fee_quote = gross_quote * self.fee_rate
-            total_cover_cost = gross_quote + fee_quote
+        slippage_bps = float(getattr(self.config, "slippage_bps", 0.0))
+        effective_exit_price = price * (1 - slippage_bps / 10_000)
+        gross_quote = quantity * effective_exit_price
+        fee_quote = gross_quote * self.fee_rate
+        net_quote = gross_quote - fee_quote
 
-            self.quote_balance -= total_cover_cost
-            self.base_balance += quantity
+        self.quote_balance += net_quote
+        self.base_balance = max(0.0, self.base_balance - quantity)
 
         pnl = (
-            _calculate_realized_pnl(side, entry_price, price, quantity)
+            _calculate_realized_pnl(side, entry_price, effective_exit_price, quantity)
             - entry_fee_quote
             - fee_quote
         )
@@ -510,7 +571,7 @@ class PaperSession:
         trade = {
             "side": side,
             "entry_price": float(entry_price),
-            "exit_price": float(price),
+            "exit_price": float(effective_exit_price),
             "quantity": float(quantity),
             "pnl": float(pnl),
             "opened_at": int(self.position["opened_at"]),
@@ -518,6 +579,7 @@ class PaperSession:
         }
 
         self.trades.append(trade)
+        self.realized_pnl += float(pnl)
         self.position = None
 
         logger.info(
@@ -531,6 +593,8 @@ class PaperSession:
         )
 
         await emit_event(self.run_id, "trade", trade)
+        self._append_equity_point(timestamp)
+        await self._emit_portfolio_update()
 
 
 # ======================================================

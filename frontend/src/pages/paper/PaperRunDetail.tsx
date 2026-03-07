@@ -4,9 +4,7 @@ import DetailNavigator from "../../components/navigation/DetailNavigator";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
 import type {
   Candle,
-  EquityPoint,
   PaperTrade,
-  PaperRunUpdateEvent,
   PaperTick,
 } from "@quantlab/contracts";
 import CandlestickChart from "../../components/charts/CandlestickChart";
@@ -20,8 +18,10 @@ import {
   useDeletePaperRunMutation,
   usePaperRun,
   usePaperRuns,
+  usePaperState,
   useStopPaperRunMutation,
 } from "../../data/paper";
+import { useCandles } from "../../data/market";
 
 export default function PaperRunDetail() {
   const { id } = useParams<{ id: string }>();
@@ -32,14 +32,18 @@ export default function PaperRunDetail() {
   const [deleting, setDeleting] = useState(false);
 
   const [candles, setCandles] = useState<Candle[]>([]);
-  const [equityCurve, setEquityCurve] = useState<EquityPoint[]>([]);
   const [exchangeStreaming, setExchangeStreaming] = useState(false);
 
   const { data: initialData, error: detailError } = usePaperRun(runId);
+  const { data: portfolioState, error: stateError } = usePaperState(runId);
   const { data: runs, error: runsError } = usePaperRuns();
+  const run = initialData?.run ?? null;
+  const { data: historicalCandles, error: candlesError } = useCandles(
+    run?.symbol ?? "",
+    run?.timeframe ?? ""
+  );
   const stopMutation = useStopPaperRunMutation();
   const deleteMutation = useDeletePaperRunMutation();
-  const run = initialData?.run ?? null;
   const trades = initialData?.trades ?? [];
   const sortedTrades = useMemo(
     () =>
@@ -62,9 +66,30 @@ export default function PaperRunDetail() {
 
   useEffect(() => {
     setCandles([]);
-    setEquityCurve([]);
     setExchangeStreaming(false);
   }, [runId]);
+
+  useEffect(() => {
+    if (!historicalCandles?.length) {
+      return;
+    }
+
+    setCandles((current) => {
+      const byTimestamp = new Map<number, Candle>();
+
+      for (const candle of historicalCandles) {
+        byTimestamp.set(candle.timestamp, candle);
+      }
+
+      for (const candle of current) {
+        byTimestamp.set(candle.timestamp, candle);
+      }
+
+      return [...byTimestamp.values()].sort(
+        (left, right) => left.timestamp - right.timestamp
+      );
+    });
+  }, [historicalCandles]);
 
   /* ================= TRADE TABLE ================= */
 
@@ -159,33 +184,10 @@ export default function PaperRunDetail() {
     []
   );
 
-  useEffect(() => {
-    if (!run) {
-      return;
-    }
-
-    const seedEquity = Number(
-      run.equity ?? run.quote_balance ?? 0
-    );
-
-    if (Number.isFinite(seedEquity)) {
-      setEquityCurve((current) =>
-        current.length > 0
-          ? current
-          : [{ timestamp: Date.now(), equity: seedEquity }]
-      );
-    }
-  }, [run?.id]);
-
   const { backendConnected } = usePaperRunEvents(runId, {
     onTick: (candle: PaperTick) => {
       setExchangeStreaming(true);
       setCandles((prev) => {
-        const exists = prev.some((item) => item.timestamp === candle.timestamp);
-        if (exists) {
-          return prev;
-        }
-
         const nextCandle: Candle = {
           timestamp: candle.timestamp,
           open: candle.open,
@@ -195,19 +197,20 @@ export default function PaperRunDetail() {
           volume: candle.volume,
         };
 
-        return [...prev, nextCandle];
-      });
-    },
-    onRunUpdate: (data: PaperRunUpdateEvent) => {
-      if (data.equity != null) {
-        const eq = Number(data.equity);
-        if (Number.isFinite(eq)) {
-          setEquityCurve((prev) => {
-            const next = [...prev, { timestamp: Date.now(), equity: eq }];
-            return next.length > 2000 ? next.slice(-2000) : next;
-          });
+        const existingIndex = prev.findIndex(
+          (item) => item.timestamp === candle.timestamp
+        );
+
+        if (existingIndex >= 0) {
+          const next = [...prev];
+          next[existingIndex] = nextCandle;
+          return next;
         }
-      }
+
+        return [...prev, nextCandle].sort(
+          (left, right) => left.timestamp - right.timestamp
+        );
+      });
     },
   });
 
@@ -235,8 +238,8 @@ export default function PaperRunDetail() {
   /* ================= UI GUARDS ================= */
 
   if (!runId) return <div className="p-6 text-slate-400">Invalid run.</div>;
-  if (detailError || runsError) {
-    return <div className="p-6 text-red-400">{detailError || runsError}</div>;
+  if (detailError || runsError || stateError || candlesError) {
+    return <div className="p-6 text-red-400">{detailError || runsError || stateError || candlesError}</div>;
   }
   if (!run) return <div className="p-6 text-slate-400">Loading...</div>;
 
@@ -245,29 +248,46 @@ export default function PaperRunDetail() {
   const quoteAsset = "USDT";
 
   const initialBalance = Number(run.initial_balance ?? 0);
-  const equity = Number(run.equity ?? 0);
+  const equity = Number(portfolioState?.equity ?? run.equity ?? 0);
+  const usdtBalance = Number(
+    portfolioState?.usdt_balance ??
+      portfolioState?.balance ??
+      run.quote_balance ??
+      run.current_balance ??
+      initialBalance
+  );
+  const btcHeld = Math.max(
+    0,
+    Number(
+      portfolioState?.btc_balance ??
+        run.base_balance ??
+        0
+    )
+  );
+  const realizedPnl = Number(portfolioState?.realized_pnl ?? 0);
+  const unrealizedPnl = Number(portfolioState?.unrealized_pnl ?? 0);
+  const portfolioOpenPositions = Number(portfolioState?.open_positions ?? 0);
+  const equityCurve =
+    portfolioState?.equity_curve && portfolioState.equity_curve.length > 0
+      ? portfolioState.equity_curve
+      : [
+          {
+            timestamp: run.started_at ? new Date(run.started_at).getTime() : Date.now(),
+            equity: initialBalance,
+          },
+        ];
   const lastPrice = Number(run.last_price ?? 0);
-  const totalTrades = sortedTrades.length;
+  const totalTrades = Number(portfolioState?.trades_count ?? sortedTrades.length);
 
-  const netPnl = equity - initialBalance;
+  const netPnl = realizedPnl + unrealizedPnl;
   const returnPct = initialBalance
     ? (netPnl / initialBalance) * 100
     : 0;
 
-  const hasPosition = !!run.position;
+  const hasPosition = portfolioOpenPositions > 0 && !!run.position;
   const positionSide = run.position?.side ?? null;
-  const positionQty = Number(run.position?.quantity ?? 0);
   const entryPrice = Number(run.position?.entry_price ?? 0);
-
-  let unrealizedPnl = 0;
-
-  if (hasPosition && lastPrice && entryPrice) {
-    if (positionSide === "LONG") {
-      unrealizedPnl = (lastPrice - entryPrice) * positionQty;
-    } else {
-      unrealizedPnl = (entryPrice - lastPrice) * positionQty;
-    }
-  }
+  const positionValue = btcHeld * lastPrice;
 
   /* ===== ADVANCED METRICS ===== */
 
@@ -287,7 +307,7 @@ export default function PaperRunDetail() {
     : 0;
 
   const exposurePct = equity
-    ? (positionQty * lastPrice) / equity * 100
+    ? (positionValue / equity) * 100
     : 0;
 
   const maxEquity = Math.max(...equityCurve.map(e => e.equity ?? 0), equity);
@@ -461,6 +481,14 @@ export default function PaperRunDetail() {
         />
 
         <KpiCard
+          title="Available Balance"
+          value={usdtBalance}
+          size="compact"
+          format={(v) => `${v.toFixed(2)} ${quoteAsset}`}
+          tooltip="Quote balance managed by engine portfolio state"
+        />
+
+        <KpiCard
           title="Net PnL"
           value={netPnl}
           positive={netPnl >= 0}
@@ -491,14 +519,14 @@ export default function PaperRunDetail() {
 
         <KpiCard
           title={`${quoteAsset} Available`}
-          value={Number(run.quote_balance ?? 0)}
+          value={usdtBalance}
           size="compact"
           format={(v) => `${v.toFixed(2)} ${quoteAsset}`}
         />
 
         <KpiCard
           title={`${baseAsset} Held`}
-          value={Number(run.base_balance ?? 0)}
+          value={btcHeld}
           size="compact"
           format={(v) => `${v.toFixed(6)} ${baseAsset}`}
         />

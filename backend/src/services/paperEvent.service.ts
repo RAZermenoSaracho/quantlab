@@ -9,6 +9,8 @@ import { toDateFromEngineTs, toIsoOrNull } from "../utils/dateUtils";
 
 import {
   PaperEngineEvent,
+  PortfolioStateSchema,
+  type PortfolioState,
   PaperRunErrorEventSchema,
   PaperRunStatusEventSchema,
   PaperRunUpdateEventSchema,
@@ -42,6 +44,14 @@ type PaperPositionPayload = z.infer<
   typeof PaperPositionEventSchema
 >["payload"];
 
+const latestPortfolioStates = new Map<string, PortfolioState>();
+
+export function getLatestPortfolioState(
+  runId: string
+): PortfolioState | null {
+  return latestPortfolioStates.get(runId) ?? null;
+}
+
 /* =====================================================
    Main Entry Point
 ===================================================== */
@@ -74,6 +84,9 @@ export async function handlePaperEvent(
           ...event.payload,
         })
       );
+
+    case "portfolio_update":
+      return handlePortfolioUpdateEvent(event.run_id, event.payload);
   }
 }
 
@@ -358,4 +371,80 @@ async function handleErrorEvent(
       message: payload.message,
     })
   );
+}
+
+/* =====================================================
+   PORTFOLIO UPDATE
+===================================================== */
+
+async function handlePortfolioUpdateEvent(
+  runId: string,
+  payload: PortfolioState
+) {
+  const state = PortfolioStateSchema.parse({
+    ...payload,
+    run_id: runId,
+  });
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    await client.query(
+      `UPDATE paper_runs
+       SET current_balance = $1,
+           quote_balance = $2,
+           base_balance = $3,
+           equity = $4,
+           updated_at = NOW()
+       WHERE id = $5`,
+      [state.usdt_balance, state.usdt_balance, state.btc_balance, state.equity, runId]
+    );
+
+    const metricsUpdate = await client.query(
+      `
+      UPDATE metrics
+      SET total_return_usdt = $1,
+          total_trades = $2,
+          equity_curve = $3::jsonb
+      WHERE run_id = $4
+        AND run_type = 'PAPER'
+      `,
+      [
+        state.realized_pnl,
+        state.trades_count,
+        JSON.stringify(state.equity_curve),
+        runId,
+      ]
+    );
+
+    if (!metricsUpdate.rowCount) {
+      await client.query(
+        `
+        INSERT INTO metrics
+          (run_id, run_type, total_return_usdt, total_trades, equity_curve)
+        VALUES
+          ($1, 'PAPER', $2, $3, $4::jsonb)
+        `,
+        [
+          runId,
+          state.realized_pnl,
+          state.trades_count,
+          JSON.stringify(state.equity_curve),
+        ]
+      );
+    }
+
+    await client.query("COMMIT");
+
+    latestPortfolioStates.set(runId, state);
+
+    await emitPaperEvent(runId, "portfolio_update", state);
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }

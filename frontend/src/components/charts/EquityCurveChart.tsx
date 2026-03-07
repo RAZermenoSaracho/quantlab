@@ -44,6 +44,13 @@ export default function EquityCurveChart({ equity }: Props) {
   const initial = Number(equity[0]?.equity ?? 0);
   const final = Number(equity[equity.length - 1]?.equity ?? initial);
   const positive = final >= initial;
+  const values = equity.map((point) => Number(point.equity ?? 0));
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+  const spread = maxValue - minValue;
+  const padding = spread > 0 ? spread * 0.2 : Math.max(Math.abs(maxValue) * 0.05, 1);
+  const chartMin = minValue - padding;
+  const chartMax = maxValue + padding;
 
   return (
     <div className="w-full min-w-0" style={{ height: CHART_HEIGHT }}>
@@ -61,6 +68,7 @@ export default function EquityCurveChart({ equity }: Props) {
 
           <YAxis
             dataKey="equity"
+            domain={[chartMin, chartMax]}
             stroke="#64748b"
             tick={{ fill: "#64748b", fontSize: 12 }}
             tickFormatter={(v) => Number(v).toFixed(0)}

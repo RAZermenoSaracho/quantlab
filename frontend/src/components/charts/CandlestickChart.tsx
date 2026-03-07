@@ -64,6 +64,8 @@ export default function CandlestickChart({
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const markersRef = useRef<MarkerApi | null>(null);
   const roRef = useRef<ResizeObserver | null>(null);
+  const previousDataRef = useRef<CandlestickData<UTCTimestamp>[]>([]);
+  const hasFittedContentRef = useRef(false);
 
   /* ================= TRANSFORM DATA ================= */
 
@@ -93,24 +95,35 @@ export default function CandlestickChart({
     for (const t of trades ?? []) {
       const opened = toUnixSeconds(t.opened_at);
       const closed = toUnixSeconds(t.closed_at);
+      const side = String(t.side ?? "").toUpperCase();
 
       if (opened) {
-        out.push({
-          time: opened,
-          position: "belowBar",
-          shape: "arrowUp",
-          color: "#22c55e",
-          text: "BUY",
-        });
+        if (side === "SHORT" || side === "SELL") {
+          out.push({
+            time: opened,
+            position: "aboveBar",
+            shape: "arrowDown",
+            color: "#f59e0b",
+            text: "SHORT",
+          });
+        } else {
+          out.push({
+            time: opened,
+            position: "belowBar",
+            shape: "arrowUp",
+            color: "#22c55e",
+            text: "LONG",
+          });
+        }
       }
 
       if (closed) {
         out.push({
           time: closed,
           position: "aboveBar",
-          shape: "arrowDown",
+          shape: "circle",
           color: "#ef4444",
-          text: "SELL",
+          text: "✖ CLOSE",
         });
       }
     }
@@ -182,10 +195,12 @@ export default function CandlestickChart({
         chart.remove();
       } catch {}
 
-      roRef.current = null;
-      chartRef.current = null;
-      seriesRef.current = null;
-      markersRef.current = null;
+    roRef.current = null;
+    chartRef.current = null;
+    seriesRef.current = null;
+    markersRef.current = null;
+    previousDataRef.current = [];
+    hasFittedContentRef.current = false;
     };
   }, [resolvedHeight]);
 
@@ -196,15 +211,39 @@ export default function CandlestickChart({
     const chart = chartRef.current;
 
     if (!series) return;
+    const previous = previousDataRef.current;
+    const next = candleData;
 
-    series.setData(candleData);
+    if (next.length === 0) {
+      series.setData([]);
+      previousDataRef.current = [];
+    } else if (previous.length === 0) {
+      series.setData(next);
+      previousDataRef.current = next;
+
+      if (chart && !hasFittedContentRef.current) {
+        chart.timeScale().fitContent();
+        hasFittedContentRef.current = true;
+      }
+    } else {
+      const prevLast = previous[previous.length - 1];
+      const nextLast = next[next.length - 1];
+      const canUpdateInPlace =
+        (next.length === previous.length && nextLast.time === prevLast.time) ||
+        (next.length === previous.length + 1 &&
+          next[next.length - 2]?.time === prevLast.time);
+
+      if (canUpdateInPlace) {
+        series.update(nextLast);
+      } else {
+        series.setData(next);
+      }
+
+      previousDataRef.current = next;
+    }
 
     if (markersRef.current) {
       markersRef.current.setMarkers(markers);
-    }
-
-    if (chart && candleData.length) {
-      chart.timeScale().fitContent();
     }
   }, [candleData, markers]);
 

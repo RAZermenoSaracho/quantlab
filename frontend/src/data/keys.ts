@@ -11,9 +11,13 @@ export const backtestKey = (id: string) => `${BACKTESTS}:${id}`;
 export const backtestStatusKey = (id: string) => `${backtestKey(id)}:status`;
 
 export const paperRunKey = (id: string) => `${PAPER_RUNS}:${id}`;
+export const paperStateKey = (id: string) => `${paperRunKey(id)}:state`;
 
 export const symbolsKey = (exchange: string, query: string) =>
   `${SYMBOLS}:${exchange}:${query}`;
+
+export const candlesKey = (symbol: string, interval: string, limit: number) =>
+  `candles:${symbol}:${interval}:${limit}`;
 
 export const defaultFeeRateKey = (exchange: string) =>
   `${EXCHANGES}:${exchange}:fee-rate`;

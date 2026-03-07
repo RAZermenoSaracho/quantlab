@@ -1,6 +1,7 @@
 import api from "./api.service";
 
 import type {
+  CandlesResponse,
   ExchangesListResponse,
   SymbolsListResponse,
   DefaultFeeRateResponse,
@@ -31,4 +32,20 @@ export function getSymbols(
 
 export function getDefaultFeeRate(exchange: string): Promise<DefaultFeeRateResponse> {
   return api.get<DefaultFeeRateResponse>("/market/fee-rate", { exchange });
+}
+
+/* ==============================
+   CANDLES
+============================== */
+
+export function getCandles(
+  symbol: string,
+  interval: string,
+  limit = 500
+): Promise<CandlesResponse> {
+  return api.get<CandlesResponse>("/market/candles", {
+    symbol,
+    interval,
+    limit,
+  });
 }

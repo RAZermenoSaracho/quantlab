@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { ApiResponseSchema, ApiSuccessSchema } from "./common";
 import { BacktestAnalysisSchema } from "./backtest";
-import { CandleSchema, EquityPointSchema } from "./market";
+import { CandleSchema } from "./market";
+import { EquityPointSchema } from "./portfolio";
 
 export const AlgorithmValidationRequestSchema = z.object({
   code: z.string(),

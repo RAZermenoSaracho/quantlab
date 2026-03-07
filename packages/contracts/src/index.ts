@@ -4,5 +4,6 @@ export * from "./algorithm";
 export * from "./backtest";
 export * from "./paper";
 export * from "./market";
+export * from "./portfolio";
 export * from "./events";
 export * from "./engine";

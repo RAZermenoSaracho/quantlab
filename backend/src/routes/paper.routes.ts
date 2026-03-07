@@ -4,6 +4,7 @@ import {
   stopPaperRun,
   receivePaperEvent,
   getPaperRunById,
+  getPaperRunState,
   getAllPaperRuns,
   deletePaperRun,
 } from "../controllers/paper.controller";
@@ -24,6 +25,7 @@ router.post("/internal/event", receivePaperEvent);
 router.post("/start", requireAuth, startPaperRun);
 router.post("/stop/:id", requireAuth, stopPaperRun);
 router.get("/", requireAuth, getAllPaperRuns);
+router.get("/:id/state", requireAuth, getPaperRunState);
 router.get("/:id", requireAuth, getPaperRunById);
 router.delete("/:id", requireAuth, deletePaperRun);
 

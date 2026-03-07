@@ -1,8 +1,12 @@
 import type { Request, Response, NextFunction } from "express";
-import { getBinanceSymbols } from "../services/binance.service";
+import {
+  getBinanceCandles,
+  getBinanceSymbols,
+} from "../services/binance.service";
 import { getSupportedExchanges } from "../services/exchangeCatalog.service";
 import type {
   ApiResponse,
+  CandlesResponse,
   DefaultFeeRateResponse,
   SymbolsListResponse,
 } from "@quantlab/contracts";
@@ -64,6 +68,39 @@ export function getFeeRate(
     return sendSuccess(res, {
       default_fee_rate: ex.default_fee_rate
     });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getCandles(
+  req: Request,
+  res: Response<ApiResponse<CandlesResponse>>,
+  next: NextFunction
+) {
+  try {
+    const { symbol, interval, limit } = req.query;
+
+    if (!symbol || typeof symbol !== "string") {
+      return sendError(res, "symbol is required", 400);
+    }
+
+    if (!interval || typeof interval !== "string") {
+      return sendError(res, "interval is required", 400);
+    }
+
+    const parsedLimit = Number(limit ?? 500);
+    const safeLimit = Number.isFinite(parsedLimit)
+      ? Math.max(1, Math.min(parsedLimit, 1000))
+      : 500;
+
+    const candles = await getBinanceCandles(
+      symbol.toUpperCase(),
+      interval,
+      safeLimit
+    );
+
+    return sendSuccess(res, { candles });
   } catch (err) {
     next(err);
   }

@@ -1,10 +1,14 @@
 import { Router } from "express";
-import { getSymbols } from "../controllers/market.controller";
-import { getFeeRate } from "../controllers/market.controller";
+import {
+  getCandles,
+  getFeeRate,
+  getSymbols,
+} from "../controllers/market.controller";
 
 const router = Router();
 
 router.get("/symbols", getSymbols);
 router.get("/fee-rate", getFeeRate);
+router.get("/candles", getCandles);
 
 export default router;

@@ -4,10 +4,14 @@ import {
   startPaperOnEngine,
   stopPaperOnEngine,
 } from "../services/pythonEngine.service";
-import { handlePaperEvent } from "../services/paperEvent.service";
+import {
+  getLatestPortfolioState,
+  handlePaperEvent,
+} from "../services/paperEvent.service";
 import {
   type ApiResponse,
   type MessageResponse,
+  type PortfolioState,
   type PaperRunDetailResponse,
   type PaperRunsListResponse,
   PaperEngineEventSchema,
@@ -180,7 +184,11 @@ export async function getPaperRunById(
   next: NextFunction
 ) {
   try {
-    const runId = req.params.id;
+    const rawId = req.params.id;
+    if (!rawId || Array.isArray(rawId)) {
+      return sendError(res, "Invalid id parameter", 400);
+    }
+    const runId = rawId;
     const userId = req.user!.id;
 
     /* =========================
@@ -340,6 +348,173 @@ export async function getPaperRunById(
     const response: PaperRunDetailResponse = {
       run: normalizedRun,
       trades: normalizedTrades,
+    };
+
+    return sendSuccess(res, response);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/* =====================================================
+   GET PAPER PORTFOLIO STATE
+===================================================== */
+export async function getPaperRunState(
+  req: Request,
+  res: Response<ApiResponse<PortfolioState>>,
+  next: NextFunction
+) {
+  try {
+    const rawId = req.params.id;
+    if (!rawId || Array.isArray(rawId)) {
+      return sendError(res, "Invalid id parameter", 400);
+    }
+    const runId = rawId;
+    const userId = req.user!.id;
+
+    const runResult = await pool.query(
+      `
+      SELECT
+        id,
+        initial_balance,
+        current_balance,
+        equity,
+        last_price,
+        position,
+        started_at
+      FROM paper_runs
+      WHERE id = $1 AND user_id = $2
+      `,
+      [runId, userId]
+    );
+
+    if (!runResult.rowCount) {
+      return sendError(res, "Paper run not found", 404);
+    }
+
+    const latest = getLatestPortfolioState(runId);
+    if (latest) {
+      return sendSuccess(res, latest);
+    }
+
+    const rawRun = runResult.rows[0];
+
+    const metricsResult = await pool.query(
+      `
+      SELECT
+        total_return_usdt,
+        equity_curve
+      FROM metrics
+      WHERE run_id = $1 AND run_type = 'PAPER'
+      ORDER BY created_at DESC
+      LIMIT 1
+      `,
+      [runId]
+    );
+
+    const tradesResult = await pool.query(
+      `
+      SELECT
+        COUNT(*) FILTER (WHERE exit_price IS NOT NULL)::int AS closed_trades,
+        COALESCE(SUM(CASE WHEN exit_price IS NOT NULL THEN pnl ELSE 0 END), 0) AS realized_pnl
+      FROM trades
+      WHERE run_id = $1 AND run_type = 'PAPER'
+      `,
+      [runId]
+    );
+
+    const usdtBalance = Number(
+      rawRun.quote_balance ?? rawRun.current_balance ?? rawRun.initial_balance ?? 0
+    );
+    const btcBalance = Math.max(0, Number(rawRun.base_balance ?? 0));
+    const initialBalance = Number(rawRun.initial_balance ?? 0);
+    const lastPrice =
+      rawRun.last_price != null ? Number(rawRun.last_price) : null;
+    const position = rawRun.position as
+      | {
+          side?: string;
+          quantity?: number;
+          entry_price?: number;
+        }
+      | null;
+
+    let unrealizedPnl = 0;
+    if (position && lastPrice != null) {
+      const qty = Number(position.quantity ?? 0);
+      const entryPrice = Number(position.entry_price ?? 0);
+      const side = String(position.side ?? "").toUpperCase();
+
+      if (qty > 0 && entryPrice > 0) {
+        unrealizedPnl =
+          side === "SHORT"
+            ? (entryPrice - lastPrice) * qty
+            : (lastPrice - entryPrice) * qty;
+      }
+    }
+
+    const realizedFromMetrics =
+      metricsResult.rowCount && metricsResult.rows[0].total_return_usdt != null
+        ? Number(metricsResult.rows[0].total_return_usdt)
+        : null;
+
+    const tradesRow = tradesResult.rows[0];
+    const realizedFromTrades = Number(tradesRow.realized_pnl ?? 0);
+    const realizedPnl = realizedFromMetrics ?? realizedFromTrades;
+    const closedTrades = Number(tradesRow.closed_trades ?? 0);
+
+    const rawCurve =
+      metricsResult.rowCount && Array.isArray(metricsResult.rows[0].equity_curve)
+        ? (metricsResult.rows[0].equity_curve as Array<{
+            timestamp?: number;
+            equity?: number;
+          }>)
+        : [];
+
+    const equityCurve = rawCurve
+      .map((point) => ({
+        timestamp: Number(point.timestamp ?? 0),
+        equity: Number(point.equity ?? 0),
+      }))
+      .filter(
+        (point) =>
+          Number.isFinite(point.timestamp) && Number.isFinite(point.equity)
+      );
+
+    if (equityCurve.length === 0) {
+      equityCurve.push({
+        timestamp:
+          rawRun.started_at != null
+            ? new Date(rawRun.started_at).getTime()
+            : Date.now(),
+        equity: initialBalance,
+      });
+    } else {
+      const hasInitialPoint = Math.abs(equityCurve[0].equity - initialBalance) < 1e-9;
+      if (!hasInitialPoint) {
+        equityCurve.unshift({
+          timestamp:
+            rawRun.started_at != null
+              ? new Date(rawRun.started_at).getTime()
+              : equityCurve[0].timestamp,
+          equity: initialBalance,
+        });
+      }
+    }
+
+    const response: PortfolioState = {
+      run_id: runId,
+      balance: usdtBalance,
+      usdt_balance: usdtBalance,
+      btc_balance: btcBalance,
+      equity:
+        rawRun.equity != null
+          ? Number(rawRun.equity)
+          : usdtBalance + (btcBalance * Number(rawRun.last_price ?? 0)),
+      realized_pnl: realizedPnl,
+      unrealized_pnl: unrealizedPnl,
+      open_positions: position ? 1 : 0,
+      trades_count: closedTrades,
+      equity_curve: equityCurve,
     };
 
     return sendSuccess(res, response);

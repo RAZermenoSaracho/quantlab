@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PortfolioStateSchema } from "./portfolio";
 
 /* ======================================================
    ENUMS
@@ -234,6 +235,14 @@ export const PaperCandleEventSchema = z.object({
   }),
 });
 
+/* ================= PORTFOLIO UPDATE EVENT ================= */
+
+export const PaperPortfolioUpdateEventSchema = z.object({
+  run_id: z.string().uuid(),
+  event_type: z.literal("portfolio_update"),
+  payload: PortfolioStateSchema,
+});
+
 /* ================= DISCRIMINATED UNION ================= */
 
 export const PaperEngineEventSchema = z.discriminatedUnion(
@@ -245,6 +254,7 @@ export const PaperEngineEventSchema = z.discriminatedUnion(
     PaperPositionEventSchema,
     PaperErrorEventSchema,
     PaperCandleEventSchema,
+    PaperPortfolioUpdateEventSchema,
   ]
 );
 

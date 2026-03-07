@@ -1,5 +1,5 @@
 import axios from "axios";
-import type { Symbol } from "@quantlab/contracts";
+import type { Candle, Symbol } from "@quantlab/contracts";
 
 type BinanceSymbol = {
   symbol: string;
@@ -14,6 +14,21 @@ type BinanceExchangeInfoResponse = {
     }
   >;
 };
+
+type BinanceKlineRow = [
+  number,
+  string,
+  string,
+  string,
+  string,
+  string,
+  number,
+  string,
+  number,
+  string,
+  string,
+  string
+];
 
 const BINANCE_BASE_URL = "https://api.binance.com";
 
@@ -48,4 +63,32 @@ export async function getBinanceSymbols(): Promise<Symbol[]> {
   cacheTimestamp = now;
 
   return symbols;
+}
+
+export async function getBinanceCandles(
+  symbol: string,
+  interval: string,
+  limit: number
+): Promise<Candle[]> {
+  const safeLimit = Math.max(1, Math.min(limit, 1000));
+
+  const response = await axios.get<BinanceKlineRow[]>(
+    `${BINANCE_BASE_URL}/api/v3/klines`,
+    {
+      params: {
+        symbol,
+        interval,
+        limit: safeLimit,
+      },
+    }
+  );
+
+  return response.data.map((row) => ({
+    timestamp: Number(row[0]),
+    open: Number(row[1]),
+    high: Number(row[2]),
+    low: Number(row[3]),
+    close: Number(row[4]),
+    volume: Number(row[5]),
+  }));
 }

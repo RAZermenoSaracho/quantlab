@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { CandleSchema } from "./market";
 import { PaperPositionSchema, PaperRunStatusSchema } from "./paper";
+import { PortfolioStateSchema } from "./portfolio";
 
 export const JoinPaperRunSchema = z.string().uuid();
 export const LeavePaperRunSchema = z.string().uuid();
@@ -51,6 +52,9 @@ export const PaperRunErrorEventSchema = z.object({
 
 export type PaperRunErrorEvent = z.infer<typeof PaperRunErrorEventSchema>;
 
+export const PortfolioUpdateEventSchema = PortfolioStateSchema;
+export type PortfolioUpdateEvent = z.infer<typeof PortfolioUpdateEventSchema>;
+
 export const BacktestProgressEventSchema = z.object({
   run_id: z.string().uuid(),
   status: z.enum(["RUNNING", "COMPLETED", "FAILED"]),
@@ -65,6 +69,7 @@ export type ServerToClientEvents = {
   paper_run_update: (payload: PaperRunUpdateEvent) => void;
   paper_run_status: (payload: PaperRunStatusEvent) => void;
   paper_run_error: (payload: PaperRunErrorEvent) => void;
+  portfolio_update: (payload: PortfolioUpdateEvent) => void;
   backtest_progress: (payload: BacktestProgressEvent) => void;
 };
 
