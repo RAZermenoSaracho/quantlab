@@ -28,6 +28,12 @@ jobs:
       - name: Install dependencies (workspaces)
         run: npm ci
 
+      - name: Workaround Rollup optional dependency bug (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          ROLLUP_VERSION=$(node -p "require('./frontend/node_modules/rollup/package.json').version")
+          npm install --no-save --workspace=frontend @rollup/rollup-linux-x64-gnu@$ROLLUP_VERSION
+
       - name: Build frontend
         run: npm run build --workspace=frontend
 
