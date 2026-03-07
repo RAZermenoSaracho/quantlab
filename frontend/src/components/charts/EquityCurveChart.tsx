@@ -9,6 +9,11 @@ import {
   ReferenceLine,
   Area,
 } from "recharts";
+import type {
+  Formatter,
+  NameType,
+  ValueType,
+} from "recharts/types/component/DefaultTooltipContent";
 
 type EquityPoint = {
   timestamp: number;
@@ -28,6 +33,21 @@ function formatDate(ts: number) {
 function formatFullDate(ts: number) {
   return new Date(ts).toLocaleString();
 }
+
+const equityTooltipFormatter: Formatter<ValueType, NameType> = (value) => {
+  const rawValue = Array.isArray(value) ? value[0] : value;
+  const numericValue =
+    typeof rawValue === "number"
+      ? rawValue
+      : typeof rawValue === "string"
+        ? Number(rawValue)
+        : NaN;
+
+  return [
+    `${Number.isFinite(numericValue) ? numericValue.toFixed(2) : "0.00"} USDT`,
+    "Equity",
+  ];
+};
 
 export default function EquityCurveChart({ equity }: Props) {
   if (!equity?.length) {
@@ -84,10 +104,7 @@ export default function EquityCurveChart({ equity }: Props) {
             labelFormatter={(value) =>
               `Date: ${formatFullDate(Number(value))}`
             }
-            formatter={(value: number | string | undefined) => [
-              `${Number(value).toFixed(2)} USDT`,
-              "Equity",
-            ]}
+            formatter={equityTooltipFormatter}
           />
 
           <ReferenceLine
