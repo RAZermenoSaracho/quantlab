@@ -25,11 +25,10 @@ jobs:
           npm config set fetch-retry-maxtimeout 120000
           npm config set maxsockets 3
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Rebuild native dependencies for Linux
-        run: npm rebuild
+      - name: Install dependencies (Linux resolution)
+        run: |
+          npm install --package-lock-only
+          npm ci
 
       - name: Build frontend
         run: npm run build --workspace=frontend
