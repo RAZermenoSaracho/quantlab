@@ -9,7 +9,7 @@
     "skipLibCheck": true,
     "baseUrl": ".",
     "paths": {
-      "@quantlab/contracts": ["../packages/contracts"]
+      "@quantlab/contracts": ["../packages/contracts/src"]
     },
 
     /* Bundler mode */

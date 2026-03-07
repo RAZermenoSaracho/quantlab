@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import os
 import time
@@ -6,9 +5,11 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from .clients import ExchangeFactory
 from .context import build_context
+from .events import get_strategy_event_system
 from .indicators import compute_indicator_series
+from .market import CandleResampler
+from .portfolio import PortfolioEngine
 from .spec import load_config_from_env
 from .validator import SAFE_GLOBALS
 
@@ -24,23 +25,10 @@ BACKEND_EVENT_URL = f"{BACKEND_BASE_URL}/api/paper/internal/event"
 _HTTP_TIMEOUT = httpx.Timeout(connect=5.0, read=5.0, write=5.0, pool=5.0)
 _http_client: Optional[httpx.AsyncClient] = None
 
-# Logging controls
-# - PAPER_WS_LOG_RAW=1 => print raw ws payloads (throttled)
-# - PAPER_WS_LOG_EVERY=N => log raw payload every N messages (default 25)
-_PAPER_WS_LOG_RAW = os.getenv("PAPER_WS_LOG_RAW", "0") == "1"
-_PAPER_WS_LOG_EVERY = int(os.getenv("PAPER_WS_LOG_EVERY", "25"))
-
 # Strategy safety: do not crash paper stream on strategy exceptions
 _STRATEGY_CRASH_IS_FATAL = os.getenv("PAPER_STRATEGY_FATAL", "0") == "1"
 
-
-def _calculate_realized_pnl(
-    side: str,
-    entry_price: float,
-    exit_price: float,
-    quantity: float,
-) -> float:
-    return (float(exit_price) - float(entry_price)) * float(quantity)
+_MAX_ENGINE_TICKS_PER_SECOND = 10.0
 
 
 def _get_http_client() -> httpx.AsyncClient:
@@ -147,22 +135,18 @@ class PaperSession:
         self.candles: List[Dict[str, Any]] = []
         self.realized_pnl = 0.0
         self.equity_curve: List[Dict[str, float]] = []
+        self.portfolio = PortfolioEngine(initial_cash=self.initial_balance)
 
         self.active = False
-        self._stream_task: Optional[asyncio.Task] = None
+        self._subscriber_id = f"paper:{self.run_id}"
+        self._event_system = get_strategy_event_system()
+        self._resampler: Optional[CandleResampler] = None
+        self._last_tick_wall_time = 0.0
 
         # Future live trading credentials (kept for compatibility)
         self.api_key = request.api_key
         self.api_secret = request.api_secret
         self.testnet = request.testnet
-
-        # Exchange client
-        self.exchange_client = ExchangeFactory.create(
-            exchange=self.exchange,
-            api_key=self.api_key,
-            api_secret=self.api_secret,
-            testnet=self.testnet,
-        )
 
         # Compile user algorithm safely
         self.execution_env = dict(SAFE_GLOBALS)
@@ -196,32 +180,17 @@ class PaperSession:
     # ==================================================
 
     def _compute_unrealized_pnl(self, current_price: Optional[float] = None) -> float:
-        if not self.position:
-            return 0.0
-
-        if current_price is None:
-            current_price = self.last_price
-
-        if current_price is None:
-            return 0.0
-
-        entry_price = float(self.position["entry_price"])
-        quantity = float(self.position["quantity"])
-        return (float(current_price) - entry_price) * quantity
+        if current_price is not None:
+            self.portfolio.apply_price_update(float(current_price))
+            self._sync_from_portfolio()
+        return float(self.portfolio.state.unrealized_pnl)
 
     def portfolio_state(self) -> Dict[str, Any]:
-        unrealized = self._compute_unrealized_pnl()
+        self._sync_from_portfolio()
+        unrealized = float(self.portfolio.state.unrealized_pnl)
         usdt_balance = float(self.quote_balance)
         btc_balance = max(0.0, float(self.base_balance))
-        mark_price = (
-            float(self.last_price)
-            if self.last_price is not None
-            else (float(self.position["entry_price"]) if self.position else 0.0)
-        )
-        equity = usdt_balance + (btc_balance * mark_price)
-        unrealized = max(0.0, btc_balance) * (
-            mark_price - (float(self.position["entry_price"]) if self.position else mark_price)
-        )
+        equity = float(self.portfolio.state.total_equity)
 
         return {
             "run_id": self.run_id,
@@ -235,6 +204,15 @@ class PaperSession:
             "trades_count": len(self.trades),
             "equity_curve": list(self.equity_curve),
         }
+
+    def _sync_from_portfolio(self) -> None:
+        position = self.portfolio.position
+        self.position = position
+        self.quote_balance = float(self.portfolio.state.cash_balance)
+        self.base_balance = float(position["quantity"]) if position else 0.0
+        self.realized_pnl = float(self.portfolio.state.realized_pnl)
+        if self.portfolio.state.last_price is not None:
+            self.last_price = float(self.portfolio.state.last_price)
 
     def _append_equity_point(self, timestamp: int, equity: Optional[float] = None) -> None:
         point_equity = float(
@@ -275,31 +253,24 @@ class PaperSession:
         await self._emit_portfolio_update()
 
         logger.info(
-            "[PaperTrading][%s] START requested. Launching websocket stream symbol=%s timeframe=%s",
+            "[PaperTrading][%s] START requested. Subscribing to shared market stream exchange=%s symbol=%s timeframe=%s",
             self.run_id,
+            self.exchange,
             self.symbol,
             self.timeframe,
         )
+        await self._hydrate_history()
+        if self.timeframe != "1s":
+            self._resampler = CandleResampler(self.timeframe)
+        else:
+            self._resampler = None
 
-        async def _run_stream():
-            try:
-                await self.exchange_client.subscribe_klines(
-                    symbol=self.symbol,
-                    timeframe=self.timeframe,
-                    on_message=self._on_candle,
-                    run_id=self.run_id,          # <-- for clearer websocket logs
-                    log_raw=_PAPER_WS_LOG_RAW,   # <-- raw payload logging toggle
-                    log_every=_PAPER_WS_LOG_EVERY,
-                )
-            except asyncio.CancelledError:
-                logger.info("[PaperTrading][%s] Stream task cancelled.", self.run_id)
-                raise
-            except Exception:
-                logger.exception("[PaperTrading][%s] Stream crashed (unexpected).", self.run_id)
-                await emit_event(self.run_id, "error", {"message": "stream_crashed"})
-                self.active = False
-
-        self._stream_task = asyncio.create_task(_run_stream())
+        await self._event_system.register_strategy(
+            exchange=self.exchange,
+            symbol=self.symbol,
+            strategy_id=self._subscriber_id,
+            callback=self._on_market_candle,
+        )
 
     async def stop(self) -> None:
         if not self.active:
@@ -309,26 +280,65 @@ class PaperSession:
 
         self.active = False
 
-        try:
-            await self.exchange_client.close_stream()
-        except Exception:
-            logger.exception("[PaperTrading][%s] Failed closing exchange stream.", self.run_id)
-
-        if self._stream_task and not self._stream_task.done():
-            self._stream_task.cancel()
-            try:
-                await asyncio.wait_for(self._stream_task, timeout=3.0)
-            except asyncio.TimeoutError:
-                logger.warning("[PaperTrading][%s] Stream task did not exit in time.", self.run_id)
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                logger.exception("[PaperTrading][%s] Stream task error on stop.", self.run_id)
-
-        self._stream_task = None
+        await self._event_system.unregister_strategy(
+            exchange=self.exchange,
+            symbol=self.symbol,
+            strategy_id=self._subscriber_id,
+        )
 
         await emit_event(self.run_id, "status", {"status": "STOPPED"})
         logger.info("[PaperTrading][%s] STOP completed.", self.run_id)
+
+    # ==================================================
+    # MARKET STREAM INTEGRATION
+    # ==================================================
+
+    async def _hydrate_history(self) -> None:
+        try:
+            raw_history = await self._event_system.get_history(
+                exchange=self.exchange,
+                symbol=self.symbol,
+                limit=50_000,
+            )
+        except Exception:
+            logger.exception("[PaperTrading][%s] Failed loading shared market history.", self.run_id)
+            return
+
+        if not raw_history:
+            return
+
+        if self.timeframe == "1s":
+            self.candles = list(raw_history)
+            return
+
+        try:
+            history_resampler = CandleResampler(self.timeframe)
+            seeded: List[Dict[str, Any]] = []
+            for candle in raw_history:
+                seeded.extend(history_resampler.add_candle(candle))
+            self.candles = seeded[-10_000:]
+        except Exception:
+            logger.exception("[PaperTrading][%s] Failed resampling shared history.", self.run_id)
+
+    async def _on_market_candle(self, candle: Dict[str, float]) -> None:
+        if not self.active:
+            return
+
+        if self.timeframe == "1s":
+            await self._on_candle(candle)
+            return
+
+        if self._resampler is None:
+            self._resampler = CandleResampler(self.timeframe)
+
+        try:
+            closed_candles = self._resampler.add_candle(candle)
+        except Exception:
+            logger.exception("[PaperTrading][%s] Failed resampling live candle.", self.run_id)
+            return
+
+        for closed in closed_candles:
+            await self._on_candle(closed)
 
     # ==================================================
     # CANDLE HANDLER
@@ -342,6 +352,12 @@ class PaperSession:
         """
         if not self.active:
             return
+
+        min_tick_interval = 1.0 / _MAX_ENGINE_TICKS_PER_SECOND
+        now = time.monotonic()
+        if self._last_tick_wall_time > 0 and (now - self._last_tick_wall_time) < min_tick_interval:
+            return
+        self._last_tick_wall_time = now
 
         self.candles.append(candle)
         await self._process_candle(candle)
@@ -360,6 +376,8 @@ class PaperSession:
         price = float(candle["close"])
         timestamp = int(candle["timestamp"])
         self.last_price = price
+        self.portfolio.apply_price_update(price)
+        self._sync_from_portfolio()
 
         # Emit candle event (backend will broadcast via socket)
         await emit_event(
@@ -491,25 +509,20 @@ class PaperSession:
             return
 
         slippage_bps = float(getattr(self.config, "slippage_bps", 0.0))
-        effective_price = price * (1 + slippage_bps / 10_000)
-        gross_qty = capital_to_use / effective_price
-        fee_qty = gross_qty * self.fee_rate
-        net_qty = gross_qty - fee_qty
+        opened = self.portfolio.apply_trade_open(
+            side=side,
+            price=price,
+            capital_to_use=capital_to_use,
+            fee_rate=self.fee_rate,
+            timestamp=timestamp,
+            slippage_bps=slippage_bps,
+        )
+        if opened is None:
+            return
 
-        usdt_spent = gross_qty * effective_price
-        self.base_balance += net_qty
-        self.quote_balance -= usdt_spent
-
-        position_qty = net_qty
-        entry_fee_quote = fee_qty * effective_price
-
-        self.position = {
-            "side": side,
-            "entry_price": float(effective_price),
-            "quantity": float(position_qty),
-            "opened_at": int(timestamp),
-            "entry_fee_quote": float(entry_fee_quote),
-        }
+        self._sync_from_portfolio()
+        effective_price = float(opened["entry_price"])
+        position_qty = float(opened["quantity"])
 
         logger.info(
             "[PaperTrading][%s] OPEN %s qty=%.6f entry=%.4f used=%.2f quote=%.2f base=%.6f",
@@ -545,41 +558,27 @@ class PaperSession:
         if not self.position:
             return
 
-        quantity = float(self.position["quantity"])
-        entry_price = float(self.position["entry_price"])
         side = str(self.position["side"]).upper()
-        entry_fee_quote = float(self.position.get("entry_fee_quote", 0.0))
-
         if side != "LONG":
             return
 
         slippage_bps = float(getattr(self.config, "slippage_bps", 0.0))
-        effective_exit_price = price * (1 - slippage_bps / 10_000)
-        gross_quote = quantity * effective_exit_price
-        fee_quote = gross_quote * self.fee_rate
-        net_quote = gross_quote - fee_quote
-
-        self.quote_balance += net_quote
-        self.base_balance = max(0.0, self.base_balance - quantity)
-
-        pnl = (
-            _calculate_realized_pnl(side, entry_price, effective_exit_price, quantity)
-            - entry_fee_quote
-            - fee_quote
+        trade = self.portfolio.apply_trade_close(
+            price=price,
+            fee_rate=self.fee_rate,
+            timestamp=timestamp,
+            slippage_bps=slippage_bps,
         )
+        if trade is None:
+            return
 
-        trade = {
-            "side": side,
-            "entry_price": float(entry_price),
-            "exit_price": float(effective_exit_price),
-            "quantity": float(quantity),
-            "pnl": float(pnl),
-            "opened_at": int(self.position["opened_at"]),
-            "closed_at": int(timestamp),
-        }
+        self._sync_from_portfolio()
+        quantity = float(trade["quantity"])
+        entry_price = float(trade["entry_price"])
+        effective_exit_price = float(trade["exit_price"])
+        pnl = float(trade["pnl"])
 
         self.trades.append(trade)
-        self.realized_pnl += float(pnl)
         self.position = None
 
         logger.info(

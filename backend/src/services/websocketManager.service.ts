@@ -66,9 +66,16 @@ export async function emitPaperEvent(
       ioInstance.to(room).emit("paper_tick", PaperTickSchema.parse(payload));
       break;
     case "trade_execution":
-      ioInstance
-        .to(room)
-        .emit("trade_execution", TradeExecutionSchema.parse(payload));
+      {
+        const parsed = TradeExecutionSchema.parse(payload);
+        ioInstance.to(room).emit("trade_execution", parsed);
+        const rawIo = ioInstance as unknown as {
+          to: (targetRoom: string) => {
+            emit: (event: string, data: unknown) => void;
+          };
+        };
+        rawIo.to(room).emit("paper_trade", parsed);
+      }
       break;
     case "paper_run_update":
       ioInstance
@@ -86,9 +93,16 @@ export async function emitPaperEvent(
         .emit("paper_run_error", PaperRunErrorEventSchema.parse(payload));
       break;
     case "portfolio_update":
-      ioInstance
-        .to(room)
-        .emit("portfolio_update", PortfolioUpdateEventSchema.parse(payload));
+      {
+        const parsed = PortfolioUpdateEventSchema.parse(payload);
+        ioInstance.to(room).emit("portfolio_update", parsed);
+        const rawIo = ioInstance as unknown as {
+          to: (targetRoom: string) => {
+            emit: (event: string, data: unknown) => void;
+          };
+        };
+        rawIo.to(room).emit("paper_portfolio_update", parsed);
+      }
       break;
   }
 }

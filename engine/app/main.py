@@ -4,7 +4,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
 from .backtest import run_backtest
@@ -24,6 +24,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("asyncio").setLevel(logging.WARNING)
 
 logger = logging.getLogger("quantlab.engine")
+DEFAULT_STRATEGY_WORKERS = 4
 
 # ======================================================
 # =================== APP INIT =========================
@@ -97,6 +98,16 @@ ACTIVE_PAPER_SESSIONS: Dict[str, Any] = {}
 # ===================== Lifespan =======================
 # ======================================================
 
+@app.on_event("startup")
+async def _startup():
+    try:
+        from .events import get_strategy_event_system
+        await get_strategy_event_system().start_workers(DEFAULT_STRATEGY_WORKERS)
+        logger.info("Strategy event workers started: %s", DEFAULT_STRATEGY_WORKERS)
+    except Exception:
+        logger.exception("Failed to start strategy event workers.")
+
+
 @app.on_event("shutdown")
 async def _shutdown():
     logger.info("Engine shutdown initiated. Stopping active paper sessions...")
@@ -117,6 +128,18 @@ async def _shutdown():
         await close_http_client()
     except Exception:
         logger.exception("Error during shutdown cleanup")
+
+    try:
+        from .market import get_market_stream_manager
+        await get_market_stream_manager().stop_all()
+    except Exception:
+        logger.exception("Error stopping market stream manager during shutdown")
+
+    try:
+        from .events import get_strategy_event_system
+        await get_strategy_event_system().stop_workers()
+    except Exception:
+        logger.exception("Error stopping strategy event workers during shutdown")
 
     logger.info("Engine shutdown cleanup completed.")
 
@@ -264,4 +287,25 @@ async def paper_status(run_id: str):
         "base_balance": session.base_balance,
         "equity": equity,
         "position": session.position,
+    }
+
+
+@app.get("/market/history")
+async def market_history(
+    exchange: str = Query(...),
+    symbol: str = Query(...),
+    limit: int = Query(500, ge=1, le=50_000),
+):
+    from .market import get_market_stream_manager
+
+    candles = await get_market_stream_manager().get_history(
+        exchange=exchange,
+        symbol=symbol,
+        limit=limit,
+    )
+
+    return {
+        "exchange": exchange,
+        "symbol": symbol,
+        "candles": candles,
     }

@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import type { BacktestRun, PaperRun } from "@quantlab/contracts";
+import type {
+  AlgorithmPaperRun,
+  AlgorithmBacktestRun,
+} from "@quantlab/contracts";
 import DetailNavigator from "../../components/navigation/DetailNavigator";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
@@ -17,31 +20,6 @@ import {
 } from "../../data/algorithms";
 
 type Tab = "overview" | "backtests" | "paper";
-
-type AlgorithmBacktestRun = Pick<
-  BacktestRun,
-  | "id"
-  | "symbol"
-  | "timeframe"
-  | "status"
-  | "created_at"
-  | "total_return_percent"
-  | "total_return_usdt"
-> & {
-  exchange?: string;
-};
-
-type AlgorithmPaperRun = Pick<
-  PaperRun,
-  | "id"
-  | "symbol"
-  | "timeframe"
-  | "status"
-  | "current_balance"
-  | "started_at"
-> & {
-  exchange?: string;
-};
 
 function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
@@ -232,11 +210,36 @@ export default function AlgorithmDetail() {
       ),
     },
     {
-      key: "equity",
-      header: "Equity",
+      key: "balance",
+      header: "Balance",
       render: (run) => {
-        const equity = Number(run.current_balance ?? 0);
+        const balance = Number(run.quote_balance ?? run.current_balance ?? 0);
+        return <span className="text-slate-300">${balance.toFixed(2)}</span>;
+      },
+    },
+    {
+      key: "equity",
+      header: "Total Equity",
+      render: (run) => {
+        const quote = Number(run.quote_balance ?? run.current_balance ?? 0);
+        const base = Number(run.base_balance ?? 0);
+        const last = Number(run.last_price ?? 0);
+        const equity = Number(run.equity ?? quote + (base * last));
         return <span className="text-slate-300">${equity.toFixed(2)}</span>;
+      },
+    },
+    {
+      key: "pnl",
+      header: "PnL",
+      render: (run) => {
+        const quote = Number(run.quote_balance ?? run.current_balance ?? 0);
+        const base = Number(run.base_balance ?? 0);
+        const last = Number(run.last_price ?? 0);
+        const equity = Number(run.equity ?? quote + (base * last));
+        const pnl = equity - Number(run.initial_balance ?? 0);
+        const cls =
+          pnl >= 0 ? "text-emerald-400 font-medium" : "text-red-400 font-medium";
+        return <span className={cls}>{`${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}`}</span>;
       },
     },
     {

@@ -5,8 +5,42 @@ type EventName = keyof EventMap;
 type EventPayload<K extends EventName> = Parameters<EventMap[K]>[0];
 type InternalHandler = (payload: unknown) => void;
 type EventHandler<K extends EventName> = (payload: EventPayload<K>) => void;
+type PendingPayloads = Map<EventName, unknown[]>;
 
 const handlers = new Map<string, Set<InternalHandler>>();
+const pendingPayloads: PendingPayloads = new Map();
+
+const EVENT_FLUSH_MS = 100;
+let flushTimer: ReturnType<typeof setInterval> | null = null;
+
+function ensureFlushTimer() {
+  if (flushTimer) {
+    return;
+  }
+
+  flushTimer = setInterval(() => {
+    if (pendingPayloads.size === 0) {
+      return;
+    }
+
+    const snapshot = new Map(pendingPayloads);
+    pendingPayloads.clear();
+
+    snapshot.forEach((payloads, eventName) => {
+      const eventHandlers = handlers.get(eventName);
+      if (!eventHandlers || eventHandlers.size === 0) {
+        return;
+      }
+
+      const currentHandlers = [...eventHandlers];
+      for (const payload of payloads) {
+        for (const handler of currentHandlers) {
+          handler(payload);
+        }
+      }
+    });
+  }, EVENT_FLUSH_MS);
+}
 
 export function subscribe<K extends EventName>(
   eventName: K,
@@ -42,11 +76,12 @@ export function emit<K extends EventName>(
   payload: EventPayload<K>
 ) {
   const eventHandlers = handlers.get(eventName);
-  if (!eventHandlers) {
+  if (!eventHandlers || eventHandlers.size === 0) {
     return;
   }
 
-  eventHandlers.forEach((handler) => {
-    handler(payload);
-  });
+  ensureFlushTimer();
+  const queue = pendingPayloads.get(eventName) ?? [];
+  queue.push(payload);
+  pendingPayloads.set(eventName, queue);
 }

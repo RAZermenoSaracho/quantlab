@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { PortfolioStateSchema } from "./portfolio";
+import { MarketTimeframeSchema } from "./market";
 
 /* ======================================================
    ENUMS
@@ -68,7 +69,7 @@ export const PaperRunSchema = z.object({
 
   exchange: z.string(),
   symbol: z.string(),
-  timeframe: z.string(),
+  timeframe: MarketTimeframeSchema,
 
   status: PaperRunStatusSchema,
 
@@ -120,7 +121,7 @@ export const StartPaperRunRequestSchema = z.object({
   algorithm_id: z.string().uuid(),
   exchange: z.string(),
   symbol: z.string(),
-  timeframe: z.string(),
+  timeframe: MarketTimeframeSchema,
   initial_balance: z.number(),
   fee_rate: z.number().optional(),
 });

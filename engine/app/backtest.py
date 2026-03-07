@@ -7,6 +7,10 @@ from .spec import load_config_from_env
 
 from .indicators import compute_indicator_series
 from .context import build_context
+from .data.candle_aggregator import expand_minute_candles_to_subminute
+
+
+SUB_MINUTE_TIMEFRAMES = {"1s", "5s", "15s", "30s"}
 
 
 # ============================================================
@@ -340,9 +344,11 @@ def run_backtest(
     if progress_callback:
         progress_callback(30)
 
+    source_timeframe = "1m" if timeframe in SUB_MINUTE_TIMEFRAMES else timeframe
+
     candles_raw = client.fetch_candles(
         symbol=symbol,
-        timeframe=timeframe,
+        timeframe=source_timeframe,
         start_date=start_date,
         end_date=end_date,
     )
@@ -370,6 +376,12 @@ def run_backtest(
         if first_ts is None:
             first_ts = candle["timestamp"]
         last_ts = candle["timestamp"]
+
+    if timeframe in SUB_MINUTE_TIMEFRAMES:
+        candles = expand_minute_candles_to_subminute(candles, timeframe)
+        if candles:
+            first_ts = int(candles[0]["timestamp"])
+            last_ts = int(candles[-1]["timestamp"])
 
     # ============================
     # INDICATORS

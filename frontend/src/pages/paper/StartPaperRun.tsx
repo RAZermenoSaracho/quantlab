@@ -211,11 +211,19 @@ export default function StartPaperRun() {
               <select
                 value={form.timeframe}
                 onChange={(e) =>
-                  setForm({ ...form, timeframe: e.target.value })
+                  setForm({
+                    ...form,
+                    timeframe:
+                      e.target.value as StartPaperRunRequest["timeframe"],
+                  })
                 }
                 className="form-input"
               >
 
+                <option value="1s">1s</option>
+                <option value="5s">5s</option>
+                <option value="15s">15s</option>
+                <option value="30s">30s</option>
                 <option value="1m">1m</option>
                 <option value="3m">3m</option>
                 <option value="5m">5m</option>

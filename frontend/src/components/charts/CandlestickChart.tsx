@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createChart,
   ColorType,
@@ -17,12 +17,43 @@ type Candle = {
   high: number;
   low: number;
   close: number;
+  volume?: number;
 };
 
 type Trade = {
   side: "BUY" | "SELL" | string;
   opened_at?: string | null;
   closed_at?: string | null;
+};
+
+type ChartTimeframe = "1s" | "5s" | "15s" | "1m" | "5m";
+type MarkerApi = {
+  setMarkers: (markers: SeriesMarker<UTCTimestamp>[]) => void;
+};
+
+type NormalizedCandle = {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+};
+
+const CHART_TIMEFRAMES: readonly ChartTimeframe[] = [
+  "1s",
+  "5s",
+  "15s",
+  "1m",
+  "5m",
+];
+
+const TIMEFRAME_SECONDS: Record<ChartTimeframe, number> = {
+  "1s": 1,
+  "5s": 5,
+  "15s": 15,
+  "1m": 60,
+  "5m": 300,
 };
 
 function toUnixSeconds(ts: unknown): UTCTimestamp | null {
@@ -44,9 +75,49 @@ function toUnixSeconds(ts: unknown): UTCTimestamp | null {
   return Math.floor(d.getTime() / 1000) as UTCTimestamp;
 }
 
-type MarkerApi = {
-  setMarkers: (markers: SeriesMarker<UTCTimestamp>[]) => void;
-};
+function aggregateCandles(
+  candles: readonly NormalizedCandle[],
+  timeframe: ChartTimeframe
+): NormalizedCandle[] {
+  if (!candles.length) {
+    return [];
+  }
+
+  const bucketSize = TIMEFRAME_SECONDS[timeframe];
+  const out: NormalizedCandle[] = [];
+  let current: NormalizedCandle | null = null;
+
+  for (const candle of candles) {
+    const bucketTime = Math.floor(candle.time / bucketSize) * bucketSize;
+
+    if (!current || current.time !== bucketTime) {
+      if (current) {
+        out.push(current);
+      }
+
+      current = {
+        time: bucketTime,
+        open: candle.open,
+        high: candle.high,
+        low: candle.low,
+        close: candle.close,
+        volume: candle.volume,
+      };
+      continue;
+    }
+
+    current.high = Math.max(current.high, candle.high);
+    current.low = Math.min(current.low, candle.low);
+    current.close = candle.close;
+    current.volume += candle.volume;
+  }
+
+  if (current) {
+    out.push(current);
+  }
+
+  return out;
+}
 
 export default function CandlestickChart({
   candles,
@@ -58,6 +129,7 @@ export default function CandlestickChart({
   height?: number;
 }) {
   const resolvedHeight = Math.max(height, 320);
+  const [chartTimeframe, setChartTimeframe] = useState<ChartTimeframe>("1m");
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   const chartRef = useRef<IChartApi | null>(null);
@@ -67,10 +139,8 @@ export default function CandlestickChart({
   const previousDataRef = useRef<CandlestickData<UTCTimestamp>[]>([]);
   const hasFittedContentRef = useRef(false);
 
-  /* ================= TRANSFORM DATA ================= */
-
-  const candleData = useMemo(() => {
-    const out: CandlestickData<UTCTimestamp>[] = [];
+  const normalizedCandles = useMemo(() => {
+    const out: NormalizedCandle[] = [];
 
     for (const c of candles ?? []) {
       const time = toUnixSeconds(c.timestamp);
@@ -82,6 +152,7 @@ export default function CandlestickChart({
         high: Number(c.high),
         low: Number(c.low),
         close: Number(c.close),
+        volume: Number(c.volume ?? 0),
       });
     }
 
@@ -89,18 +160,41 @@ export default function CandlestickChart({
     return out;
   }, [candles]);
 
+  const aggregatedCandles = useMemo(
+    () => aggregateCandles(normalizedCandles, chartTimeframe),
+    [normalizedCandles, chartTimeframe]
+  );
+
+  const candleData = useMemo(() => {
+    return aggregatedCandles.map((candle) => ({
+      time: candle.time as UTCTimestamp,
+      open: candle.open,
+      high: candle.high,
+      low: candle.low,
+      close: candle.close,
+    }));
+  }, [aggregatedCandles]);
+
   const markers = useMemo(() => {
     const out: SeriesMarker<UTCTimestamp>[] = [];
+    const bucketSize = TIMEFRAME_SECONDS[chartTimeframe];
 
     for (const t of trades ?? []) {
       const opened = toUnixSeconds(t.opened_at);
       const closed = toUnixSeconds(t.closed_at);
       const side = String(t.side ?? "").toUpperCase();
 
-      if (opened) {
+      const openedBucket = opened
+        ? (Math.floor(opened / bucketSize) * bucketSize) as UTCTimestamp
+        : null;
+      const closedBucket = closed
+        ? (Math.floor(closed / bucketSize) * bucketSize) as UTCTimestamp
+        : null;
+
+      if (openedBucket) {
         if (side === "SHORT" || side === "SELL") {
           out.push({
-            time: opened,
+            time: openedBucket,
             position: "aboveBar",
             shape: "arrowDown",
             color: "#f59e0b",
@@ -108,7 +202,7 @@ export default function CandlestickChart({
           });
         } else {
           out.push({
-            time: opened,
+            time: openedBucket,
             position: "belowBar",
             shape: "arrowUp",
             color: "#22c55e",
@@ -117,9 +211,9 @@ export default function CandlestickChart({
         }
       }
 
-      if (closed) {
+      if (closedBucket) {
         out.push({
-          time: closed,
+          time: closedBucket,
           position: "aboveBar",
           shape: "circle",
           color: "#ef4444",
@@ -130,16 +224,13 @@ export default function CandlestickChart({
 
     out.sort((a, b) => Number(a.time) - Number(b.time));
     return out;
-  }, [trades]);
-
-  /* ================= CREATE CHART ONCE ================= */
+  }, [trades, chartTimeframe]);
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
     el.innerHTML = "";
-
     const initialWidth = Math.max(el.clientWidth, 300);
 
     const chart = createChart(el, {
@@ -155,7 +246,7 @@ export default function CandlestickChart({
       },
       timeScale: {
         timeVisible: true,
-        secondsVisible: false,
+        secondsVisible: TIMEFRAME_SECONDS[chartTimeframe] < 60,
       },
       rightPriceScale: {
         borderColor: "#1f2a44",
@@ -172,7 +263,6 @@ export default function CandlestickChart({
 
     chartRef.current = chart;
     seriesRef.current = series;
-
     markersRef.current = createSeriesMarkers(series, []);
 
     const ro = new ResizeObserver(() => {
@@ -189,22 +279,36 @@ export default function CandlestickChart({
     return () => {
       try {
         ro.disconnect();
-      } catch {}
+      } catch {
+        // no-op
+      }
 
       try {
         chart.remove();
-      } catch {}
+      } catch {
+        // no-op
+      }
 
-    roRef.current = null;
-    chartRef.current = null;
-    seriesRef.current = null;
-    markersRef.current = null;
-    previousDataRef.current = [];
-    hasFittedContentRef.current = false;
+      roRef.current = null;
+      chartRef.current = null;
+      seriesRef.current = null;
+      markersRef.current = null;
+      previousDataRef.current = [];
+      hasFittedContentRef.current = false;
     };
   }, [resolvedHeight]);
 
-  /* ================= UPDATE DATA ================= */
+  useEffect(() => {
+    if (!chartRef.current) {
+      return;
+    }
+
+    chartRef.current.applyOptions({
+      timeScale: {
+        secondsVisible: TIMEFRAME_SECONDS[chartTimeframe] < 60,
+      },
+    });
+  }, [chartTimeframe]);
 
   useEffect(() => {
     const series = seriesRef.current;
@@ -222,7 +326,14 @@ export default function CandlestickChart({
       previousDataRef.current = next;
 
       if (chart && !hasFittedContentRef.current) {
-        chart.timeScale().fitContent();
+        if (next.length > 800) {
+          chart.timeScale().setVisibleLogicalRange({
+            from: next.length - 800,
+            to: next.length + 20,
+          });
+        } else {
+          chart.timeScale().fitContent();
+        }
         hasFittedContentRef.current = true;
       }
     } else {
@@ -247,16 +358,33 @@ export default function CandlestickChart({
     }
   }, [candleData, markers]);
 
-  /* ================= RENDER ================= */
-
   return (
-    <div className="relative w-full min-w-0" style={{ height: resolvedHeight }}>
-      {!candles?.length && (
-        <div className="absolute inset-0 flex items-center justify-center text-slate-500 text-sm">
-          Waiting for candles...
-        </div>
-      )}
-      <div ref={containerRef} className="w-full h-full" />
+    <div className="relative w-full min-w-0">
+      <div className="mb-3 flex items-center justify-end gap-2">
+        {CHART_TIMEFRAMES.map((timeframe) => (
+          <button
+            key={timeframe}
+            type="button"
+            onClick={() => setChartTimeframe(timeframe)}
+            className={`rounded-md border px-2 py-1 text-xs ${
+              chartTimeframe === timeframe
+                ? "border-sky-500 bg-sky-600/20 text-sky-300"
+                : "border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-500"
+            }`}
+          >
+            {timeframe}
+          </button>
+        ))}
+      </div>
+
+      <div className="relative w-full min-w-0" style={{ height: resolvedHeight }}>
+        {!candles?.length && (
+          <div className="absolute inset-0 flex items-center justify-center text-slate-500 text-sm">
+            Waiting for candles...
+          </div>
+        )}
+        <div ref={containerRef} className="w-full h-full" />
+      </div>
     </div>
   );
 }

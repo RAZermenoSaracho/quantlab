@@ -23,6 +23,21 @@ import {
 } from "../../data/paper";
 import { useCandles } from "../../data/market";
 
+function getHistoryLimit(timeframe: string): number {
+  switch (timeframe) {
+    case "1s":
+      return 30000;
+    case "5s":
+      return 6000;
+    case "15s":
+      return 2000;
+    case "1m":
+      return 500;
+    default:
+      return 500;
+  }
+}
+
 export default function PaperRunDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -38,9 +53,14 @@ export default function PaperRunDetail() {
   const { data: portfolioState, error: stateError } = usePaperState(runId);
   const { data: runs, error: runsError } = usePaperRuns();
   const run = initialData?.run ?? null;
+  const historyLimit = useMemo(
+    () => getHistoryLimit(run?.timeframe ?? "1m"),
+    [run?.timeframe]
+  );
   const { data: historicalCandles, error: candlesError } = useCandles(
     run?.symbol ?? "",
-    run?.timeframe ?? ""
+    run?.timeframe ?? "",
+    historyLimit
   );
   const stopMutation = useStopPaperRunMutation();
   const deleteMutation = useDeletePaperRunMutation();
@@ -75,21 +95,27 @@ export default function PaperRunDetail() {
     }
 
     setCandles((current) => {
-      const byTimestamp = new Map<number, Candle>();
+      if (current.length === 0) {
+        return [...historicalCandles];
+      }
 
+      const byTimestamp = new Map<number, Candle>();
       for (const candle of historicalCandles) {
         byTimestamp.set(candle.timestamp, candle);
       }
-
       for (const candle of current) {
         byTimestamp.set(candle.timestamp, candle);
       }
-
-      return [...byTimestamp.values()].sort(
-        (left, right) => left.timestamp - right.timestamp
-      );
+      return [...byTimestamp.values()].sort((left, right) => left.timestamp - right.timestamp);
     });
   }, [historicalCandles]);
+
+  const shouldSubscribeToRealtime = Boolean(
+    runId &&
+      run &&
+      !candlesError &&
+      historicalCandles !== undefined
+  );
 
   /* ================= TRADE TABLE ================= */
 
@@ -184,7 +210,9 @@ export default function PaperRunDetail() {
     []
   );
 
-  const { backendConnected } = usePaperRunEvents(runId, {
+  const { backendConnected } = usePaperRunEvents(
+    shouldSubscribeToRealtime ? runId : "",
+    {
     onTick: (candle: PaperTick) => {
       setExchangeStreaming(true);
       setCandles((prev) => {
@@ -197,19 +225,32 @@ export default function PaperRunDetail() {
           volume: candle.volume,
         };
 
-        const existingIndex = prev.findIndex(
-          (item) => item.timestamp === candle.timestamp
-        );
+        if (prev.length === 0) {
+          return [nextCandle];
+        }
 
+        const lastIndex = prev.length - 1;
+        const lastCandle = prev[lastIndex];
+
+        if (lastCandle.timestamp === nextCandle.timestamp) {
+          const next = [...prev];
+          next[lastIndex] = nextCandle;
+          return next;
+        }
+
+        if (Number(nextCandle.timestamp) > Number(lastCandle.timestamp)) {
+          return [...prev, nextCandle];
+        }
+
+        const existingIndex = prev.findIndex(
+          (item) => item.timestamp === nextCandle.timestamp
+        );
         if (existingIndex >= 0) {
           const next = [...prev];
           next[existingIndex] = nextCandle;
           return next;
         }
-
-        return [...prev, nextCandle].sort(
-          (left, right) => left.timestamp - right.timestamp
-        );
+        return [...prev, nextCandle].sort((left, right) => left.timestamp - right.timestamp);
       });
     },
   });

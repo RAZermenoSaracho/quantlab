@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CandleSchema } from "./market";
+import { CandleSchema, MarketTimeframeSchema } from "./market";
 import { EquityPointSchema } from "./portfolio";
 
 /* =========================
@@ -52,7 +52,7 @@ export const BacktestRunSchema = z.object({
 
   exchange: z.string(),
   symbol: z.string(),
-  timeframe: z.string(),
+  timeframe: MarketTimeframeSchema,
 
   status: BacktestStatusSchema,
 
@@ -115,7 +115,7 @@ export const CreateBacktestRequestSchema = z.object({
   algorithm_id: z.string().uuid(),
   exchange: z.string(),
   symbol: z.string(),
-  timeframe: z.string(),
+  timeframe: MarketTimeframeSchema,
   initial_balance: z.number().positive(),
   start_date: z.string(),
   end_date: z.string(),

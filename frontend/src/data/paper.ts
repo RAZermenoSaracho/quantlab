@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import type {
   MessageResponse,
+  PaperRun,
   PaperRunDetailResponse,
   PaperTrade,
   PortfolioState,
@@ -107,14 +108,34 @@ function makeTrade(payload: TradeExecution): PaperTrade {
 }
 
 export function usePaperRuns() {
+  const query = useQuery({
+    key: PAPER_RUNS,
+    fetcher: async () => (await getAllPaperRuns()).runs,
+  });
+
   useEffect(() => {
     connectSocket();
   }, []);
 
-  return useQuery({
-    key: PAPER_RUNS,
-    fetcher: async () => (await getAllPaperRuns()).runs,
-  });
+  useEffect(() => {
+    const socket = connectSocket();
+    const runs: PaperRun[] = query.data ?? [];
+    if (runs.length === 0) {
+      return;
+    }
+
+    for (const run of runs) {
+      socket.emit("join_paper_run", run.id);
+    }
+
+    return () => {
+      for (const run of runs) {
+        socket.emit("leave_paper_run", run.id);
+      }
+    };
+  }, [query.data]);
+
+  return query;
 }
 
 export function usePaperRun(id: string) {

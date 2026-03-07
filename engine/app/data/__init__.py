@@ -1,7 +1,7 @@
 from typing import Optional
 
-from .clients import ExchangeFactory
-from .clients.base import BaseExchangeClient
+from ..clients import ExchangeFactory
+from ..clients.base import BaseExchangeClient
 
 
 def get_exchange_client(

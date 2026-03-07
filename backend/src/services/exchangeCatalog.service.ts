@@ -11,6 +11,10 @@ const EXCHANGES: ExchangeCatalogItem[] = [
     name: "Binance",
     default_fee_rate: 0.001,
     supported_timeframes: [
+      "1s",
+      "5s",
+      "15s",
+      "30s",
       "1m",
       "5m",
       "15m",

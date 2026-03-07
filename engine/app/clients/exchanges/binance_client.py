@@ -44,6 +44,19 @@ class BinanceClient(BaseExchangeClient):
             )
             self._socket_manager = BinanceSocketManager(self._async_client)
 
+    async def _reset_async_stream_client(self) -> None:
+        if self._async_client is not None:
+            try:
+                await self._async_client.close_connection()
+            except Exception:
+                logger.exception("Failed to close async Binance client during reset.")
+        self._async_client = None
+        self._socket_manager = None
+
+    @staticmethod
+    def _is_read_loop_closed_error(err: Exception) -> bool:
+        return err.__class__.__name__ == "ReadLoopClosed"
+
     async def subscribe_klines(
         self,
         symbol: str,
@@ -139,6 +152,90 @@ class BinanceClient(BaseExchangeClient):
                     continue
 
         logger.info("[WS][%s] Websocket context exited symbol=%s timeframe=%s", rid, sym, timeframe)
+
+    async def subscribe_trades(
+        self,
+        symbol: str,
+        on_message: Callable[[Dict[str, Any]], Awaitable[None]],
+        run_id: Optional[str] = None,
+        log_raw: bool = False,
+        log_every: int = 100,
+    ) -> None:
+        """
+        Subscribes to Binance trade websocket and calls on_message for every trade.
+        """
+        self._stream_active = True
+
+        rid = run_id or "unknown"
+        sym = symbol.upper()
+        msg_count = 0
+
+        while self._stream_active:
+            try:
+                await self._ensure_async_client()
+
+                if not self._socket_manager:
+                    raise RuntimeError("BinanceSocketManager not initialized")
+
+                logger.info("[WS][%s] CONNECTING trades symbol=%s testnet=%s", rid, sym, self.testnet)
+                socket = self._socket_manager.trade_socket(symbol=sym)
+
+                async with socket as stream:
+                    logger.info("[WS][%s] CONNECTED trades symbol=%s", rid, sym)
+
+                    while self._stream_active:
+                        msg = await stream.recv()
+                        msg_count += 1
+
+                        if not msg:
+                            continue
+
+                        if log_raw and (msg_count % max(1, log_every) == 0):
+                            logger.info("[WS][%s] TRADE_RAW(%s): %s", rid, msg_count, msg)
+
+                        if not isinstance(msg, dict):
+                            continue
+
+                        if msg.get("e") != "trade":
+                            continue
+
+                        if "p" not in msg or "q" not in msg or "T" not in msg:
+                            continue
+
+                        trade = {
+                            "price": float(msg["p"]),
+                            "qty": float(msg["q"]),
+                            "timestamp": int(msg["T"]),
+                        }
+                        await on_message(trade)
+
+                if self._stream_active:
+                    logger.warning("[WS][%s] WS CLOSED trades symbol=%s", rid, sym)
+                    logger.info("[WS][%s] WS RECONNECTING trades symbol=%s", rid, sym)
+                    await self._reset_async_stream_client()
+                    await asyncio.sleep(1)
+
+            except asyncio.CancelledError:
+                logger.info("[WS][%s] Trade stream cancelled.", rid)
+                break
+            except Exception as err:
+                if not self._stream_active:
+                    break
+
+                if self._is_read_loop_closed_error(err):
+                    logger.warning(
+                        "[WS][%s] WS CLOSED trades symbol=%s (ReadLoopClosed).",
+                        rid,
+                        sym,
+                    )
+                else:
+                    logger.exception("[WS][%s] Trade stream error.", rid)
+
+                logger.info("[WS][%s] WS RECONNECTING trades symbol=%s", rid, sym)
+                await self._reset_async_stream_client()
+                await asyncio.sleep(1)
+
+        logger.info("[WS][%s] Trade websocket loop stopped symbol=%s", rid, sym)
 
     async def close_stream(self) -> None:
         self._stream_active = False

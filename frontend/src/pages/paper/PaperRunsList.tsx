@@ -14,9 +14,18 @@ export default function PaperRunsList() {
 
   const columns: ListColumn<PaperRun>[] = [
     {
-      key: "symbol",
-      header: "Market",
-      render: (item) => `${item.symbol} (${item.timeframe})`,
+      key: "strategy",
+      header: "Strategy",
+      render: (item) => (
+        <div className="flex flex-col">
+          <span className="text-white font-medium">
+            {item.algorithm_name ?? "—"}
+          </span>
+          <span className="text-xs text-slate-500">
+            {item.symbol} • {item.timeframe} • {item.exchange}
+          </span>
+        </div>
+      ),
     },
     {
       key: "status",
@@ -27,7 +36,32 @@ export default function PaperRunsList() {
       key: "balance",
       header: "Balance",
       render: (item) =>
-        `$${Number(item.current_balance ?? 0).toFixed(2)}`,
+        `$${Number(item.quote_balance ?? item.current_balance ?? 0).toFixed(2)}`,
+    },
+    {
+      key: "equity",
+      header: "Total Equity",
+      render: (item) => {
+        const quote = Number(item.quote_balance ?? item.current_balance ?? 0);
+        const base = Number(item.base_balance ?? 0);
+        const last = Number(item.last_price ?? 0);
+        const equity = quote + (base * last);
+        return `$${equity.toFixed(2)}`;
+      },
+    },
+    {
+      key: "pnl",
+      header: "PnL",
+      render: (item) => {
+        const quote = Number(item.quote_balance ?? item.current_balance ?? 0);
+        const base = Number(item.base_balance ?? 0);
+        const last = Number(item.last_price ?? 0);
+        const equity = quote + (base * last);
+        const pnl = equity - Number(item.initial_balance ?? 0);
+        const className =
+          pnl >= 0 ? "text-emerald-400 font-medium" : "text-red-400 font-medium";
+        return <span className={className}>{`${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}`}</span>;
+      },
     },
     {
       key: "started",

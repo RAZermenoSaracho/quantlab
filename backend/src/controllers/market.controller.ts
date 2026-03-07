@@ -91,7 +91,7 @@ export async function getCandles(
 
     const parsedLimit = Number(limit ?? 500);
     const safeLimit = Number.isFinite(parsedLimit)
-      ? Math.max(1, Math.min(parsedLimit, 1000))
+      ? Math.max(1, Math.min(parsedLimit, 50000))
       : 500;
 
     const candles = await getBinanceCandles(

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { ApiResponseSchema, ApiSuccessSchema } from "./common";
 import { BacktestAnalysisSchema } from "./backtest";
-import { CandleSchema } from "./market";
+import { CandleSchema, MarketTimeframeSchema } from "./market";
 import { EquityPointSchema } from "./portfolio";
 
 export const AlgorithmValidationRequestSchema = z.object({
@@ -48,7 +48,7 @@ export const BacktestEngineRequestSchema = z.object({
   code: z.string(),
   exchange: z.string(),
   symbol: z.string(),
-  timeframe: z.string(),
+  timeframe: MarketTimeframeSchema,
   initial_balance: z.number().positive(),
   start_date: z.string(),
   end_date: z.string(),
@@ -99,7 +99,7 @@ export const StartPaperEngineRequestSchema = z.object({
   code: z.string(),
   exchange: z.string(),
   symbol: z.string(),
-  timeframe: z.string(),
+  timeframe: MarketTimeframeSchema,
   initial_balance: z.number().positive(),
   fee_rate: z.number().optional(),
   api_key: z.string().optional(),

@@ -302,7 +302,7 @@ export async function getAlgorithmRuns(
 
     const backtests = await pool.query(
       `
-      SELECT r.id, r.symbol, r.timeframe, r.status,
+      SELECT r.id, r.exchange, r.symbol, r.timeframe, r.status,
              r.created_at,
              m.total_return_percent,
              m.total_return_usdt
@@ -318,8 +318,8 @@ export async function getAlgorithmRuns(
 
     const paperRuns = await pool.query(
       `
-      SELECT id, symbol, timeframe, status,
-             initial_balance, current_balance,
+      SELECT id, exchange, symbol, timeframe, status,
+             initial_balance, current_balance, quote_balance, base_balance, equity, last_price,
              started_at
       FROM paper_runs
       WHERE algorithm_id = $1
@@ -332,6 +332,7 @@ export async function getAlgorithmRuns(
     return sendSuccess(res, {
       backtests: backtests.rows.map((row) => ({
         id: row.id,
+        exchange: row.exchange,
         symbol: row.symbol,
         timeframe: row.timeframe,
         status: row.status,
@@ -347,11 +348,20 @@ export async function getAlgorithmRuns(
       })),
       paperRuns: paperRuns.rows.map((row) => ({
         id: row.id,
+        exchange: row.exchange,
         symbol: row.symbol,
         timeframe: row.timeframe,
         status: row.status,
         initial_balance: Number(row.initial_balance),
         current_balance: Number(row.current_balance),
+        quote_balance:
+          row.quote_balance != null ? Number(row.quote_balance) : null,
+        base_balance:
+          row.base_balance != null ? Number(row.base_balance) : null,
+        equity:
+          row.equity != null ? Number(row.equity) : null,
+        last_price:
+          row.last_price != null ? Number(row.last_price) : null,
         started_at:
           row.started_at instanceof Date ? row.started_at.toISOString() : null,
       })),

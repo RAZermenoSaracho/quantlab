@@ -12,7 +12,7 @@ export default defineConfig({
     alias: {
       "@quantlab/contracts": path.resolve(
         __dirname,
-        "../packages/contracts"
+        "../packages/contracts/src"
       ),
     },
   },

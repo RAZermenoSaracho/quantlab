@@ -55,6 +55,7 @@ export type AlgorithmsListResponse = z.infer<
 export const AlgorithmBacktestRunSchema = BacktestRunSchema.pick({
   id: true,
   symbol: true,
+  exchange: true,
   timeframe: true,
   status: true,
   created_at: true,
@@ -68,13 +69,17 @@ export type AlgorithmBacktestRun = z.infer<typeof AlgorithmBacktestRunSchema>;
 
 export const AlgorithmPaperRunSchema = PaperRunSchema.pick({
   id: true,
+  exchange: true,
   symbol: true,
   timeframe: true,
   status: true,
+  initial_balance: true,
   current_balance: true,
+  quote_balance: true,
+  base_balance: true,
+  equity: true,
+  last_price: true,
   started_at: true,
-}).extend({
-  exchange: z.string().optional(),
 });
 
 export type AlgorithmPaperRun = z.infer<typeof AlgorithmPaperRunSchema>;

@@ -215,13 +215,23 @@ export default function CreateBacktest() {
               <select
                 value={form.timeframe}
                 onChange={(e) =>
-                  setForm({ ...form, timeframe: e.target.value })
+                  setForm({
+                    ...form,
+                    timeframe:
+                      e.target.value as CreateBacktestRequest["timeframe"],
+                  })
                 }
                 className="form-input"
               >
+                <option value="1s">1s</option>
+                <option value="5s">5s</option>
+                <option value="15s">15s</option>
+                <option value="30s">30s</option>
                 <option value="1m">1m</option>
+                <option value="3m">3m</option>
                 <option value="5m">5m</option>
                 <option value="15m">15m</option>
+                <option value="30m">30m</option>
                 <option value="1h">1h</option>
                 <option value="4h">4h</option>
                 <option value="1d">1d</option>
