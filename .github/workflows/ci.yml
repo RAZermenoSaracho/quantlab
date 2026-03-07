@@ -19,10 +19,10 @@ jobs:
       - name: Install frontend deps
         run: |
           cd frontend
-          npm install
+          npm ci
           npm run build
 
       - name: Install backend deps
         run: |
           cd backend
-          npm install
+          npm ci
