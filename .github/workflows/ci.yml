@@ -26,8 +26,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build frontend
-        run: pnpm --filter frontend build
+      - name: Build contracts
+        run: pnpm --filter @quantlab/contracts build
 
       - name: Build backend
         run: pnpm --filter backend build
+
+      - name: Build frontend
+        run: pnpm --filter frontend build
