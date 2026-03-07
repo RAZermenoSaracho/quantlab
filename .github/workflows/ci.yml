@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-   branches: [develop, main]
+    branches: [develop, main]
 
 jobs:
   build:
@@ -12,14 +12,16 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v3
 
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.30.3 --activate
+
       - name: Setup Node
         uses: actions/setup-node@v3
         with:
           node-version: 20
           cache: "pnpm"
-
-      - name: Enable pnpm
-        run: corepack enable
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
