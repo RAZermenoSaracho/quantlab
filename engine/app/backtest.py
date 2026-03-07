@@ -392,7 +392,7 @@ def run_backtest(
     # STATE
     # ============================
     balance = float(initial_balance)
-    max_allowed_capital = float(initial_balance) * (float(getattr(config, "max_account_exposure_pct", 100.0)) / 100.0)
+    max_exposure_pct = float(getattr(config, "max_account_exposure_pct", 100.0))
 
     position = None
     trades = []
@@ -545,10 +545,14 @@ def run_backtest(
                     pass
                 else:
                     if position is None:
+                        dynamic_max_allowed_capital = max(
+                            0.0,
+                            float(balance) * (max_exposure_pct / 100.0),
+                        )
                         position = _open_position(
                             desired_side=intent,
                             balance=balance,
-                            max_allowed_capital=max_allowed_capital,
+                            max_allowed_capital=dynamic_max_allowed_capital,
                             entry_price=float(exec_price),
                             timestamp=ts,
                             config=config,
@@ -574,10 +578,14 @@ def run_backtest(
 
                             # If reentry allowed, attempt immediate flip open (common in long_short)
                             if allow_reentry and _cooldown_ok():
+                                dynamic_max_allowed_capital = max(
+                                    0.0,
+                                    float(balance) * (max_exposure_pct / 100.0),
+                                )
                                 position = _open_position(
                                     desired_side=intent,
                                     balance=balance,
-                                    max_allowed_capital=max_allowed_capital,
+                                    max_allowed_capital=dynamic_max_allowed_capital,
                                     entry_price=float(exec_price),
                                     timestamp=ts,
                                     config=config,
