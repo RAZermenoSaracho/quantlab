@@ -289,7 +289,7 @@ export async function getPaperRunById(
     };
 
     /* =========================
-       FETCH TRADES (NO SELECT *)
+       FETCH TRADES
     ========================= */
 
     const tradesResult = await pool.query(

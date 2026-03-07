@@ -134,7 +134,7 @@ async function runBacktestWorker(runId: string, payload: RunBacktestPayload) {
       ]
     );
 
-    // INSERT TRADES (con normalizeTradeSide)
+    // Insert trades using normalized side values.
     for (const trade of engineResult.trades ?? []) {
       const dbSide = normalizeTradeSide(trade);
 

@@ -20,7 +20,7 @@ export default function DetailNavigator({
 
   if (currentIndex === -1 || total <= 1) return null;
 
-  // 🔁 Circular logic
+  // Wrap navigation across the current id list.
   const prevIndex = (currentIndex - 1 + total) % total;
   const nextIndex = (currentIndex + 1) % total;
 

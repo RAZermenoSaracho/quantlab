@@ -88,8 +88,8 @@ initializeWebsocket(io);
 
 server.listen(env.PORT, () => {
   console.log(`
-🚀 QuantLab API running on http://localhost:${env.PORT}
-🔗 Engine URL: ${env.ENGINE_URL}
-📡 WebSocket enabled
+QuantLab API running on http://localhost:${env.PORT}
+Engine URL: ${env.ENGINE_URL}
+WebSocket enabled
 `);
 });

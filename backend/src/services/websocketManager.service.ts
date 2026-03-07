@@ -38,8 +38,6 @@ export function initializeWebsocket(
   ioInstance = io;
 
   io.on("connection", (socket: Socket<ClientToServerEvents, ServerToClientEvents>) => {
-    console.log(`Socket connected: ${socket.id}`);
-
     socket.on("join_paper_run", (runId) => {
       const parsed = JoinPaperRunSchema.safeParse(runId);
       if (!parsed.success) return;
@@ -50,10 +48,6 @@ export function initializeWebsocket(
       const parsed = LeavePaperRunSchema.safeParse(runId);
       if (!parsed.success) return;
       socket.leave(`paper:${parsed.data}`);
-    });
-
-    socket.on("disconnect", () => {
-      console.log(`Socket disconnected: ${socket.id}`);
     });
   });
 }
@@ -66,12 +60,6 @@ export async function emitPaperEvent(
   if (!ioInstance) return;
 
   const room = `paper:${runId}`;
-  try {
-    const sockets = await ioInstance.in(room).allSockets();
-    console.log(`[WS EMIT] event=${event} room=${room} sockets=${sockets.size}`);
-  } catch {
-    console.log(`[WS EMIT] event=${event} room=${room} (could not count sockets)`);
-  }
 
   switch (event) {
     case "paper_tick":
