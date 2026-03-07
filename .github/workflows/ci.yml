@@ -31,14 +31,14 @@ jobs:
       - name: Workaround Rollup optional dependency bug (Linux)
         if: runner.os == 'Linux'
         run: |
-          ROLLUP_VERSION=$(node -p "require('./frontend/node_modules/rollup/package.json').version")
-          npm install --no-save --workspace=frontend @rollup/rollup-linux-x64-gnu@$ROLLUP_VERSION
+          ROLLUP_VERSION=$(node -p "require('./node_modules/rollup/package.json').version")
+          npm install --no-save @rollup/rollup-linux-x64-gnu@$ROLLUP_VERSION
 
       - name: Workaround LightningCSS optional dependency bug (Linux)
         if: runner.os == 'Linux'
         run: |
-          LIGHTNINGCSS_VERSION=$(node -p "require('./frontend/node_modules/lightningcss/package.json').version")
-          npm install --no-save --workspace=frontend lightningcss-linux-x64-gnu@$LIGHTNINGCSS_VERSION
+          LIGHTNINGCSS_VERSION=$(node -p "require('./node_modules/lightningcss/package.json').version")
+          npm install --no-save lightningcss-linux-x64-gnu@$LIGHTNINGCSS_VERSION
 
       - name: Build frontend
         run: npm run build --workspace=frontend
