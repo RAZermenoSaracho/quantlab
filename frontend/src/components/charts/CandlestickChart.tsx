@@ -385,6 +385,9 @@ export default function CandlestickChart({
         )}
         <div ref={containerRef} className="w-full h-full" />
       </div>
+      <div className="mt-2 text-xs text-slate-500">
+        Times shown in UTC
+      </div>
     </div>
   );
 }
