@@ -14,7 +14,7 @@ type ExportBacktestMetrics = BacktestMetrics & {
 };
 
 type ExportBacktestTrade = BacktestTrade & {
-  net_pnl?: number;
+  net_pnl?: number | null;
 };
 
 /* ==============================

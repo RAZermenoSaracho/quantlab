@@ -167,6 +167,15 @@ CREATE TABLE trades (
 
     quantity NUMERIC(18,8) NOT NULL,
 
+    entry_notional NUMERIC(18,8),
+    exit_notional NUMERIC(18,8),
+    entry_fee NUMERIC(18,8),
+    exit_fee NUMERIC(18,8),
+    total_fee NUMERIC(18,8),
+    gross_pnl NUMERIC(18,8),
+    net_pnl NUMERIC(18,8),
+    fee_rate_used NUMERIC(18,8),
+
     pnl NUMERIC(18,8),
     pnl_percent NUMERIC(10,4),
 

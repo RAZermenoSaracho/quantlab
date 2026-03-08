@@ -46,6 +46,15 @@ export const PaperTradeSchema = z.object({
 
   quantity: z.number(),
 
+  entry_notional: z.number().nullable().optional(),
+  exit_notional: z.number().nullable().optional(),
+  entry_fee: z.number().nullable().optional(),
+  exit_fee: z.number().nullable().optional(),
+  total_fee: z.number().nullable().optional(),
+  gross_pnl: z.number().nullable().optional(),
+  net_pnl: z.number().nullable().optional(),
+  fee_rate_used: z.number().nullable().optional(),
+
   pnl: z.number().nullable().optional(),
   pnl_percent: z.number().nullable().optional(),
 
@@ -171,6 +180,14 @@ export const PaperTradeEventSchema = z.object({
     entry_price: z.number(),
     exit_price: z.number().nullable().optional(),
     quantity: z.number(),
+    entry_notional: z.number().optional(),
+    exit_notional: z.number().nullable().optional(),
+    entry_fee: z.number().optional(),
+    exit_fee: z.number().nullable().optional(),
+    total_fee: z.number().optional(),
+    gross_pnl: z.number().optional(),
+    net_pnl: z.number().optional(),
+    fee_rate_used: z.number().optional(),
     pnl: z.number().optional(),
     pnl_percent: z.number().optional(),
     opened_at: z.number().nullable().optional(),

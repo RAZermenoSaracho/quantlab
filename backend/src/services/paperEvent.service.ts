@@ -1,7 +1,10 @@
 import { pool } from "../config/db";
 import { emitPaperEvent } from "./websocketManager.service";
 import {
-  calculateTradePnl,
+  calculateTradeFees,
+  calculateTradeGrossPnl,
+  calculateTradeNotional,
+  calculateTradeNetPnl,
   calculateTradePnlPercent,
   normalizeTradeSide,
 } from "../utils/tradeUtils";
@@ -108,11 +111,33 @@ async function handleTradeEvent(
     const entryPrice = trade.entry_price;
     const exitPrice = trade.exit_price ?? null;
     const quantity = trade.quantity;
-    const pnl =
-      trade.pnl ??
+    const feeRateUsed = trade.fee_rate_used ?? 0.001;
+    const entryNotional =
+      trade.entry_notional ??
+      calculateTradeNotional(entryPrice, quantity);
+    const exitNotional =
+      exitPrice != null
+        ? (trade.exit_notional ?? calculateTradeNotional(exitPrice, quantity))
+        : null;
+    const entryFee =
+      trade.entry_fee ??
+      calculateTradeFees(entryNotional, feeRateUsed);
+    const exitFee =
+      exitNotional != null
+        ? (trade.exit_fee ?? calculateTradeFees(exitNotional, feeRateUsed))
+        : null;
+    const totalFee =
+      trade.total_fee ?? (entryFee + (exitFee ?? 0));
+    const grossPnl =
+      trade.gross_pnl ??
       (exitPrice != null
-        ? calculateTradePnl(dbSide, entryPrice, exitPrice, quantity)
+        ? calculateTradeGrossPnl(dbSide, entryPrice, exitPrice, quantity)
         : 0);
+    const netPnl =
+      trade.net_pnl ??
+      trade.pnl ??
+      calculateTradeNetPnl(grossPnl, totalFee);
+    const pnl = netPnl;
 
     const computedPnlPercent =
       trade.pnl_percent ??
@@ -150,17 +175,33 @@ async function handleTradeEvent(
             entry_price = $2,
             exit_price = $3,
             quantity = $4,
-            pnl = $5,
-            pnl_percent = $6,
-            closed_at = $7,
-            forced_close = $8
-        WHERE id = $9
+            entry_notional = $5,
+            exit_notional = $6,
+            entry_fee = $7,
+            exit_fee = $8,
+            total_fee = $9,
+            gross_pnl = $10,
+            net_pnl = $11,
+            fee_rate_used = $12,
+            pnl = $13,
+            pnl_percent = $14,
+            closed_at = $15,
+            forced_close = $16
+        WHERE id = $17
         `,
         [
           dbSide,
           entryPrice,
           exitPrice,
           quantity,
+          entryNotional,
+          exitNotional,
+          entryFee,
+          exitFee,
+          totalFee,
+          grossPnl,
+          netPnl,
+          feeRateUsed,
           pnl,
           computedPnlPercent,
           closedAt,
@@ -172,14 +213,23 @@ async function handleTradeEvent(
       await client.query(
         `INSERT INTO trades
          (run_id, run_type, side, entry_price, exit_price,
-          quantity, pnl, pnl_percent, opened_at, closed_at, forced_close)
-         VALUES ($1,'PAPER',$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          quantity, entry_notional, exit_notional, entry_fee, exit_fee, total_fee,
+          gross_pnl, net_pnl, fee_rate_used, pnl, pnl_percent, opened_at, closed_at, forced_close)
+         VALUES ($1,'PAPER',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
         [
           runId,
           dbSide,
           entryPrice,
           exitPrice,
           quantity,
+          entryNotional,
+          exitNotional,
+          entryFee,
+          exitFee,
+          totalFee,
+          grossPnl,
+          netPnl,
+          feeRateUsed,
           pnl,
           computedPnlPercent,
           openedAt,
@@ -200,6 +250,14 @@ async function handleTradeEvent(
         entry_price: entryPrice,
         exit_price: exitPrice,
         quantity,
+        entry_notional: entryNotional,
+        exit_notional: exitNotional,
+        entry_fee: entryFee,
+        exit_fee: exitFee,
+        total_fee: totalFee,
+        gross_pnl: grossPnl,
+        net_pnl: netPnl,
+        fee_rate_used: feeRateUsed,
         pnl,
         pnl_percent: computedPnlPercent,
         opened_at: toIsoOrNull(openedAt),

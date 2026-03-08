@@ -62,6 +62,50 @@ export function calculateTradePnl(
   return (exitPrice - entryPrice) * quantity;
 }
 
+export function calculateTradeGrossPnl(
+  side: PaperTradeSide,
+  entryPrice: number,
+  exitPrice: number,
+  quantity: number
+): number {
+  return calculateTradePnl(side, entryPrice, exitPrice, quantity);
+}
+
+export function calculateTradeNotional(
+  price: number,
+  quantity: number
+): number {
+  if (!Number.isFinite(price) || price <= 0) {
+    return 0;
+  }
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    return 0;
+  }
+  return price * quantity;
+}
+
+export function calculateTradeFees(
+  notional: number,
+  feeRate: number
+): number {
+  if (!Number.isFinite(notional) || notional <= 0) {
+    return 0;
+  }
+  if (!Number.isFinite(feeRate) || feeRate < 0) {
+    return 0;
+  }
+  return notional * feeRate;
+}
+
+export function calculateTradeNetPnl(
+  grossPnl: number,
+  totalFee: number
+): number {
+  const gross = Number.isFinite(grossPnl) ? grossPnl : 0;
+  const fee = Number.isFinite(totalFee) ? totalFee : 0;
+  return gross - fee;
+}
+
 export function calculateTradePnlPercent(
   pnl: number,
   entryPrice: number,

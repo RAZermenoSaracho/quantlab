@@ -248,26 +248,47 @@ export default function BacktestDetail() {
     derived.maxDD;
 
   const totalTrades = Number(metrics?.total_trades ?? trades.length ?? 0);
+  const getTradeNetPnl = (trade: BacktestTrade) =>
+    Number(trade.net_pnl ?? trade.pnl ?? 0);
+  const getTradeGrossPnl = (trade: BacktestTrade) =>
+    Number(trade.gross_pnl ?? getTradeNetPnl(trade));
+  const getTradeEntryNotional = (trade: BacktestTrade) =>
+    Number(
+      trade.entry_notional ??
+        Number(trade.entry_price ?? 0) * Number(trade.quantity ?? 0)
+    );
+  const getTradeExitNotional = (trade: BacktestTrade) =>
+    trade.exit_notional != null
+      ? Number(trade.exit_notional)
+      : trade.exit_price != null
+        ? Number(trade.exit_price) * Number(trade.quantity ?? 0)
+        : null;
+  const getTradeTotalFee = (trade: BacktestTrade) =>
+    Number(
+      trade.total_fee ??
+        Number(trade.entry_fee ?? 0) +
+          Number(trade.exit_fee ?? 0)
+    );
 
   const winRate =
     Number(metrics?.win_rate_percent ?? 0) ||
     (trades.length
-      ? (trades.filter((t) => Number(t.pnl ?? 0) > 0).length / trades.length) *
+      ? (trades.filter((t) => getTradeNetPnl(t) > 0).length / trades.length) *
         100
       : 0);
 
   const wins = useMemo(
-    () => trades.filter((t) => Number(t.pnl ?? 0) > 0),
+    () => trades.filter((t) => getTradeNetPnl(t) > 0),
     [trades]
   );
 
   const losses = useMemo(
-    () => trades.filter((t) => Number(t.pnl ?? 0) < 0),
+    () => trades.filter((t) => getTradeNetPnl(t) < 0),
     [trades]
   );
 
-  const avgWin = mean(wins.map((t) => Number(t.pnl ?? 0)));
-  const avgLoss = mean(losses.map((t) => Number(t.pnl ?? 0)));
+  const avgWin = mean(wins.map((t) => getTradeNetPnl(t)));
+  const avgLoss = mean(losses.map((t) => getTradeNetPnl(t)));
 
   const expectancy = trades.length ? Number(netProfit ?? 0) / trades.length : 0;
 
@@ -325,6 +346,53 @@ export default function BacktestDetail() {
       },
 
       {
+        key: "entry_notional",
+        header: "Entry Value",
+        render: (t) => getTradeEntryNotional(t).toFixed(2),
+      },
+
+      {
+        key: "exit_notional",
+        header: "Exit Value",
+        render: (t) => {
+          const exitNotional = getTradeExitNotional(t);
+          return exitNotional != null ? exitNotional.toFixed(2) : "-";
+        },
+      },
+
+      {
+        key: "entry_fee",
+        header: "Entry Fee",
+        render: (t) => Number(t.entry_fee ?? 0).toFixed(4),
+      },
+
+      {
+        key: "exit_fee",
+        header: "Exit Fee",
+        render: (t) =>
+          t.exit_fee != null ? Number(t.exit_fee).toFixed(4) : "-",
+      },
+
+      {
+        key: "total_fee",
+        header: "Total Fee",
+        render: (t) => getTradeTotalFee(t).toFixed(4),
+      },
+
+      {
+        key: "gross_pnl",
+        header: "Gross PnL",
+        render: (t) => {
+          const grossPnl = getTradeGrossPnl(t);
+          return (
+            <span className={grossPnl >= 0 ? "text-emerald-300" : "text-red-300"}>
+              {grossPnl.toFixed(2)}
+            </span>
+          );
+        },
+      },
+
+      {
         key: "opened",
         header: "Opened",
         render: (t) => formatDateTime(t.opened_at),
@@ -337,10 +405,10 @@ export default function BacktestDetail() {
       },
 
       {
-        key: "pnl",
-        header: "PnL",
+        key: "net_pnl",
+        header: "Net PnL",
         render: (t) => {
-          const pnl = Number(t.pnl ?? 0);
+          const pnl = getTradeNetPnl(t);
 
           return (
             <span
@@ -418,11 +486,11 @@ export default function BacktestDetail() {
     return <div className="p-6 text-slate-400">Loading...</div>;
 
   return (
-    <div id="backtest-report" className="space-y-8">
+    <div id="backtest-report" className="w-full min-w-0 max-w-full space-y-8">
 
       {/* HEADER */}
 
-      <div className="flex justify-between items-start">
+      <div className="w-full min-w-0 max-w-full flex justify-between items-start">
 
         <div>
 
@@ -497,7 +565,7 @@ export default function BacktestDetail() {
       )}
 
       {/* CORE METRICS */}
-      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-5">
+      <div className="w-full min-w-0 max-w-full grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-5">
         <KpiCard
           title="Net Profit"
           value={Number(netProfit ?? 0)}
@@ -546,7 +614,7 @@ export default function BacktestDetail() {
       </div>
 
       {/* RUN META + TRADE QUALITY */}
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+      <div className="w-full min-w-0 max-w-full grid grid-cols-2 md:grid-cols-6 gap-4">
         <KpiCard
           title="Initial Balance"
           value={Number(derived.initial ?? run.initial_balance ?? 0)}
@@ -591,7 +659,7 @@ export default function BacktestDetail() {
         />
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+      <div className="w-full min-w-0 max-w-full grid grid-cols-2 md:grid-cols-4 gap-5">
 
         <KpiCard
           title="Avg Win"
@@ -628,7 +696,7 @@ export default function BacktestDetail() {
       </div>
 
       {/* PRICE CHART */}
-      <div id="candle-chart-wrapper" className="bg-slate-800 p-6 rounded-xl border border-slate-700">
+      <div id="candle-chart-wrapper" className="w-full min-w-0 max-w-full bg-slate-800 p-6 rounded-xl border border-slate-700">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-white font-semibold">Price Chart (Candles + Trades)</h3>
           <span className="text-xs text-slate-400">
@@ -640,7 +708,7 @@ export default function BacktestDetail() {
       </div>
 
       {/* PERIOD ANALYSIS */}
-      <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 space-y-4">
+      <div className="w-full min-w-0 max-w-full bg-slate-800 p-6 rounded-xl border border-slate-700 space-y-4">
         <div className="flex justify-between items-center">
           <h3 className="text-white font-semibold">Period Analysis</h3>
 
@@ -694,20 +762,23 @@ export default function BacktestDetail() {
       </div>
 
       {/* EQUITY CHART */}
-      <div id="equity-chart-wrapper" className="bg-slate-800 p-6 rounded-xl border border-slate-700">
+      <div id="equity-chart-wrapper" className="w-full min-w-0 max-w-full bg-slate-800 p-6 rounded-xl border border-slate-700">
         <h3 className="text-white font-semibold mb-4">Equity Curve</h3>
         <EquityCurveChart equity={equity_curve} />
       </div>
 
       {/* TRADES */}
 
-      <ListView
-        title="Trades"
-        description="Executed trades during the backtest"
-        columns={tradeColumns}
-        data={trades}
-        emptyMessage="No trades generated for this run."
-      />
+      <div className="w-full min-w-0 overflow-x-auto">
+        <ListView
+          tableId="backtest_trades"
+          title="Trades"
+          description="Executed trades during the backtest"
+          columns={tradeColumns}
+          data={trades}
+          emptyMessage="No trades generated for this run."
+        />
+      </div>
 
     </div>
   );

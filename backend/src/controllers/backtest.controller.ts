@@ -171,7 +171,27 @@ async function runBacktestWorker(runId: string, payload: RunBacktestPayload) {
       const exitPrice =
         trade.exit_price == null ? null : Number(trade.exit_price);
       const quantity = Number(trade.quantity ?? 1);
-      const pnl = Number(trade.pnl ?? trade.net_pnl ?? 0);
+      const entryNotional = Number(
+        trade.entry_notional ?? entryPrice * quantity
+      );
+      const exitNotional =
+        exitPrice == null ? null : Number(trade.exit_notional ?? exitPrice * quantity);
+      const feeRateUsed = Number(trade.fee_rate_used ?? payload.fee_rate ?? 0);
+      const entryFee = Number(trade.entry_fee ?? entryNotional * feeRateUsed);
+      const exitFee =
+        exitNotional == null ? null : Number(trade.exit_fee ?? exitNotional * feeRateUsed);
+      const totalFee = Number(
+        trade.total_fee ??
+          (entryFee + (exitFee ?? 0))
+      );
+      const grossPnl = Number(
+        trade.gross_pnl ??
+          (dbSide === "SHORT"
+            ? (entryPrice - (exitPrice ?? entryPrice)) * quantity
+            : ((exitPrice ?? entryPrice) - entryPrice) * quantity)
+      );
+      const netPnl = Number(trade.net_pnl ?? trade.pnl ?? grossPnl - totalFee);
+      const pnl = netPnl;
 
       const computedPnlPercent =
         trade.pnl_percent != null
@@ -193,14 +213,23 @@ async function runBacktestWorker(runId: string, payload: RunBacktestPayload) {
       await client.query(
         `INSERT INTO trades
         (run_id, run_type, side, entry_price, exit_price,
-          quantity, pnl, pnl_percent, opened_at, closed_at, forced_close)
-        VALUES ($1,'BACKTEST',$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          quantity, entry_notional, exit_notional, entry_fee, exit_fee, total_fee,
+          gross_pnl, net_pnl, fee_rate_used, pnl, pnl_percent, opened_at, closed_at, forced_close)
+        VALUES ($1,'BACKTEST',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
         [
           runId,
           dbSide,
           entryPrice,
           exitPrice,
           quantity,
+          entryNotional,
+          exitNotional,
+          entryFee,
+          exitFee,
+          totalFee,
+          grossPnl,
+          netPnl,
+          feeRateUsed,
           pnl,
           computedPnlPercent,
           openedAt,
@@ -353,8 +382,19 @@ export async function getBacktestById(
         exit_price:
           trade.exit_price != null ? Number(trade.exit_price) : null,
         quantity: Number(trade.quantity),
-        pnl: Number(trade.pnl),
-        pnl_percent: Number(trade.pnl_percent),
+        entry_notional:
+          trade.entry_notional != null ? Number(trade.entry_notional) : null,
+        exit_notional:
+          trade.exit_notional != null ? Number(trade.exit_notional) : null,
+        entry_fee: trade.entry_fee != null ? Number(trade.entry_fee) : null,
+        exit_fee: trade.exit_fee != null ? Number(trade.exit_fee) : null,
+        total_fee: trade.total_fee != null ? Number(trade.total_fee) : null,
+        gross_pnl: trade.gross_pnl != null ? Number(trade.gross_pnl) : null,
+        net_pnl: trade.net_pnl != null ? Number(trade.net_pnl) : null,
+        fee_rate_used:
+          trade.fee_rate_used != null ? Number(trade.fee_rate_used) : null,
+        pnl: trade.pnl != null ? Number(trade.pnl) : Number(trade.net_pnl ?? 0),
+        pnl_percent: Number(trade.pnl_percent ?? 0),
         opened_at: toIsoOrNull(trade.opened_at) ?? new Date().toISOString(),
         closed_at: toIsoOrNull(trade.closed_at),
         created_at: toIsoOrNull(trade.created_at),

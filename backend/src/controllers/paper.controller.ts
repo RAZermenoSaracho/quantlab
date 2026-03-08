@@ -328,6 +328,14 @@ export async function getPaperRunById(
         entry_price,
         exit_price,
         quantity,
+        entry_notional,
+        exit_notional,
+        entry_fee,
+        exit_fee,
+        total_fee,
+        gross_pnl,
+        net_pnl,
+        fee_rate_used,
         pnl,
         pnl_percent,
         opened_at,
@@ -357,7 +365,24 @@ export async function getPaperRunById(
 
       quantity: Number(t.quantity),
 
-      pnl: t.pnl != null ? Number(t.pnl) : null,
+      entry_notional:
+        t.entry_notional != null ? Number(t.entry_notional) : null,
+      exit_notional:
+        t.exit_notional != null ? Number(t.exit_notional) : null,
+      entry_fee: t.entry_fee != null ? Number(t.entry_fee) : null,
+      exit_fee: t.exit_fee != null ? Number(t.exit_fee) : null,
+      total_fee: t.total_fee != null ? Number(t.total_fee) : null,
+      gross_pnl: t.gross_pnl != null ? Number(t.gross_pnl) : null,
+      net_pnl: t.net_pnl != null ? Number(t.net_pnl) : null,
+      fee_rate_used:
+        t.fee_rate_used != null ? Number(t.fee_rate_used) : null,
+
+      pnl:
+        t.pnl != null
+          ? Number(t.pnl)
+          : t.net_pnl != null
+            ? Number(t.net_pnl)
+            : null,
       pnl_percent: t.pnl_percent != null ? Number(t.pnl_percent) : null,
 
       opened_at: toIsoOrNull(t.opened_at),

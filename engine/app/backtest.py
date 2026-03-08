@@ -85,6 +85,48 @@ def _pnl_pct_from_prices(current_price: float, entry_price: float, side: str) ->
     return ((entry_price - current_price) / entry_price) * 100.0
 
 
+def _position_with_fee_metrics(
+    position: Optional[dict],
+    mark_price: float,
+) -> Optional[dict]:
+    if position is None:
+        return None
+
+    side = str(position.get("side", "LONG"))
+    entry = float(position.get("entry_price", 0.0))
+    qty = float(position.get("quantity", 0.0))
+    fee_rate_used = float(position.get("fee_rate_used", 0.0))
+    entry_notional = float(position.get("entry_notional", entry * qty))
+    entry_fee = float(position.get("entry_fee", entry_notional * fee_rate_used))
+
+    gross_pnl = _unrealized_pnl(mark_price, entry, qty, side)
+    exit_notional = float(mark_price * qty)
+    estimated_exit_fee = float(exit_notional * fee_rate_used)
+    total_fee_so_far = float(entry_fee + estimated_exit_fee)
+    net_pnl = float(gross_pnl - total_fee_so_far)
+
+    if side == "LONG":
+        breakeven_price = (
+            (entry_notional + entry_fee) / (max(qty, 1e-12) * max(1.0 - fee_rate_used, 1e-12))
+        )
+    else:
+        breakeven_price = (
+            (entry_notional - entry_fee) / (max(qty, 1e-12) * (1.0 + fee_rate_used))
+        )
+
+    return {
+        **position,
+        "entry_notional": entry_notional,
+        "entry_fee": entry_fee,
+        "fee_rate_used": fee_rate_used,
+        "gross_pnl": float(gross_pnl),
+        "estimated_exit_fee": float(estimated_exit_fee),
+        "total_fee_so_far": float(total_fee_so_far),
+        "net_pnl": float(net_pnl),
+        "breakeven_price": float(breakeven_price),
+    }
+
+
 # ============================================================
 # Position management
 # ============================================================
@@ -95,6 +137,7 @@ def _open_position(
     max_allowed_capital: float,
     entry_price: float,
     timestamp: int,
+    fee_rate: float,
     config,
 ) -> Optional[dict]:
     """
@@ -135,10 +178,16 @@ def _open_position(
     if notional > float(max_allowed_capital):
         return None
 
+    fee_rate_used = float(fee_rate)
+    entry_fee = notional * fee_rate_used
+
     return {
         "side": desired_side,          # LONG | SHORT
         "entry_price": float(fill_price),
         "quantity": float(qty),
+        "entry_notional": float(notional),
+        "entry_fee": float(entry_fee),
+        "fee_rate_used": float(fee_rate_used),
         "opened_at": int(timestamp),
         # trailing tracking (intrabar)
         "max_price": float(fill_price),  # used for LONG
@@ -173,16 +222,27 @@ def _close_position(
     else:
         gross = (entry - fill_exit) * qty
 
-    fee = (entry * qty * float(fee_rate)) + (fill_exit * qty * float(fee_rate))
-    net = gross - fee
+    entry_notional = float(position.get("entry_notional", entry * qty))
+    exit_notional = fill_exit * qty
+    fee_rate_used = float(position.get("fee_rate_used", fee_rate))
+    entry_fee = float(position.get("entry_fee", entry_notional * fee_rate_used))
+    exit_fee = exit_notional * fee_rate_used
+    total_fee = entry_fee + exit_fee
+    net = gross - total_fee
 
     trade = {
         "side": side,  # LONG | SHORT
         "entry_price": float(entry),
         "exit_price": float(fill_exit),
+        "entry_notional": float(entry_notional),
+        "exit_notional": float(exit_notional),
+        "entry_fee": float(entry_fee),
+        "exit_fee": float(exit_fee),
+        "total_fee": float(total_fee),
         "gross_pnl": float(gross),
         "net_pnl": float(net),
-        "fee": float(fee),
+        "pnl": float(net),  # backward-compatible field = net
+        "fee_rate_used": float(fee_rate_used),
         "quantity": float(qty),
         "opened_at": int(position["opened_at"]),
         "closed_at": int(timestamp),
@@ -451,11 +511,16 @@ def run_backtest(
             else:
                 position["min_price"] = min(float(position.get("min_price", position["entry_price"])), float(candle["low"]))
 
+        position_for_ctx = _position_with_fee_metrics(
+            position=position,
+            mark_price=float(candle["close"]),
+        )
+
         ctx = build_context(
             index=i,
             candles=candles,
             indicator_series=indicator_series,
-            position=position,
+            position=position_for_ctx,
             balance=balance,
             initial_balance=float(initial_balance),
             timeframe=timeframe,
@@ -555,6 +620,7 @@ def run_backtest(
                             max_allowed_capital=dynamic_max_allowed_capital,
                             entry_price=float(exec_price),
                             timestamp=ts,
+                            fee_rate=float(final_fee_rate),
                             config=config,
                         )
                     else:
@@ -588,6 +654,7 @@ def run_backtest(
                                     max_allowed_capital=dynamic_max_allowed_capital,
                                     entry_price=float(exec_price),
                                     timestamp=ts,
+                                    fee_rate=float(final_fee_rate),
                                     config=config,
                                 )
 

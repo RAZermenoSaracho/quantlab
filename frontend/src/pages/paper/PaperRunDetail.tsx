@@ -65,6 +65,27 @@ export default function PaperRunDetail() {
   const stopMutation = useStopPaperRunMutation();
   const deleteMutation = useDeletePaperRunMutation();
   const trades = initialData?.trades ?? [];
+  const getTradeNetPnl = (trade: PaperTrade) =>
+    Number(trade.net_pnl ?? trade.pnl ?? 0);
+  const getTradeGrossPnl = (trade: PaperTrade) =>
+    Number(trade.gross_pnl ?? getTradeNetPnl(trade));
+  const getTradeEntryNotional = (trade: PaperTrade) =>
+    Number(
+      trade.entry_notional ??
+        Number(trade.entry_price ?? 0) * Number(trade.quantity ?? 0)
+    );
+  const getTradeExitNotional = (trade: PaperTrade) =>
+    trade.exit_notional != null
+      ? Number(trade.exit_notional)
+      : trade.exit_price != null
+        ? Number(trade.exit_price) * Number(trade.quantity ?? 0)
+        : null;
+  const getTradeTotalFee = (trade: PaperTrade) =>
+    Number(
+      trade.total_fee ??
+        Number(trade.entry_fee ?? 0) +
+          Number(trade.exit_fee ?? 0)
+    );
   const sortedTrades = useMemo(
     () =>
       [...trades].sort((left, right) => {
@@ -156,6 +177,60 @@ export default function PaperRunDetail() {
       },
 
       {
+        key: "entry_notional",
+        header: "Entry Value",
+        render: (t) => getTradeEntryNotional(t).toFixed(2),
+      },
+
+      {
+        key: "exit_notional",
+        header: "Exit Value",
+        render: (t) => {
+          const exitNotional = getTradeExitNotional(t);
+          return exitNotional != null ? exitNotional.toFixed(2) : "-";
+        },
+      },
+
+      {
+        key: "entry_fee",
+        header: "Entry Fee",
+        render: (t) => Number(t.entry_fee ?? 0).toFixed(4),
+      },
+
+      {
+        key: "exit_fee",
+        header: "Exit Fee",
+        render: (t) =>
+          t.exit_fee != null ? Number(t.exit_fee).toFixed(4) : "-",
+      },
+
+      {
+        key: "total_fee",
+        header: "Total Fee",
+        render: (t) => getTradeTotalFee(t).toFixed(4),
+      },
+
+      {
+        key: "gross_pnl",
+        header: "Gross PnL",
+        render: (t) => {
+          const grossPnl = getTradeGrossPnl(t);
+
+          return (
+            <span
+              className={
+                grossPnl >= 0
+                  ? "text-emerald-300 font-medium"
+                  : "text-red-300 font-medium"
+              }
+            >
+              {grossPnl.toFixed(2)}
+            </span>
+          );
+        },
+      },
+
+      {
         key: "opened",
         header: "Opened",
         render: (t) => formatDateTime(t.opened_at),
@@ -168,10 +243,10 @@ export default function PaperRunDetail() {
       },
 
       {
-        key: "pnl",
-        header: "PnL",
+        key: "net_pnl",
+        header: "Net PnL",
         render: (t) => {
-          const pnl = Number(t.pnl ?? 0);
+          const pnl = getTradeNetPnl(t);
 
           return (
             <span
@@ -332,19 +407,19 @@ export default function PaperRunDetail() {
 
   /* ===== ADVANCED METRICS ===== */
 
-  const winTrades = sortedTrades.filter(t => Number(t.pnl ?? 0) > 0);
-  const lossTrades = sortedTrades.filter(t => Number(t.pnl ?? 0) < 0);
+  const winTrades = sortedTrades.filter((t) => getTradeNetPnl(t) > 0);
+  const lossTrades = sortedTrades.filter((t) => getTradeNetPnl(t) < 0);
 
   const winRate = totalTrades
     ? (winTrades.length / totalTrades) * 100
     : 0;
 
   const avgWin = winTrades.length
-    ? winTrades.reduce((a, t) => a + Number(t.pnl ?? 0), 0) / winTrades.length
+    ? winTrades.reduce((a, t) => a + getTradeNetPnl(t), 0) / winTrades.length
     : 0;
 
   const avgLoss = lossTrades.length
-    ? lossTrades.reduce((a, t) => a + Number(t.pnl ?? 0), 0) / lossTrades.length
+    ? lossTrades.reduce((a, t) => a + getTradeNetPnl(t), 0) / lossTrades.length
     : 0;
 
   const exposurePct = equity
@@ -412,10 +487,10 @@ export default function PaperRunDetail() {
   /* ================= UI ================= */
 
   return (
-    <div className="space-y-8">
+    <div className="w-full min-w-0 max-w-full space-y-8">
 
       {/* HEADER */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+      <div className="w-full min-w-0 max-w-full bg-slate-900 border border-slate-800 rounded-2xl p-6">
 
         <div className="flex flex-col lg:flex-row justify-between gap-6">
 
@@ -507,7 +582,7 @@ export default function PaperRunDetail() {
       </div>
 
       {/* KPI STRIP */}
-      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-4">
+      <div className="w-full min-w-0 max-w-full grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-4">
 
         {/* ===== CORE PERFORMANCE ===== */}
 
@@ -706,26 +781,29 @@ export default function PaperRunDetail() {
       </div>
 
       {/* CHARTS */}
-      <div className="space-y-8">
-        <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
+      <div className="w-full min-w-0 max-w-full space-y-8">
+        <div className="w-full min-w-0 max-w-full bg-slate-900 p-6 rounded-xl border border-slate-800">
           <h3 className="text-white font-semibold mb-4">Price Chart</h3>
           <CandlestickChart candles={candles} trades={sortedTrades} />
         </div>
 
-        <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
+        <div className="w-full min-w-0 max-w-full bg-slate-900 p-6 rounded-xl border border-slate-800">
           <h3 className="text-white font-semibold mb-4">Equity Curve</h3>
           <EquityCurveChart equity={equityCurve} />
         </div>
       </div>
 
       {/* TRADES */}
-      <ListView
-        title="Trades"
-        description="Executed trades"
-        columns={tradeColumns}
-        data={sortedTrades}
-        emptyMessage="No trades yet."
-      />
+      <div className="w-full min-w-0 overflow-x-auto">
+        <ListView
+          tableId="paper_trades"
+          title="Trades"
+          description="Executed trades"
+          columns={tradeColumns}
+          data={sortedTrades}
+          emptyMessage="No trades yet."
+        />
+      </div>
     </div>
   );
 }
