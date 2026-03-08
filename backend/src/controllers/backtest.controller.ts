@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
+import type { PoolClient } from "pg";
 import { pool } from "../config/db";
 import { runBacktestOnEngine, getEngineProgress } from "../services/backtestEngine.service";
 import { getExchangeById } from "../services/exchangeCatalog.service";
@@ -16,6 +17,7 @@ import {
 } from "@quantlab/contracts";
 import { sendError, sendSuccess } from "../utils/apiResponse";
 import { z } from "zod";
+import { getConcurrentRunsCount } from "../services/runConcurrency.service";
 
 type RunBacktestPayload = Omit<CreateBacktestRequest, "algorithm_id"> & {
   code: string;
@@ -58,6 +60,10 @@ export async function createBacktest(
     }
 
     const userId = req.user!.id;
+    const concurrentRuns = await getConcurrentRunsCount(userId);
+    if (concurrentRuns >= 20) {
+      return sendError(res, "Maximum concurrent runs reached", 429);
+    }
 
     const exchangeMeta = getExchangeById(payload.exchange);
     if (!exchangeMeta) {
@@ -92,30 +98,17 @@ export async function createBacktest(
     const algorithmId: string = algoResult.rows[0].id;
     const code = algoResult.rows[0].code;
 
-    await client.query("BEGIN");
-
-    const runInsert = await client.query(
-      `INSERT INTO backtest_runs
-       (user_id, algorithm_id, exchange, fee_rate, symbol, timeframe,
-        initial_balance, start_date, end_date, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'RUNNING')
-       RETURNING id`,
-      [
-        userId,
-        algorithmId,
-        payload.exchange,
-        finalFeeRate,
-        payload.symbol,
-        payload.timeframe,
-        parsedBalance,
-        payload.start_date,
-        payload.end_date
-      ]
-    );
-
-    const runId: string = runInsert.rows[0].id;
-
-    await client.query("COMMIT");
+    const runId = await createBacktestRunRecord(client, {
+      userId,
+      algorithmId,
+      exchange: payload.exchange,
+      feeRate: finalFeeRate,
+      symbol: payload.symbol,
+      timeframe: payload.timeframe,
+      initialBalance: parsedBalance,
+      startDate: payload.start_date,
+      endDate: payload.end_date,
+    });
 
     sendSuccess(res, { run_id: runId }, 201);
 
@@ -136,6 +129,45 @@ export async function createBacktest(
   } finally {
     client.release();
   }
+}
+
+async function createBacktestRunRecord(
+  client: PoolClient,
+  params: {
+    userId: string;
+    algorithmId: string;
+    exchange: string;
+    feeRate: number;
+    symbol: string;
+    timeframe: CreateBacktestRequest["timeframe"];
+    initialBalance: number;
+    startDate: string;
+    endDate: string;
+  }
+): Promise<string> {
+  await client.query("BEGIN");
+
+  const runInsert = await client.query(
+    `INSERT INTO backtest_runs
+     (user_id, algorithm_id, exchange, fee_rate, symbol, timeframe,
+      initial_balance, start_date, end_date, status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'RUNNING')
+     RETURNING id`,
+    [
+      params.userId,
+      params.algorithmId,
+      params.exchange,
+      params.feeRate,
+      params.symbol,
+      params.timeframe,
+      params.initialBalance,
+      params.startDate,
+      params.endDate,
+    ]
+  );
+
+  await client.query("COMMIT");
+  return String(runInsert.rows[0].id);
 }
 
 async function runBacktestWorker(runId: string, payload: RunBacktestPayload) {
@@ -533,4 +565,91 @@ export async function getBacktestStatus(
     status: progress >= 100 ? "COMPLETED" : "RUNNING",
     progress,
   });
+}
+
+export async function rerunBacktest(
+  req: Request,
+  res: Response<ApiResponse<{ id: string; status: "started" }>>,
+  next: NextFunction
+) {
+  const client = await pool.connect();
+
+  try {
+    const rawId = req.params.id;
+    if (!rawId || Array.isArray(rawId)) {
+      return sendError(res, "Invalid id parameter", 400);
+    }
+
+    const userId = req.user!.id;
+    const concurrentRuns = await getConcurrentRunsCount(userId);
+    if (concurrentRuns >= 20) {
+      return sendError(res, "Maximum concurrent runs reached", 429);
+    }
+
+    const existingRunResult = await client.query(
+      `
+      SELECT
+        r.algorithm_id,
+        r.exchange,
+        r.symbol,
+        r.timeframe,
+        r.initial_balance,
+        r.start_date,
+        r.end_date,
+        r.fee_rate,
+        a.code
+      FROM backtest_runs r
+      JOIN algorithms a ON a.id = r.algorithm_id
+      WHERE r.id = $1 AND r.user_id = $2
+      `,
+      [rawId, userId]
+    );
+
+    if (!existingRunResult.rowCount) {
+      return sendError(res, "Backtest not found", 404);
+    }
+
+    const run = existingRunResult.rows[0];
+    const newRunId = await createBacktestRunRecord(client, {
+      userId,
+      algorithmId: String(run.algorithm_id),
+      exchange: String(run.exchange),
+      feeRate: Number(run.fee_rate ?? 0),
+      symbol: String(run.symbol),
+      timeframe: run.timeframe as CreateBacktestRequest["timeframe"],
+      initialBalance: Number(run.initial_balance ?? 0),
+      startDate:
+        run.start_date instanceof Date
+          ? run.start_date.toISOString()
+          : String(run.start_date),
+      endDate:
+        run.end_date instanceof Date
+          ? run.end_date.toISOString()
+          : String(run.end_date),
+    });
+
+    void runBacktestWorker(newRunId, {
+      code: String(run.code),
+      exchange: String(run.exchange),
+      symbol: String(run.symbol),
+      timeframe: run.timeframe as CreateBacktestRequest["timeframe"],
+      initial_balance: Number(run.initial_balance ?? 0),
+      start_date:
+        run.start_date instanceof Date
+          ? run.start_date.toISOString()
+          : String(run.start_date),
+      end_date:
+        run.end_date instanceof Date
+          ? run.end_date.toISOString()
+          : String(run.end_date),
+      fee_rate: Number(run.fee_rate ?? 0),
+    });
+
+    return sendSuccess(res, { id: newRunId, status: "started" });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    next(error);
+  } finally {
+    client.release();
+  }
 }

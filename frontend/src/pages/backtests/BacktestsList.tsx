@@ -1,10 +1,10 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { BacktestRun } from "@quantlab/contracts";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import Button from "../../components/ui/Button";
-import { useBacktests } from "../../data/backtests";
+import { useBacktests, useDeleteBacktestMutation } from "../../data/backtests";
 
 function fmtPct(x?: number) {
   if (!x && x !== 0) return "—";
@@ -18,7 +18,9 @@ function fmtPct(x?: number) {
 
 export default function BacktestsList() {
   const navigate = useNavigate();
+  const [deletingAll, setDeletingAll] = useState(false);
   const { data, loading } = useBacktests();
+  const deleteMutation = useDeleteBacktestMutation();
   const backtests = useMemo(() => data ?? [], [data]);
 
   const columns: ListColumn<BacktestRun>[] = [
@@ -82,6 +84,25 @@ export default function BacktestsList() {
     },
   ];
 
+  async function handleDeleteAll() {
+    if (deletingAll || backtests.length === 0) {
+      return;
+    }
+
+    if (!confirm(`Delete all ${backtests.length} backtest runs?`)) {
+      return;
+    }
+
+    setDeletingAll(true);
+    try {
+      for (const backtest of backtests) {
+        await deleteMutation.mutate(backtest.id);
+      }
+    } finally {
+      setDeletingAll(false);
+    }
+  }
+
   return (
     <ListView
       title="Backtests"
@@ -94,13 +115,25 @@ export default function BacktestsList() {
         navigate(`/backtests/${bt.id}`)
       }
       actions={
-        <Button
-                  variant="PRIMARY"
-                  size="md"
-                  onClick={() => navigate("/backtests/new")}
-                >
-                  + New Backtest
-                </Button>
+        <>
+          <Button
+            variant="DELETE"
+            size="md"
+            loading={deletingAll}
+            loadingText="Deleting..."
+            disabled={deletingAll || backtests.length === 0}
+            onClick={handleDeleteAll}
+          >
+            Delete All
+          </Button>
+          <Button
+            variant="PRIMARY"
+            size="md"
+            onClick={() => navigate("/backtests/new")}
+          >
+            + New Backtest
+          </Button>
+        </>
       }
     />
   );

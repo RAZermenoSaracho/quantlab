@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import DateSection from "../../components/backtests/DateSection";
 import ProgressBar from "../../components/ui/ProgressBar";
 import Button from "../../components/ui/Button";
+import ErrorAlert from "../../components/ui/ErrorAlert";
 import type {
   CreateBacktestRequest,
 } from "@quantlab/contracts";
@@ -36,6 +37,7 @@ export default function CreateBacktest() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [toastError, setToastError] = useState<string | null>(null);
 
   const [progress, setProgress] = useState(0);
   const [isRunning, setIsRunning] = useState(false);
@@ -104,6 +106,15 @@ export default function CreateBacktest() {
     }
   }, [navigate, runId, statusQuery.data]);
 
+  useEffect(() => {
+    if (!error) {
+      return;
+    }
+    setToastError(error);
+    const timeout = window.setTimeout(() => setToastError(null), 3500);
+    return () => window.clearTimeout(timeout);
+  }, [error]);
+
   /* =====================================
      Submit
   ===================================== */
@@ -154,10 +165,13 @@ export default function CreateBacktest() {
         </p>
       </div>
 
-      {error && (
-        <div className="bg-red-900/40 border border-red-800 text-red-400 p-4 rounded-xl">
-          {error}
-        </div>
+      {error && <ErrorAlert message={error} />}
+      {toastError && (
+        <ErrorAlert
+          mode="toast"
+          message={toastError}
+          onClose={() => setToastError(null)}
+        />
       )}
 
       <form onSubmit={handleSubmit} className="space-y-10">
@@ -348,8 +362,9 @@ export default function CreateBacktest() {
             type="submit"
             variant="CREATE"
             size="lg"
-            loading={loading}
+            loading={loading || isRunning}
             loadingText="Running Backtest..."
+            disabled={isRunning}
           >
             Run Backtest
           </Button>

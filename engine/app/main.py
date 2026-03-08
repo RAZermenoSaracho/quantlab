@@ -1,8 +1,11 @@
 from datetime import datetime
 import asyncio
+import os
 import logging
 from typing import Any, Dict, Optional
+from contextlib import suppress
 
+import asyncpg
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
@@ -92,14 +95,128 @@ class PaperStartRequest(BaseModel):
 
 BACKTEST_PROGRESS: Dict[str, int] = {}
 ACTIVE_PAPER_SESSIONS: Dict[str, Any] = {}
+RECONCILIATION_TASK: Optional[asyncio.Task[None]] = None
+_RECOVERY_LOCK = asyncio.Lock()
+RECONCILIATION_INTERVAL_SECONDS = 30
 
 
 # ======================================================
 # ===================== Lifespan =======================
 # ======================================================
 
+async def _fetch_running_paper_runs() -> list[dict[str, Any]]:
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        logger.warning("DATABASE_URL missing. Paper run recovery disabled.")
+        return []
+
+    conn: Optional[asyncpg.Connection] = None
+    try:
+        conn = await asyncpg.connect(database_url)
+        rows = await conn.fetch(
+            """
+            SELECT
+              p.id AS run_id,
+              a.code,
+              COALESCE(p.exchange, 'binance') AS exchange,
+              p.symbol,
+              p.timeframe,
+              p.initial_balance,
+              p.fee_rate
+            FROM paper_runs p
+            JOIN algorithms a ON a.id = p.algorithm_id
+            WHERE LOWER(p.status::text) IN ('active', 'running')
+            ORDER BY p.started_at ASC
+            """
+        )
+        return [dict(row) for row in rows]
+    finally:
+        if conn is not None:
+            await conn.close()
+
+
+async def _start_paper_session_if_missing(
+    request: PaperStartRequest,
+    *,
+    source: str,
+) -> bool:
+    if request.run_id in ACTIVE_PAPER_SESSIONS:
+        return False
+
+    from .paper_trading import build_paper_session
+
+    session = build_paper_session(request)
+    ACTIVE_PAPER_SESSIONS[request.run_id] = session
+
+    try:
+        await session.start()
+        logger.info(
+            "Paper session started source=%s run_id=%s symbol=%s timeframe=%s",
+            source,
+            request.run_id,
+            request.symbol,
+            request.timeframe,
+        )
+        return True
+    except Exception:
+        ACTIVE_PAPER_SESSIONS.pop(request.run_id, None)
+        raise
+
+
+async def restore_running_sessions(
+    runs: Optional[list[dict[str, Any]]] = None,
+) -> None:
+    async with _RECOVERY_LOCK:
+        rows = runs if runs is not None else await _fetch_running_paper_runs()
+        restored_count = 0
+
+        for row in rows:
+            run_id = str(row["run_id"])
+            if run_id in ACTIVE_PAPER_SESSIONS:
+                continue
+
+            try:
+                started = await _start_paper_session_if_missing(
+                    PaperStartRequest(
+                        run_id=run_id,
+                        code=str(row["code"]),
+                        exchange=str(row.get("exchange") or "binance"),
+                        symbol=str(row["symbol"]),
+                        timeframe=str(row["timeframe"]),
+                        initial_balance=float(row["initial_balance"] or 0),
+                        fee_rate=float(row["fee_rate"] or 0.001),
+                    ),
+                    source="recovery",
+                )
+                if started:
+                    restored_count += 1
+            except Exception:
+                logger.exception("Failed to recover paper session run_id=%s", run_id)
+
+        logger.info(
+            "Engine recovery: %d sessions restored",
+            restored_count,
+        )
+
+
+async def reconciliation_loop() -> None:
+    while True:
+        await asyncio.sleep(RECONCILIATION_INTERVAL_SECONDS)
+        try:
+            runs = await _fetch_running_paper_runs()
+            logger.debug(
+                "Engine reconciliation checked %d runs",
+                len(runs),
+            )
+            await restore_running_sessions(runs)
+        except Exception:
+            logger.exception("Paper reconciliation loop iteration failed")
+
+
 @app.on_event("startup")
 async def _startup():
+    global RECONCILIATION_TASK
+
     try:
         from .events import get_strategy_event_system
         await get_strategy_event_system().start_workers(DEFAULT_STRATEGY_WORKERS)
@@ -107,20 +224,34 @@ async def _startup():
     except Exception:
         logger.exception("Failed to start strategy event workers.")
 
+    try:
+        await restore_running_sessions()
+    except Exception:
+        logger.exception("Initial paper run recovery failed.")
+
+    RECONCILIATION_TASK = asyncio.create_task(reconciliation_loop())
+    logger.info("Paper reconciliation loop started interval=%ss", RECONCILIATION_INTERVAL_SECONDS)
+
 
 @app.on_event("shutdown")
 async def _shutdown():
-    logger.info("Engine shutdown initiated. Stopping active paper sessions...")
+    global RECONCILIATION_TASK
 
-    # Stop all active paper sessions
-    for run_id, session in list(ACTIVE_PAPER_SESSIONS.items()):
-        try:
-            logger.info("Stopping paper session during shutdown run_id=%s", run_id)
-            await session.stop()
-        except Exception:
-            logger.exception("Failed stopping session during shutdown run_id=%s", run_id)
+    logger.info(
+        "Engine shutdown initiated. Preserving active paper runs state for backend recovery."
+    )
 
+    # IMPORTANT:
+    # Do not call session.stop() on process shutdown. `stop()` emits STOPPED events to the
+    # backend, which would incorrectly mark runs as user-stopped during restarts.
+    # We only clear in-memory references here; backend startup recovery will restore runs.
     ACTIVE_PAPER_SESSIONS.clear()
+
+    if RECONCILIATION_TASK is not None:
+        RECONCILIATION_TASK.cancel()
+        with suppress(asyncio.CancelledError):
+            await RECONCILIATION_TASK
+        RECONCILIATION_TASK = None
 
     # Close shared HTTP client
     try:
@@ -218,15 +349,7 @@ async def start_paper(request: PaperStartRequest):
         raise HTTPException(status_code=400, detail="Paper run already active")
 
     try:
-        from .paper_trading import build_paper_session
-
-        session = build_paper_session(request)
-        ACTIVE_PAPER_SESSIONS[request.run_id] = session
-
-        await session.start()
-
-        logger.info("Paper session started run_id=%s symbol=%s timeframe=%s",
-                    request.run_id, request.symbol, request.timeframe)
+        await _start_paper_session_if_missing(request, source="api")
 
         return {
             "success": True,

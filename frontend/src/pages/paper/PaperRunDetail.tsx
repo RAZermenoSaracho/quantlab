@@ -18,6 +18,7 @@ import {
   useDeletePaperRunMutation,
   usePaperRun,
   usePaperRuns,
+  useRestartPaperRunMutation,
   usePaperState,
   useStopPaperRunMutation,
 } from "../../data/paper";
@@ -44,6 +45,7 @@ export default function PaperRunDetail() {
   const runId = id ?? "";
 
   const [stopping, setStopping] = useState(false);
+  const [restarting, setRestarting] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   const [candles, setCandles] = useState<Candle[]>([]);
@@ -63,6 +65,7 @@ export default function PaperRunDetail() {
     historyLimit
   );
   const stopMutation = useStopPaperRunMutation();
+  const restartMutation = useRestartPaperRunMutation();
   const deleteMutation = useDeletePaperRunMutation();
   const trades = initialData?.trades ?? [];
   const getTradeNetPnl = (trade: PaperTrade) =>
@@ -342,6 +345,16 @@ export default function PaperRunDetail() {
     }
   }
 
+  async function handleRestart() {
+    if (!runId) return;
+    try {
+      setRestarting(true);
+      await restartMutation.mutate(runId);
+    } finally {
+      setRestarting(false);
+    }
+  }
+
   async function handleDelete() {
     if (!runId) return;
     if (!confirm("Delete paper run?")) return;
@@ -558,13 +571,25 @@ export default function PaperRunDetail() {
 
             {isRunning && (
               <Button
-                variant="STOP"
+                variant="STOP" 
                 size="md"
                 loading={stopping}
                 loadingText="Stopping..."
                 onClick={handleStop}
               >
                 Stop
+              </Button>
+            )}
+
+            {!isRunning && (
+              <Button
+                variant="SUCCESS"
+                size="md"
+                loading={restarting}
+                loadingText="Restarting..."
+                onClick={handleRestart}
+              >
+                Restart
               </Button>
             )}
 

@@ -1,13 +1,18 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { Algorithm } from "@quantlab/contracts";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
 import Button from "../../components/ui/Button";
-import { useAlgorithms } from "../../data/algorithms";
+import {
+  useAlgorithms,
+  useDeleteAlgorithmMutation,
+} from "../../data/algorithms";
 
 export default function AlgorithmsList() {
   const navigate = useNavigate();
+  const [deletingAll, setDeletingAll] = useState(false);
   const { data, loading } = useAlgorithms();
+  const deleteMutation = useDeleteAlgorithmMutation();
   const algorithms = useMemo(() => data ?? [], [data]);
 
   const columns: ListColumn<Algorithm>[] = [
@@ -41,6 +46,25 @@ export default function AlgorithmsList() {
     },
   ];
 
+  async function handleDeleteAll() {
+    if (deletingAll || algorithms.length === 0) {
+      return;
+    }
+
+    if (!confirm(`Delete all ${algorithms.length} algorithms?`)) {
+      return;
+    }
+
+    setDeletingAll(true);
+    try {
+      for (const algorithm of algorithms) {
+        await deleteMutation.mutate(algorithm.id);
+      }
+    } finally {
+      setDeletingAll(false);
+    }
+  }
+
   return (
     <ListView
       title="Algorithms"
@@ -53,13 +77,25 @@ export default function AlgorithmsList() {
         navigate(`/algorithms/${algo.id}`)
       }
       actions={
-        <Button
-          variant="PRIMARY"
-          size="md"
-          onClick={() => navigate("/algorithms/new")}
-        >
-          + New Algorithm
-        </Button>
+        <>
+          <Button
+            variant="DELETE"
+            size="md"
+            loading={deletingAll}
+            loadingText="Deleting..."
+            disabled={deletingAll || algorithms.length === 0}
+            onClick={handleDeleteAll}
+          >
+            Delete All
+          </Button>
+          <Button
+            variant="PRIMARY"
+            size="md"
+            onClick={() => navigate("/algorithms/new")}
+          >
+            + New Algorithm
+          </Button>
+        </>
       }
     />
   );

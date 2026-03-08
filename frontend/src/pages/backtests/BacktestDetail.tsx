@@ -14,6 +14,7 @@ import {
   useBacktest,
   useBacktests,
   useDeleteBacktestMutation,
+  useRerunBacktestMutation,
 } from "../../data/backtests";
 
 import type {
@@ -140,6 +141,7 @@ export default function BacktestDetail() {
 
   const [loadingDelete, setLoadingDelete] = useState(false);
   const [loadingPdf, setLoadingPdf] = useState(false);
+  const [loadingRerun, setLoadingRerun] = useState(false);
 
   const [returnPeriod, setReturnPeriod] = useState<
     "yearly" | "monthly" | "weekly" | "daily"
@@ -149,6 +151,7 @@ export default function BacktestDetail() {
   const { data, error: detailError } = useBacktest(id ?? "");
   const { data: allBacktests, error: listError } = useBacktests();
   const deleteMutation = useDeleteBacktestMutation();
+  const rerunMutation = useRerunBacktestMutation();
   const allIds = useMemo(
     () => (allBacktests ?? []).map((backtest) => backtest.id),
     [allBacktests]
@@ -476,6 +479,18 @@ export default function BacktestDetail() {
     }
   }
 
+  async function handleRerun() {
+    if (!id) return;
+
+    try {
+      setLoadingRerun(true);
+      const result = await rerunMutation.mutate(id);
+      navigate(`/backtests/${result.id}`);
+    } finally {
+      setLoadingRerun(false);
+    }
+  }
+
   /* ================= UI ================= */
 
   if (detailError || listError) {
@@ -538,6 +553,16 @@ export default function BacktestDetail() {
             onClick={handleExportPdf}
           >
             Export PDF
+          </Button>
+
+          <Button
+            variant="WARNING"
+            size="md"
+            loading={loadingRerun}
+            loadingText="Starting..."
+            onClick={handleRerun}
+          >
+            Re-run Backtest
           </Button>
 
           <Button

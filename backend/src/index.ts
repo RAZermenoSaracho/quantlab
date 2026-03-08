@@ -15,6 +15,7 @@ import marketRoutes from "./routes/market.routes";
 import paperRoutes from "./routes/paper.routes";
 
 import { initializeWebsocket } from "./services/websocketManager.service";
+import { restoreRunningPaperRuns } from "./services/paperRecovery.service";
 import passport from "passport";
 import "./config/passport";
 
@@ -93,4 +94,8 @@ QuantLab API running on http://localhost:${env.PORT}
 Engine URL: ${env.ENGINE_URL}
 WebSocket enabled
 `);
+
+  void restoreRunningPaperRuns().catch((error: unknown) => {
+    console.error("[PaperRecovery] Failed to restore active paper runs:", error);
+  });
 });

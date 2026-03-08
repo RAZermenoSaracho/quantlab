@@ -4,7 +4,7 @@
     "dev": "pnpm --parallel --filter backend --filter frontend dev",
     "dev:backend": "pnpm --filter backend dev",
     "dev:frontend": "pnpm --filter frontend dev",
-    "build": "pnpm -r --if-present build",
+    "build": "pnpm build:contracts && pnpm build:backend && pnpm build:frontend",
     "build:contracts": "pnpm --filter @quantlab/contracts build",
     "build:backend": "pnpm --filter backend build",
     "build:frontend": "pnpm --filter frontend build"

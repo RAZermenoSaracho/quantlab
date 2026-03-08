@@ -6,6 +6,7 @@ import {
   getAllBacktests,
   getBacktest,
   getBacktestStatus,
+  rerunBacktest,
 } from "../services/backtest.service";
 import { connectSocket } from "../services/socket.service";
 import {
@@ -86,5 +87,12 @@ export function useDeleteBacktestMutation() {
       void output;
       return [BACKTESTS, backtestKey(id), backtestStatusKey(id)];
     },
+  });
+}
+
+export function useRerunBacktestMutation() {
+  return useMutation<string, { id: string; status: "started" }>({
+    mutationFn: rerunBacktest,
+    invalidate: [BACKTESTS],
   });
 }

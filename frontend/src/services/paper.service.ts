@@ -23,6 +23,12 @@ export function stopPaperRun(runId: string): Promise<MessageResponse> {
   return api.post<MessageResponse>(`/paper/stop/${runId}`, {});
 }
 
+/* ================= RESTART ================= */
+
+export function restartPaperRun(runId: string): Promise<StartPaperRunResponse> {
+  return api.post<StartPaperRunResponse>(`/paper/restart/${runId}`, {});
+}
+
 /* ================= DELETE ================= */
 
 export function deletePaperRun(runId: string): Promise<MessageResponse> {

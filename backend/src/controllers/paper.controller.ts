@@ -9,6 +9,11 @@ import {
   handlePaperEvent,
 } from "../services/paperEvent.service";
 import {
+  markRecoveredPaperRun,
+  unmarkRecoveredPaperRun,
+} from "../services/paperRecovery.service";
+import { getConcurrentRunsCount } from "../services/runConcurrency.service";
+import {
   type ApiResponse,
   type MessageResponse,
   type PortfolioState,
@@ -63,6 +68,10 @@ export async function startPaperRun(
     }
 
     const userId = req.user!.id;
+    const concurrentRuns = await getConcurrentRunsCount(userId);
+    if (concurrentRuns >= 20) {
+      return sendError(res, "Maximum concurrent runs reached", 429);
+    }
 
     const algoResult = payload.algorithm_id
       ? await client.query(
@@ -122,11 +131,13 @@ export async function startPaperRun(
       initial_balance: parsedBalance,
       fee_rate: fee_rate ?? 0.001,
     }).catch(async () => {
+      unmarkRecoveredPaperRun(runId);
       await pool.query(
         `UPDATE paper_runs SET status = 'STOPPED' WHERE id = $1`,
         [runId]
       );
     });
+    markRecoveredPaperRun(runId);
 
   } catch (err) {
     await client.query("ROLLBACK");
@@ -164,6 +175,7 @@ export async function stopPaperRun(
     }
 
     await stopPaperOnEngine(runId);
+    unmarkRecoveredPaperRun(runId);
 
     await pool.query(
       `UPDATE paper_runs
@@ -177,6 +189,122 @@ export async function stopPaperRun(
 
   } catch (err) {
     next(err);
+  }
+}
+
+/* =====================================================
+   RESTART PAPER RUN
+===================================================== */
+export async function restartPaperRun(
+  req: Request,
+  res: Response<ApiResponse<StartPaperRunResponse>>,
+  next: NextFunction
+) {
+  const client = await pool.connect();
+
+  try {
+    const rawId = req.params.id;
+    if (!rawId || Array.isArray(rawId)) {
+      return sendError(res, "Invalid id parameter", 400);
+    }
+
+    const runId = rawId;
+    const userId = req.user!.id;
+
+    const concurrentRuns = await getConcurrentRunsCount(userId);
+    if (concurrentRuns >= 20) {
+      return sendError(res, "Maximum concurrent runs reached", 429);
+    }
+
+    await client.query("BEGIN");
+
+    const updateResult = await client.query(
+      `
+      UPDATE paper_runs
+      SET status = 'ACTIVE',
+          updated_at = NOW()
+      WHERE id = $1
+        AND user_id = $2
+        AND LOWER(status::text) IN ('stopped', 'failed')
+      RETURNING id, algorithm_id, exchange, symbol, timeframe, initial_balance, fee_rate
+      `,
+      [runId, userId]
+    );
+
+    if (!updateResult.rowCount) {
+      await client.query("ROLLBACK");
+
+      const existingRun = await pool.query(
+        `SELECT id, status
+         FROM paper_runs
+         WHERE id = $1 AND user_id = $2`,
+        [runId, userId]
+      );
+
+      if (!existingRun.rowCount) {
+        return sendError(res, "Paper run not found", 404);
+      }
+
+      const status = String(existingRun.rows[0].status ?? "").toUpperCase();
+      if (status === "ACTIVE" || status === "RUNNING") {
+        return sendError(res, "Paper run already running", 409);
+      }
+
+      return sendError(res, "Paper run cannot be restarted from current status", 400);
+    }
+
+    const run = updateResult.rows[0];
+    const algoResult = await client.query(
+      `
+      SELECT code
+      FROM algorithms
+      WHERE id = $1 AND user_id = $2
+      `,
+      [run.algorithm_id, userId]
+    );
+
+    if (!algoResult.rowCount) {
+      await client.query("ROLLBACK");
+      return sendError(res, "Algorithm not found", 404);
+    }
+
+    const code = String(algoResult.rows[0].code ?? "");
+    await client.query("COMMIT");
+
+    sendSuccess(res, { run_id: runId });
+
+    startPaperOnEngine({
+      run_id: runId,
+      code,
+      exchange: String(run.exchange ?? "binance"),
+      symbol: String(run.symbol),
+      timeframe: run.timeframe,
+      initial_balance: Number(run.initial_balance ?? 0),
+      fee_rate: Number(run.fee_rate ?? 0.001),
+    }).catch(async (error: unknown) => {
+      const message =
+        error instanceof Error ? error.message.toLowerCase() : "";
+
+      if (message.includes("already active") || message.includes("already running")) {
+        return;
+      }
+
+      unmarkRecoveredPaperRun(runId);
+      await pool.query(
+        `UPDATE paper_runs
+         SET status = 'STOPPED',
+             updated_at = NOW()
+         WHERE id = $1`,
+        [runId]
+      );
+    });
+
+    markRecoveredPaperRun(runId);
+  } catch (err) {
+    await client.query("ROLLBACK");
+    next(err);
+  } finally {
+    client.release();
   }
 }
 

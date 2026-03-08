@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   startPaperRun,
+  restartPaperRun,
   stopPaperRun,
   receivePaperEvent,
   getPaperRunById,
@@ -23,6 +24,7 @@ router.post("/internal/event", receivePaperEvent);
 ===================================================== */
 
 router.post("/start", requireAuth, startPaperRun);
+router.post("/restart/:id", requireAuth, restartPaperRun);
 router.post("/stop/:id", requireAuth, stopPaperRun);
 router.get("/", requireAuth, getAllPaperRuns);
 router.get("/:id/state", requireAuth, getPaperRunState);

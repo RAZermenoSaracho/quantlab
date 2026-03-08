@@ -49,3 +49,12 @@ export function deleteBacktest(id: string): Promise<{ message: string }> {
 export function getBacktestStatus(runId: string): Promise<BacktestStatusResponse> {
   return api.get<BacktestStatusResponse>(`/backtests/${runId}/status`);
 }
+
+export function rerunBacktest(
+  id: string
+): Promise<{ id: string; status: "started" }> {
+  return api.post<{ id: string; status: "started" }>(
+    `/backtests/${id}/rerun`,
+    {}
+  );
+}

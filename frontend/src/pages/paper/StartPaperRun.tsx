@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Button from "../../components/ui/Button";
+import ErrorAlert from "../../components/ui/ErrorAlert";
 import FormCard from "../../components/ui/FormCard";
 import Field from "../../components/ui/Field";
 import Hint from "../../components/ui/Hint";
@@ -27,6 +28,7 @@ export default function StartPaperRun() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [toastError, setToastError] = useState<string | null>(null);
 
   const [form, setForm] = useState<StartPaperRunRequest>({
     algorithm_id: "",
@@ -83,6 +85,15 @@ export default function StartPaperRun() {
     }
   }, [feeRateData]);
 
+  useEffect(() => {
+    if (!error) {
+      return;
+    }
+    setToastError(error);
+    const timeout = window.setTimeout(() => setToastError(null), 3500);
+    return () => window.clearTimeout(timeout);
+  }, [error]);
+
   /* =====================================
      Submit
   ===================================== */
@@ -133,10 +144,13 @@ export default function StartPaperRun() {
         </p>
       </div>
 
-      {error && (
-        <div className="bg-red-900/40 border border-red-800 text-red-400 p-4 rounded-xl">
-          {error}
-        </div>
+      {error && <ErrorAlert message={error} />}
+      {toastError && (
+        <ErrorAlert
+          mode="toast"
+          message={toastError}
+          onClose={() => setToastError(null)}
+        />
       )}
 
       <form onSubmit={handleSubmit} className="space-y-10">

@@ -14,6 +14,7 @@ import {
   getAllPaperRuns,
   getPaperRunById,
   getPaperRunState as fetchPaperRunState,
+  restartPaperRun,
   startPaperRun,
   stopPaperRun,
 } from "../services/paper.service";
@@ -272,6 +273,16 @@ export function useStopPaperRunMutation() {
     invalidate: (output, id) => {
       void output;
       return [PAPER_RUNS, paperRunKey(id)];
+    },
+  });
+}
+
+export function useRestartPaperRunMutation() {
+  return useMutation<string, StartPaperRunResponse>({
+    mutationFn: restartPaperRun,
+    invalidate: (output, id) => {
+      void output;
+      return [PAPER_RUNS, paperRunKey(id), paperStateKey(id)];
     },
   });
 }
