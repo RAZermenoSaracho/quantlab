@@ -505,11 +505,11 @@ export default function BacktestDetail() {
 
       {/* HEADER */}
 
-      <div className="w-full min-w-0 max-w-full flex justify-between items-start">
+      <div className="w-full min-w-0 max-w-full grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
 
-        <div>
+        <div className="min-w-0 break-words">
 
-          <h1 className="text-2xl font-bold text-white">
+          <h1 className="text-2xl font-bold text-white break-words">
             {run.symbol} — {run.timeframe}
           </h1>
 
@@ -535,7 +535,7 @@ export default function BacktestDetail() {
 
         </div>
 
-        <div className="flex gap-3 items-center">
+        <div className="min-w-0 flex flex-wrap gap-2 md:gap-3 items-center md:justify-end overflow-x-auto">
 
           <DetailNavigator
             ids={allIds}

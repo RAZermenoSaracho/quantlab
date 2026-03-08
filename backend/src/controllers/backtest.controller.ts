@@ -557,6 +557,22 @@ export async function getBacktestStatus(
   }
 
   const id = rawId;
+  const userId = req.user?.id;
+
+  if (!userId) {
+    return sendError(res, "Unauthorized", 401);
+  }
+
+  const owned = await pool.query(
+    `SELECT id
+     FROM backtest_runs
+     WHERE id = $1 AND user_id = $2`,
+    [id, userId]
+  );
+
+  if (!owned.rowCount) {
+    return sendError(res, "Backtest not found", 404);
+  }
 
   const engineProgress = await getEngineProgress(id);
   const progress = engineProgress;

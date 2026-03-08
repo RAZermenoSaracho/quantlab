@@ -1,10 +1,16 @@
 import { Router, Request, Response } from "express";
-import { login, me, register } from "../controllers/auth.controller";
+import {
+  changePassword,
+  login,
+  me,
+  profile,
+  register,
+} from "../controllers/auth.controller";
 import { requireAuth } from "../middleware/auth.middleware";
 import passport from "passport";
 import { env } from "../config/env";
 import jwt, { SignOptions } from "jsonwebtoken";
-import { AuthResponseSchema } from "../../../packages/contracts/dist";
+import { AuthResponseSchema } from "@quantlab/contracts";
 
 const router = Router();
 
@@ -13,6 +19,8 @@ const router = Router();
 router.post("/register", register);
 router.post("/login", login);
 router.get("/me", requireAuth, me);
+router.get("/profile", requireAuth, profile);
+router.post("/change-password", requireAuth, changePassword);
 
 /* ================= GOOGLE ================= */
 

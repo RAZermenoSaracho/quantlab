@@ -505,11 +505,11 @@ export default function PaperRunDetail() {
       {/* HEADER */}
       <div className="w-full min-w-0 max-w-full bg-slate-900 border border-slate-800 rounded-2xl p-6">
 
-        <div className="flex flex-col lg:flex-row justify-between gap-6">
+        <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 md:gap-6">
 
           {/* LEFT */}
-          <div className="space-y-2">
-            <h1 className="text-2xl font-bold text-white">
+          <div className="min-w-0 space-y-2 break-words">
+            <h1 className="text-2xl font-bold text-white break-words">
               {run.symbol}
               <span className="text-slate-400 ml-3 text-base">
                 {run.timeframe}
@@ -529,7 +529,7 @@ export default function PaperRunDetail() {
             </p>
 
             {/* STATUS STRIP */}
-            <div className="flex items-center gap-5 mt-2">
+            <div className="flex flex-wrap items-center gap-3 md:gap-5 mt-2">
 
               <div
                 className={`px-3 py-1 rounded-full text-xs font-semibold ${
@@ -562,7 +562,7 @@ export default function PaperRunDetail() {
           </div>
 
           {/* RIGHT */}
-          <div className="flex items-start gap-3 flex-wrap">
+          <div className="min-w-0 flex items-start md:justify-end gap-2 md:gap-3 flex-wrap overflow-x-auto">
             <DetailNavigator
               ids={allIds}
               currentId={runId}
@@ -806,7 +806,20 @@ export default function PaperRunDetail() {
       </div>
 
       {/* CHARTS */}
-      <div className="w-full min-w-0 max-w-full space-y-8">
+      <div id="candle-chart-wrapper" className="w-full min-w-0 max-w-full bg-slate-800 p-6 rounded-xl border border-slate-700">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-white font-semibold">Price Chart (Candles + Trades)</h3>
+        </div>
+      
+        <CandlestickChart candles={candles} trades={sortedTrades} />
+      </div>
+
+      <div id="equity-chart-wrapper" className="w-full min-w-0 max-w-full bg-slate-800 p-6 rounded-xl border border-slate-700">
+        <h3 className="text-white font-semibold mb-4">Equity Curve</h3>
+        <EquityCurveChart equity={equityCurve} />
+      </div>
+
+      {/* <div className="w-full min-w-0 max-w-full space-y-8">
         <div className="w-full min-w-0 max-w-full bg-slate-900 p-6 rounded-xl border border-slate-800">
           <h3 className="text-white font-semibold mb-4">Price Chart</h3>
           <CandlestickChart candles={candles} trades={sortedTrades} />
@@ -816,7 +829,7 @@ export default function PaperRunDetail() {
           <h3 className="text-white font-semibold mb-4">Equity Curve</h3>
           <EquityCurveChart equity={equityCurve} />
         </div>
-      </div>
+      </div> */}
 
       {/* TRADES */}
       <div className="w-full min-w-0 overflow-x-auto">

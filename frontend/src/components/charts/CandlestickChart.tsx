@@ -359,7 +359,7 @@ export default function CandlestickChart({
   }, [candleData, markers]);
 
   return (
-    <div className="relative w-full min-w-0">
+    <div className="relative w-full max-w-full min-w-0 overflow-hidden">
       <div className="mb-3 flex items-center justify-end gap-2">
         {CHART_TIMEFRAMES.map((timeframe) => (
           <button
@@ -377,13 +377,16 @@ export default function CandlestickChart({
         ))}
       </div>
 
-      <div className="relative w-full min-w-0" style={{ height: resolvedHeight }}>
+      <div
+        className="relative w-full max-w-full min-w-0 overflow-hidden"
+        style={{ height: resolvedHeight }}
+      >
         {!candles?.length && (
           <div className="absolute inset-0 flex items-center justify-center text-slate-500 text-sm">
             Waiting for candles...
           </div>
         )}
-        <div ref={containerRef} className="w-full h-full" />
+        <div ref={containerRef} className="w-full max-w-full h-full" />
       </div>
       <div className="mt-2 text-xs text-slate-500">
         Times shown in UTC

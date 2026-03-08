@@ -8,6 +8,7 @@ import {
   type ApiResponse,
   type AuthResponse,
   type MeResponse,
+  type MessageResponse,
   RegisterRequestSchema,
   LoginRequestSchema,
   AuthUserSchema,
@@ -15,6 +16,7 @@ import {
   MeResponseSchema,
 } from "@quantlab/contracts";
 import { sendError, sendSuccess } from "../utils/apiResponse";
+import { z } from "zod";
 
 type JwtPayload = { id: string; email: string };
 
@@ -25,6 +27,11 @@ function signToken(payload: JwtPayload) {
 
   return jwt.sign(payload, env.JWT_SECRET, options);
 }
+
+const ChangePasswordRequestSchema = z.object({
+  current_password: z.string().min(1),
+  new_password: z.string().min(8),
+});
 
 /* =========================
    REGISTER
@@ -131,4 +138,118 @@ export async function me(req: Request, res: Response<ApiResponse<MeResponse>>) {
   });
 
   return sendSuccess(res, response);
+}
+
+export async function profile(
+  req: Request,
+  res: Response<
+    ApiResponse<{
+      id: string;
+      email: string;
+      provider: "google" | "github" | "password";
+      created_at: string | null;
+    }>
+  >
+) {
+  const authUser = req.user;
+  if (!authUser) {
+    return sendError(res, "Unauthorized", 401);
+  }
+
+  const result = await pool.query(
+    `
+    SELECT id, email, password_hash, created_at
+    FROM users
+    WHERE id = $1
+    `,
+    [authUser.id]
+  );
+
+  if (!result.rowCount) {
+    return sendError(res, "User not found", 404);
+  }
+
+  const row = result.rows[0] as {
+    id: string;
+    email: string;
+    password_hash: string | null;
+    created_at: Date | string | null;
+  };
+
+  const passwordHash = String(row.password_hash ?? "");
+  const provider: "google" | "github" | "password" =
+    passwordHash === "oauth_google"
+      ? "google"
+      : passwordHash === "oauth_github"
+        ? "github"
+        : "password";
+
+  return sendSuccess(res, {
+    id: row.id,
+    email: row.email,
+    provider,
+    created_at:
+      row.created_at instanceof Date
+        ? row.created_at.toISOString()
+        : row.created_at ?? null,
+  });
+}
+
+export async function changePassword(
+  req: Request,
+  res: Response<ApiResponse<MessageResponse>>,
+  next: NextFunction
+) {
+  try {
+    const authUser = req.user;
+    if (!authUser) {
+      return sendError(res, "Unauthorized", 401);
+    }
+
+    const { current_password, new_password } =
+      ChangePasswordRequestSchema.parse(req.body);
+
+    const result = await pool.query(
+      `
+      SELECT id, password_hash
+      FROM users
+      WHERE id = $1
+      `,
+      [authUser.id]
+    );
+
+    if (!result.rowCount) {
+      return sendError(res, "User not found", 404);
+    }
+
+    const row = result.rows[0] as { password_hash: string | null };
+    const passwordHash = String(row.password_hash ?? "");
+
+    if (passwordHash === "oauth_google" || passwordHash === "oauth_github") {
+      return sendError(
+        res,
+        "Password change is not available for OAuth accounts",
+        400
+      );
+    }
+
+    const valid = await bcrypt.compare(current_password, passwordHash);
+    if (!valid) {
+      return sendError(res, "Current password is incorrect", 400);
+    }
+
+    const nextHash = await bcrypt.hash(new_password, 12);
+    await pool.query(
+      `
+      UPDATE users
+      SET password_hash = $1
+      WHERE id = $2
+      `,
+      [nextHash, authUser.id]
+    );
+
+    return sendSuccess(res, { message: "Password updated" });
+  } catch (error) {
+    next(error);
+  }
 }

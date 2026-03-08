@@ -73,7 +73,10 @@ export default function EquityCurveChart({ equity }: Props) {
   const chartMax = maxValue + padding;
 
   return (
-    <div className="w-full min-w-0" style={{ height: CHART_HEIGHT }}>
+    <div
+      className="w-full max-w-full min-w-0 overflow-hidden"
+      style={{ height: CHART_HEIGHT }}
+    >
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={equity}>
           <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" />

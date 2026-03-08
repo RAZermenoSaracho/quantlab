@@ -1,7 +1,9 @@
+import Landing from "../pages/Landing";
 import Login from "../pages/Login";
 import Register from "../pages/Register";
 import OAuthSuccess from "../pages/OAuthSuccess";
 import Dashboard from "../pages/Dashboard";
+import Profile from "../pages/Profile";
 import NotFound from "../pages/NotFound";
 
 // Algorithms
@@ -21,12 +23,14 @@ import PaperRunDetail from "../pages/paper/PaperRunDetail";
 
 export const nav = [
   // PUBLIC
+  { path: "/", element: <Landing />, isPrivate: false },
   { path: "/login", element: <Login />, isPrivate: false },
   { path: "/register", element: <Register />, isPrivate: false },
   { path: "/oauth-success", element: <OAuthSuccess />, isPrivate: false },
 
   // DASHBOARD
   { path: "/dashboard", element: <Dashboard />, isPrivate: true },
+  { path: "/profile", element: <Profile />, isPrivate: true },
 
   // ALGORITHMS
   { path: "/algorithms", element: <AlgorithmsList />, isPrivate: true },

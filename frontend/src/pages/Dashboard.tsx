@@ -9,11 +9,6 @@ import { usePaperRuns } from "../data/paper";
 
 type Tab = "backtests" | "paper";
 
-function fmtMoney(x: number, d = 2) {
-  if (!Number.isFinite(x)) return "0.00";
-  return x.toFixed(d);
-}
-
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<Tab>("backtests");
   const { data: backtestsData, loading: backtestsLoading } = useBacktests();
@@ -26,47 +21,36 @@ export default function Dashboard() {
     () => backtests.filter((bt) => bt.status === "COMPLETED"),
     [backtests]
   );
-
-  const totalPnL = useMemo(() => {
-    return completed.reduce((acc, bt) => {
-      const pnl = Number(bt.analysis?.summary?.net_profit ?? 0);
-      return acc + pnl;
-    }, 0);
-  }, [completed]);
+  const activePaperRuns = useMemo(
+    () =>
+      paperRuns.filter((run) => {
+        const status = String(run.status ?? "").toUpperCase();
+        return status === "ACTIVE" || status === "RUNNING";
+      }),
+    [paperRuns]
+  );
 
   if (loading) {
     return <div className="p-6 text-slate-400">Loading dashboard...</div>;
   }
 
   return (
-    <div className="space-y-8">
+    <div className="max-w-7xl mx-auto w-full min-w-0 space-y-8">
 
       {/* ================= KPI ================= */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
 
         <KpiCard
-          title="Total Backtests"
-          value={backtests.length}
-          size="compact"
-        />
-
-        <KpiCard
-          title="Completed"
+          title="Backtests (Completed / Total)"
           value={completed.length}
+          format={(v) => `${Math.round(v)} / ${backtests.length}`}
           size="compact"
         />
 
         <KpiCard
-          title="Paper Runs"
-          value={paperRuns.length}
-          size="compact"
-        />
-
-        <KpiCard
-          title="Total Net PnL"
-          value={totalPnL}
-          positive={totalPnL >= 0}
-          format={(v) => `${fmtMoney(v)} USDT`}
+          title="Paper Trades (Running / Total)"
+          value={activePaperRuns.length}
+          format={(v) => `${Math.round(v)} / ${paperRuns.length}`}
           size="compact"
         />
 
