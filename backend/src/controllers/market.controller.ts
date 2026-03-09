@@ -1,9 +1,9 @@
 import type { Request, Response, NextFunction } from "express";
-import {
-  getBinanceCandles,
-  getBinanceSymbols,
-} from "../services/binance.service";
 import { getSupportedExchanges } from "../services/exchangeCatalog.service";
+import {
+  getCandles as getExchangeCandles,
+  getSymbols as getExchangeSymbols,
+} from "../services/exchanges/exchange.service";
 import type {
   ApiResponse,
   CandlesResponse,
@@ -24,11 +24,7 @@ export async function getSymbols(
       return sendError(res, "exchange is required", 400);
     }
 
-    if (exchange !== "binance") {
-      return sendError(res, "Unsupported exchange", 400);
-    }
-
-    const symbols = await getBinanceSymbols();
+    const symbols = await getExchangeSymbols(exchange);
 
     const filtered = query
       ? symbols.filter(s =>
@@ -42,6 +38,9 @@ export async function getSymbols(
       })),
     });
   } catch (err) {
+    if (err instanceof Error && err.message.startsWith("Unsupported exchange")) {
+      return sendError(res, "Unsupported exchange", 400);
+    }
     next(err);
   }
 }
@@ -69,6 +68,9 @@ export function getFeeRate(
       default_fee_rate: ex.default_fee_rate
     });
   } catch (err) {
+    if (err instanceof Error && err.message.startsWith("Unsupported exchange")) {
+      return sendError(res, "Unsupported exchange", 400);
+    }
     next(err);
   }
 }
@@ -79,7 +81,12 @@ export async function getCandles(
   next: NextFunction
 ) {
   try {
-    const { symbol, interval, limit } = req.query;
+    const { exchange, symbol, interval, limit } = req.query;
+
+    const exchangeId =
+      typeof exchange === "string" && exchange.length > 0
+        ? exchange
+        : "binance";
 
     if (!symbol || typeof symbol !== "string") {
       return sendError(res, "symbol is required", 400);
@@ -94,7 +101,8 @@ export async function getCandles(
       ? Math.max(1, Math.min(parsedLimit, 50000))
       : 500;
 
-    const candles = await getBinanceCandles(
+    const candles = await getExchangeCandles(
+      exchangeId,
       symbol.toUpperCase(),
       interval,
       safeLimit
