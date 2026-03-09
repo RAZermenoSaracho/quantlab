@@ -83,18 +83,13 @@ export class BinanceProvider implements ExchangeProvider {
       ? Math.max(1, Math.min(Math.ceil(safeLimit / expansionFactor), 1000))
       : Math.max(1, Math.min(safeLimit, 1000));
 
-    const response = await axios.get<BinanceKlineRow[]>(
-      `${BINANCE_FALLBACK_BASE_URL}/api/v3/klines`,
-      {
-        params: {
-          symbol,
-          interval: sourceInterval,
-          limit: sourceLimit,
-        },
-      }
-    );
+    const klineRows = await this.fetchKlinesWithFallback({
+      symbol,
+      interval: sourceInterval,
+      limit: sourceLimit,
+    });
 
-    const minuteCandles = response.data.map((row) => ({
+    const minuteCandles = klineRows.map((row) => ({
       timestamp: Number(row[0]),
       open: Number(row[1]),
       high: Number(row[2]),
@@ -156,6 +151,36 @@ export class BinanceProvider implements ExchangeProvider {
     }
 
     return subminuteCandles.slice(-safeLimit);
+  }
+
+  private async fetchKlinesWithFallback(params: {
+    symbol: string;
+    interval: string;
+    limit: number;
+  }): Promise<BinanceKlineRow[]> {
+    try {
+      return await this.fetchKlines(BINANCE_DATA_BASE_URL, params);
+    } catch {
+      return this.fetchKlines(BINANCE_FALLBACK_BASE_URL, params);
+    }
+  }
+
+  private async fetchKlines(
+    baseUrl: string,
+    params: {
+      symbol: string;
+      interval: string;
+      limit: number;
+    }
+  ): Promise<BinanceKlineRow[]> {
+    const response = await axios.get<BinanceKlineRow[]>(
+      `${baseUrl}/api/v3/klines`,
+      {
+        params,
+        timeout: 10000,
+      }
+    );
+    return response.data;
   }
 
   private async fetchSymbolsWithFallback(): Promise<Symbol[]> {
