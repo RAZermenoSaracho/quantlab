@@ -26,7 +26,7 @@ CREATE TABLE algorithms (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
-    description TEXT,
+    notes_html TEXT,
     code TEXT NOT NULL,
     github_url TEXT,
     created_at TIMESTAMP DEFAULT NOW(),
@@ -184,13 +184,7 @@ CREATE TABLE trades (
     opened_at TIMESTAMP NOT NULL,
     closed_at TIMESTAMP,
 
-    created_at TIMESTAMP DEFAULT NOW(),
-
-    -- CONSTRAINT fk_trades_backtest
-    --     FOREIGN KEY (run_id)
-    --     REFERENCES backtest_runs(id)
-    --     ON DELETE CASCADE
-    --     DEFERRABLE INITIALLY DEFERRED
+    created_at TIMESTAMP DEFAULT NOW()
 );
 
 CREATE INDEX idx_trades_run ON trades(run_id);
@@ -216,16 +210,9 @@ CREATE TABLE metrics (
 
     total_trades INTEGER,
 
-    -- 🔥 NEW: Equity curve stored as JSON
     equity_curve JSONB,
 
-    created_at TIMESTAMP DEFAULT NOW(),
-
-    -- CONSTRAINT fk_metrics_backtest
-    --     FOREIGN KEY (run_id)
-    --     REFERENCES backtest_runs(id)
-    --     ON DELETE CASCADE
-    --     DEFERRABLE INITIALLY DEFERRED
+    created_at TIMESTAMP DEFAULT NOW()
 );
 
 CREATE INDEX idx_metrics_run ON metrics(run_id);
