@@ -5,7 +5,7 @@ import OAuthButton from "../components/ui/OAuthButton";
 import Button from "../components/ui/Button";
 import { loginUser } from "../services/auth.service";
 
-const BACKEND_URL = "http://localhost:5000";
+const BACKEND_URL = import.meta.env.VITE_API_URL?.replace("/api", "") || "http://localhost:5000";
 
 export default function Login() {
   const navigate = useNavigate();
