@@ -35,9 +35,20 @@ export default function ConfigSpecification() {
   "direction": "long_only",  # long_only | long_short
   "order_type": "market",    # market | limit
   "slippage_bps": 5,
+  "execution_model": "next_open",      # next_open | same_close
+  "stop_fill_model": "stop_price",     # stop_price | worst_case
+  "leverage": 1.0,                     # 1 - 125
+  "margin_mode": "isolated",           # isolated | cross
 
   # Strategy Mode
   "signal_mode": "mean_reversion",
+
+  # Custom strategy parameters (optional)
+  "params": {
+    "dca_drop_pct": 1.5,
+    "max_dca_entries": 5,
+    "net_take_profit_pct": 1.2
+  }
 }`}
         </pre>
 
@@ -45,6 +56,8 @@ export default function ConfigSpecification() {
           <div>• spec_version must be positive integer</div>
           <div>• max_account_exposure_pct must be 0-100</div>
           <div>• batch_size must be &gt; 0</div>
+          <div>• allow_reentry controls immediate re-entry after close</div>
+          <div>• slippage_bps, fee_rate, execution_model and stop_fill_model are exposed in ctx</div>
           <div>• slow_ma_window must be &gt; fast_ma_window</div>
           <div>• RSI thresholds must be 0-100</div>
         </div>

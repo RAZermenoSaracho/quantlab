@@ -54,7 +54,7 @@ export function initializeWebsocket(
 
 export async function emitPaperEvent(
   runId: string,
-  event: keyof PaperEventSchemaMap,
+  event: keyof PaperEventSchemaMap | "order_update",
   payload: unknown
 ) {
   if (!ioInstance) return;
@@ -102,6 +102,16 @@ export async function emitPaperEvent(
           };
         };
         rawIo.to(room).emit("paper_portfolio_update", parsed);
+      }
+      break;
+    case "order_update":
+      {
+        const rawIo = ioInstance as unknown as {
+          to: (targetRoom: string) => {
+            emit: (eventName: string, data: unknown) => void;
+          };
+        };
+        rawIo.to(room).emit("order_update", payload);
       }
       break;
   }

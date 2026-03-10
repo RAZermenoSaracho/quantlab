@@ -31,14 +31,35 @@ export default function EngineRequirements() {
       "history": tuple[dict],
 
       # Current open position (if any)
-      "position": dict | None,
+      "position": {
+        "side": str,
+        "quantity": float,
+        "entry_price": float,
+        "average_entry_price": float,
+        "market_value": float,
+        "gross_pnl": float,
+        "net_pnl": float,
+        "realized_pnl": float,
+        "unrealized_pnl": float,
+        "fees_paid": float,
+        "entries_count": int
+      } | None,
 
       # Account state
-      "balance": float
-      "initial_balance": float
+      "balance": float,
+      "initial_balance": float,
+      "equity": float,
+      "realized_pnl": float,
+      "unrealized_pnl": float,
+      "open_positions": int,
+      "exposure_pct": float,
+      "average_entry_price": float | None,
+      "current_drawdown_pct": float,
 
       # Market info
-      "timeframe": str
+      "exchange": str,
+      "symbol": str,
+      "timeframe": str,
 
       # Precomputed indicators
       "indicators": {
@@ -52,8 +73,17 @@ export default function EngineRequirements() {
         "atr": float
       }
 
+      # Execution model metadata
+      "fee_rate": float,
+      "slippage_bps": float,
+      "execution_model": str,
+      "stop_fill_model": str,
+      "leverage": float,
+      "margin_mode": str,
+      "params": dict,
+
       # Current bar index
-      "index": int
+      "index": int,
     }
     """
 
@@ -78,6 +108,7 @@ export default function EngineRequirements() {
 
           <div>• BUY → LONG</div>
           <div>• SELL → CLOSE (or SHORT if shorting enabled)</div>
+          <div>• Backward-compatible top-level OHLCV keys remain available (ctx["close"], etc.)</div>
 
         </div>
 

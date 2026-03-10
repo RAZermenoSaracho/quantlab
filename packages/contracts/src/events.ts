@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { CandleSchema } from "./market";
-import { PaperPositionSchema, PaperRunStatusSchema } from "./paper";
+import { PaperOrderSchema, PaperPositionSchema, PaperRunStatusSchema } from "./paper";
 import { PortfolioStateSchema } from "./portfolio";
 
 export const JoinPaperRunSchema = z.string().uuid();
@@ -26,6 +26,7 @@ export const TradeExecutionSchema = z.object({
   gross_pnl: z.number().nullable().optional(),
   net_pnl: z.number().nullable().optional(),
   fee_rate_used: z.number().nullable().optional(),
+  entries_count_after_fill: z.number().int().nullable().optional(),
   pnl: z.number().nullable().optional(),
   pnl_percent: z.number().nullable().optional(),
   opened_at: z.string().nullable().optional(),
@@ -63,6 +64,14 @@ export type PaperRunErrorEvent = z.infer<typeof PaperRunErrorEventSchema>;
 export const PortfolioUpdateEventSchema = PortfolioStateSchema;
 export type PortfolioUpdateEvent = z.infer<typeof PortfolioUpdateEventSchema>;
 
+export const OrderUpdateEventSchema = z.object({
+  run_id: z.string().uuid(),
+  event_type: z.enum(["order_created", "order_filled", "order_cancelled"]),
+  order: PaperOrderSchema,
+  reason: z.string().optional(),
+});
+export type OrderUpdateEvent = z.infer<typeof OrderUpdateEventSchema>;
+
 export const BacktestProgressEventSchema = z.object({
   run_id: z.string().uuid(),
   status: z.enum(["RUNNING", "COMPLETED", "FAILED"]),
@@ -78,6 +87,7 @@ export type ServerToClientEvents = {
   paper_run_status: (payload: PaperRunStatusEvent) => void;
   paper_run_error: (payload: PaperRunErrorEvent) => void;
   portfolio_update: (payload: PortfolioUpdateEvent) => void;
+  order_update: (payload: OrderUpdateEvent) => void;
   backtest_progress: (payload: BacktestProgressEvent) => void;
 };
 

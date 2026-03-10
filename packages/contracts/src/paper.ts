@@ -28,6 +28,15 @@ export const PaperPositionSchema = z.object({
   side: PaperPositionSideSchema,
   quantity: z.number(),
   entry_price: z.number(),
+  average_entry_price: z.number().optional(),
+  entries_count: z.number().int().optional(),
+  fees_paid: z.number().optional(),
+  market_value: z.number().optional(),
+  breakeven_price: z.number().optional(),
+  gross_pnl: z.number().optional(),
+  net_pnl: z.number().optional(),
+  realized_pnl: z.number().optional(),
+  unrealized_pnl: z.number().optional(),
   opened_at: z.string().nullable().optional(),
 });
 
@@ -67,6 +76,29 @@ export const PaperTradeSchema = z.object({
 });
 
 export type PaperTrade = z.infer<typeof PaperTradeSchema>;
+
+export const PaperOrderTypeSchema = z.enum(["market", "limit", "stop", "stop_limit"]);
+export type PaperOrderType = z.infer<typeof PaperOrderTypeSchema>;
+
+export const PaperOrderSideSchema = z.enum(["BUY", "SELL"]);
+export type PaperOrderSide = z.infer<typeof PaperOrderSideSchema>;
+
+export const PaperOrderStatusSchema = z.enum(["pending", "filled", "cancelled"]);
+export type PaperOrderStatus = z.infer<typeof PaperOrderStatusSchema>;
+
+export const PaperOrderSchema = z.object({
+  id: z.string(),
+  symbol: z.string(),
+  side: PaperOrderSideSchema,
+  order_type: PaperOrderTypeSchema,
+  price: z.number().nullable().optional(),
+  stop_price: z.number().nullable().optional(),
+  quantity: z.number().nullable().optional(),
+  status: PaperOrderStatusSchema,
+  created_at: z.number(),
+  filled_at: z.number().nullable().optional(),
+});
+export type PaperOrder = z.infer<typeof PaperOrderSchema>;
 
 export const PaperRunSchema = z.object({
   id: z.string().uuid(),
@@ -176,6 +208,15 @@ export const PaperEnginePositionSchema = z.object({
   side: PaperPositionSideSchema,
   quantity: z.number(),
   entry_price: z.number(),
+  average_entry_price: z.number().optional(),
+  entries_count: z.number().int().optional(),
+  fees_paid: z.number().optional(),
+  market_value: z.number().optional(),
+  breakeven_price: z.number().optional(),
+  gross_pnl: z.number().optional(),
+  net_pnl: z.number().optional(),
+  realized_pnl: z.number().optional(),
+  unrealized_pnl: z.number().optional(),
   opened_at: z.number().nullable().optional(),
 });
 
@@ -197,6 +238,7 @@ export const PaperTradeEventSchema = z.object({
     gross_pnl: z.number().optional(),
     net_pnl: z.number().optional(),
     fee_rate_used: z.number().optional(),
+    entries_count_after_fill: z.number().int().optional(),
     pnl: z.number().optional(),
     pnl_percent: z.number().optional(),
     opened_at: z.number().nullable().optional(),
@@ -237,6 +279,14 @@ export const PaperPositionEventSchema = z.object({
   payload: PaperEnginePositionSchema,
 });
 
+/* ================= POSITION UPDATE EVENT ================= */
+
+export const PaperPositionUpdateEventSchema = z.object({
+  run_id: z.string().uuid(),
+  event_type: z.literal("position_update"),
+  payload: PaperEnginePositionSchema.nullable(),
+});
+
 /* ================= ERROR EVENT ================= */
 
 export const PaperErrorEventSchema = z.object({
@@ -270,6 +320,40 @@ export const PaperPortfolioUpdateEventSchema = z.object({
   payload: PortfolioStateSchema,
 });
 
+/* ================= ORDER EVENTS ================= */
+
+export const PaperOrderCreatedEventSchema = z.object({
+  run_id: z.string().uuid(),
+  event_type: z.literal("order_created"),
+  payload: PaperOrderSchema.extend({
+    reason: z.string().optional(),
+  }),
+});
+
+export const PaperOrderFilledEventSchema = z.object({
+  run_id: z.string().uuid(),
+  event_type: z.literal("order_filled"),
+  payload: PaperOrderSchema.extend({
+    reason: z.string().optional(),
+  }),
+});
+
+export const PaperOrderCancelledEventSchema = z.object({
+  run_id: z.string().uuid(),
+  event_type: z.literal("order_cancelled"),
+  payload: PaperOrderSchema.extend({
+    reason: z.string().optional(),
+  }),
+});
+
+/* ================= TRADE FILL EVENT ================= */
+
+export const PaperTradeFillEventSchema = z.object({
+  run_id: z.string().uuid(),
+  event_type: z.literal("trade_fill"),
+  payload: PaperTradeEventSchema.shape.payload,
+});
+
 /* ================= DISCRIMINATED UNION ================= */
 
 export const PaperEngineEventSchema = z.discriminatedUnion(
@@ -279,9 +363,14 @@ export const PaperEngineEventSchema = z.discriminatedUnion(
     PaperBalanceEventSchema,
     PaperStatusEventSchema,
     PaperPositionEventSchema,
+    PaperPositionUpdateEventSchema,
     PaperErrorEventSchema,
     PaperCandleEventSchema,
     PaperPortfolioUpdateEventSchema,
+    PaperOrderCreatedEventSchema,
+    PaperOrderFilledEventSchema,
+    PaperOrderCancelledEventSchema,
+    PaperTradeFillEventSchema,
   ]
 );
 

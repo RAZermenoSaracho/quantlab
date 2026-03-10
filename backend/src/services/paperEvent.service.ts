@@ -62,34 +62,52 @@ export function getLatestPortfolioState(
 export async function handlePaperEvent(
   event: PaperEngineEvent
 ) {
-  switch (event.event_type) {
+  const eventType = String((event as { event_type: string }).event_type);
+  const runId = String((event as { run_id: string }).run_id);
+  const payload = (event as { payload: unknown }).payload;
+
+  switch (eventType) {
     case "trade":
-      return handleTradeEvent(event.run_id, event.payload);
+      return handleTradeEvent(runId, payload as PaperTradePayload);
 
     case "balance":
-      return handleBalanceEvent(event.run_id, event.payload);
+      return handleBalanceEvent(runId, payload as PaperBalancePayload);
 
     case "position":
-      return handlePositionEvent(event.run_id, event.payload);
+      return handlePositionEvent(runId, payload as PaperPositionPayload);
+
+    case "position_update":
+      if (payload) {
+        return handlePositionEvent(runId, payload as PaperPositionPayload);
+      }
+      return handlePositionClearEvent(runId);
 
     case "status":
-      return handleStatusEvent(event.run_id, event.payload);
+      return handleStatusEvent(runId, payload as PaperStatusPayload);
 
     case "error":
-      return handleErrorEvent(event.run_id, event.payload);
+      return handleErrorEvent(runId, payload as { message: string });
 
     case "candle":
       return emitPaperEvent(
-        event.run_id,
+        runId,
         "paper_tick",
         PaperTickSchema.parse({
-          run_id: event.run_id,
-          ...event.payload,
+          run_id: runId,
+          ...(payload as Record<string, unknown>),
         })
       );
 
     case "portfolio_update":
-      return handlePortfolioUpdateEvent(event.run_id, event.payload);
+      return handlePortfolioUpdateEvent(runId, payload as PortfolioState);
+
+    case "trade_fill":
+      return handleTradeEvent(runId, payload as PaperTradePayload);
+
+    case "order_created":
+    case "order_filled":
+    case "order_cancelled":
+      return handleOrderEvent(runId, eventType, payload);
   }
 }
 
@@ -374,6 +392,17 @@ async function handlePositionEvent(
   );
 }
 
+async function handlePositionClearEvent(runId: string) {
+  await emitPaperEvent(
+    runId,
+    "paper_run_update",
+    PaperRunUpdateEventSchema.parse({
+      run_id: runId,
+      position: null,
+    })
+  );
+}
+
 /* =====================================================
    STATUS
 ===================================================== */
@@ -505,4 +534,42 @@ async function handlePortfolioUpdateEvent(
   } finally {
     client.release();
   }
+}
+
+async function handleOrderEvent(
+  runId: string,
+  eventType: string,
+  payload: unknown
+) {
+  const parsedPayload = payload as {
+    id: string;
+    symbol: string;
+    side: "BUY" | "SELL";
+    order_type: "market" | "limit" | "stop" | "stop_limit";
+    price?: number | null;
+    stop_price?: number | null;
+    quantity?: number | null;
+    status: "pending" | "filled" | "cancelled";
+    created_at: number;
+    filled_at?: number | null;
+    reason?: string;
+  };
+
+  await emitPaperEvent(runId, "order_update", {
+    run_id: runId,
+    event_type: eventType,
+    order: {
+      id: parsedPayload.id,
+      symbol: parsedPayload.symbol,
+      side: parsedPayload.side,
+      order_type: parsedPayload.order_type,
+      price: parsedPayload.price ?? null,
+      stop_price: parsedPayload.stop_price ?? null,
+      quantity: parsedPayload.quantity ?? null,
+      status: parsedPayload.status,
+      created_at: parsedPayload.created_at,
+      filled_at: parsedPayload.filled_at ?? null,
+    },
+    reason: parsedPayload.reason,
+  });
 }

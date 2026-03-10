@@ -1,14 +1,18 @@
 import logging
 import os
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
+from uuid import uuid4
 
 import httpx
 
+from .clients import ExchangeFactory
 from .context import build_context
+from .data.candle_aggregator import expand_minute_candles_to_subminute
 from .events import get_strategy_event_system
 from .indicators import compute_indicator_series
-from .market import CandleResampler
+from .market import CandleResampler, timeframe_to_ms
 from .portfolio import PortfolioEngine
 from .spec import load_config_from_env
 from .validator import SAFE_GLOBALS
@@ -29,6 +33,8 @@ _http_client: Optional[httpx.AsyncClient] = None
 _STRATEGY_CRASH_IS_FATAL = os.getenv("PAPER_STRATEGY_FATAL", "0") == "1"
 
 _MAX_ENGINE_TICKS_PER_SECOND = 10.0
+_TARGET_HYDRATION_CANDLES = 500
+_MAX_STORED_CANDLES = 10_000
 
 
 def _get_http_client() -> httpx.AsyncClient:
@@ -107,6 +113,42 @@ def _safe_intent(raw_signal: Any) -> str:
     return str(raw_signal).upper().strip()
 
 
+def _normalize_signal(raw_signal: Any) -> str:
+    if raw_signal is None:
+        return "HOLD"
+    s = str(raw_signal).upper().strip()
+    if s in {"LONG", "BUY"}:
+        return "BUY"
+    if s in {"SHORT", "SELL", "CLOSE"}:
+        return "SELL"
+    return "HOLD"
+
+
+def _normalize_order_instruction(raw_signal: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw_signal, dict):
+        return None
+
+    action = str(raw_signal.get("action", "")).upper().strip()
+    if action not in ("BUY", "SELL", "CLOSE", "HOLD"):
+        return None
+    if action == "HOLD":
+        return None
+
+    order_type = str(raw_signal.get("order_type", "market")).lower().strip()
+    if order_type not in ("market", "limit", "stop", "stop_limit"):
+        order_type = "market"
+
+    return {
+        "action": action,
+        "order_type": order_type,
+        "price": raw_signal.get("price"),
+        "stop_price": raw_signal.get("stop_price"),
+        "size_pct": raw_signal.get("size_pct"),
+        "quantity": raw_signal.get("quantity"),
+        "reduce_only": bool(raw_signal.get("reduce_only", action in ("SELL", "CLOSE"))),
+    }
+
+
 # ======================================================
 # PAPER SESSION
 # ======================================================
@@ -131,6 +173,7 @@ class PaperSession:
         self.fee_rate = float(request.fee_rate) if request.fee_rate is not None else 0.001
 
         self.position: Optional[Dict[str, Any]] = None
+        self.pending_orders: List[Dict[str, Any]] = []
         self.trades: List[Dict[str, Any]] = []
         self.candles: List[Dict[str, Any]] = []
         self.realized_pnl = 0.0
@@ -142,6 +185,8 @@ class PaperSession:
         self._event_system = get_strategy_event_system()
         self._resampler: Optional[CandleResampler] = None
         self._last_tick_wall_time = 0.0
+        self.last_exit_ts: Optional[int] = None
+        self.reentry_blocked = False
 
         # Future live trading credentials (kept for compatibility)
         self.api_key = request.api_key
@@ -201,6 +246,9 @@ class PaperSession:
             "realized_pnl": float(self.realized_pnl),
             "unrealized_pnl": float(unrealized),
             "open_positions": 1 if self.position else 0,
+            "pending_orders": len(
+                [o for o in self.pending_orders if str(o.get("status", "pending")) == "pending"]
+            ),
             "trades_count": len(self.trades),
             "equity_curve": list(self.equity_curve),
         }
@@ -293,7 +341,132 @@ class PaperSession:
     # MARKET STREAM INTEGRATION
     # ==================================================
 
+    @staticmethod
+    def _normalize_candle(candle: Dict[str, Any]) -> Dict[str, float]:
+        return {
+            "timestamp": int(candle["timestamp"]),
+            "open": float(candle["open"]),
+            "high": float(candle["high"]),
+            "low": float(candle["low"]),
+            "close": float(candle["close"]),
+            "volume": float(candle.get("volume", 0.0)),
+        }
+
+    def _merge_candles_by_timestamp(
+        self,
+        primary: List[Dict[str, Any]],
+        secondary: List[Dict[str, Any]],
+    ) -> List[Dict[str, float]]:
+        merged: Dict[int, Dict[str, float]] = {}
+
+        for candle in primary:
+            normalized = self._normalize_candle(candle)
+            merged[int(normalized["timestamp"])] = normalized
+
+        for candle in secondary:
+            normalized = self._normalize_candle(candle)
+            merged[int(normalized["timestamp"])] = normalized
+
+        ordered = sorted(merged.values(), key=lambda item: int(item["timestamp"]))
+        return ordered[-_MAX_STORED_CANDLES:]
+
+    async def _fetch_rest_fallback_candles(
+        self,
+        required_candles: int,
+    ) -> List[Dict[str, float]]:
+        missing = max(0, int(required_candles))
+        if missing <= 0:
+            return []
+
+        subminute_timeframes = {"1s", "5s", "15s", "30s"}
+        requested_timeframe = str(self.timeframe).lower()
+        source_timeframe = "1m" if requested_timeframe in subminute_timeframes else self.timeframe
+
+        try:
+            source_ms = timeframe_to_ms(source_timeframe)
+        except Exception:
+            source_ms = 60_000
+
+        # Add headroom to avoid bucket-edge truncation from exchange API.
+        source_needed = max(1, int(missing) + 5)
+        if requested_timeframe in subminute_timeframes:
+            target_ms = timeframe_to_ms(requested_timeframe)
+            expand_ratio = max(1, int(source_ms // target_ms))
+            source_needed = max(1, int((missing + 5 + expand_ratio - 1) // expand_ratio) + 2)
+
+        end_dt = datetime.now(timezone.utc)
+        start_dt = end_dt - timedelta(milliseconds=source_ms * source_needed)
+
+        try:
+            client = ExchangeFactory.create(exchange=self.exchange)
+            raw_rows = client.fetch_candles(
+                self.symbol,
+                source_timeframe,
+                start_dt.isoformat(),
+                end_dt.isoformat(),
+            )
+        except Exception:
+            logger.exception(
+                "[PaperTrading][%s] Failed REST fallback history fetch exchange=%s symbol=%s timeframe=%s",
+                self.run_id,
+                self.exchange,
+                self.symbol,
+                self.timeframe,
+            )
+            return []
+
+        normalized_rows: List[Dict[str, float]] = []
+        for row in raw_rows:
+            try:
+                normalized_rows.append(
+                    {
+                        "timestamp": int(row[0]),
+                        "open": float(row[1]),
+                        "high": float(row[2]),
+                        "low": float(row[3]),
+                        "close": float(row[4]),
+                        "volume": float(row[5]),
+                    }
+                )
+            except Exception:
+                continue
+
+        if requested_timeframe in subminute_timeframes:
+            try:
+                normalized_rows = expand_minute_candles_to_subminute(
+                    normalized_rows,
+                    requested_timeframe,
+                )
+            except Exception:
+                logger.exception(
+                    "[PaperTrading][%s] Failed expanding REST minute candles to %s",
+                    self.run_id,
+                    requested_timeframe,
+                )
+                return []
+
+        return normalized_rows[-_MAX_STORED_CANDLES:]
+
+    async def _emit_hydrated_candle_history(self, limit: int = _TARGET_HYDRATION_CANDLES) -> None:
+        if not self.candles:
+            return
+
+        for candle in self.candles[-max(1, int(limit)):]:
+            await emit_event(
+                self.run_id,
+                "candle",
+                {
+                    "timestamp": int(candle["timestamp"]),
+                    "open": float(candle["open"]),
+                    "high": float(candle["high"]),
+                    "low": float(candle["low"]),
+                    "close": float(candle["close"]),
+                    "volume": float(candle["volume"]),
+                },
+            )
+
     async def _hydrate_history(self) -> None:
+        raw_history: List[Dict[str, Any]] = []
         try:
             raw_history = await self._event_system.get_history(
                 exchange=self.exchange,
@@ -302,21 +475,34 @@ class PaperSession:
             )
         except Exception:
             logger.exception("[PaperTrading][%s] Failed loading shared market history.", self.run_id)
-            return
+            raw_history = []
 
-        if not raw_history:
+        merged_history = self._merge_candles_by_timestamp(raw_history, [])
+
+        if len(merged_history) < _TARGET_HYDRATION_CANDLES:
+            fallback_history = await self._fetch_rest_fallback_candles(
+                _TARGET_HYDRATION_CANDLES - len(merged_history)
+            )
+            merged_history = self._merge_candles_by_timestamp(
+                fallback_history,
+                merged_history,
+            )
+
+        if not merged_history:
             return
 
         if self.timeframe == "1s":
-            self.candles = list(raw_history)
+            self.candles = merged_history[-_MAX_STORED_CANDLES:]
+            await self._emit_hydrated_candle_history()
             return
 
         try:
             history_resampler = CandleResampler(self.timeframe)
             seeded: List[Dict[str, Any]] = []
-            for candle in raw_history:
+            for candle in merged_history:
                 seeded.extend(history_resampler.add_candle(candle))
-            self.candles = seeded[-10_000:]
+            self.candles = seeded[-_MAX_STORED_CANDLES:]
+            await self._emit_hydrated_candle_history()
         except Exception:
             logger.exception("[PaperTrading][%s] Failed resampling shared history.", self.run_id)
 
@@ -362,6 +548,189 @@ class PaperSession:
         self.candles.append(candle)
         await self._process_candle(candle)
 
+    def _serialize_open_orders(self) -> List[Dict[str, Any]]:
+        serialized: List[Dict[str, Any]] = []
+        for order in self.pending_orders:
+            if str(order.get("status", "pending")) != "pending":
+                continue
+            serialized.append(
+                {
+                    "id": str(order["id"]),
+                    "symbol": self.symbol,
+                    "side": str(order["side"]),
+                    "order_type": str(order["order_type"]),
+                    "price": order.get("price"),
+                    "stop_price": order.get("stop_price"),
+                    "quantity": order.get("quantity"),
+                    "status": str(order.get("status", "pending")),
+                    "created_at": int(order.get("created_at", 0)),
+                    "filled_at": order.get("filled_at"),
+                }
+            )
+        return serialized
+
+    async def _emit_order_event(self, event_type: str, order: Dict[str, Any], reason: Optional[str] = None) -> None:
+        payload: Dict[str, Any] = {
+            "id": str(order["id"]),
+            "symbol": self.symbol,
+            "side": str(order["side"]),
+            "order_type": str(order["order_type"]),
+            "price": float(order["price"]) if order.get("price") is not None else None,
+            "stop_price": float(order["stop_price"]) if order.get("stop_price") is not None else None,
+            "quantity": float(order["quantity"]) if order.get("quantity") is not None else None,
+            "status": str(order.get("status", "pending")),
+            "created_at": int(order.get("created_at", 0)),
+            "filled_at": int(order["filled_at"]) if order.get("filled_at") is not None else None,
+        }
+        if reason:
+            payload["reason"] = reason
+        await emit_event(self.run_id, event_type, payload)
+
+    async def _create_order(
+        self,
+        *,
+        action: str,
+        order_type: str,
+        timestamp: int,
+        price: Optional[float] = None,
+        stop_price: Optional[float] = None,
+        size_pct: Optional[float] = None,
+        size_qty: Optional[float] = None,
+        reduce_only: bool = False,
+    ) -> None:
+        side = "SELL" if action in {"SELL", "CLOSE"} else "BUY"
+        order: Dict[str, Any] = {
+            "id": str(uuid4()),
+            "symbol": self.symbol,
+            "side": side,
+            "order_type": order_type,
+            "price": price,
+            "stop_price": stop_price,
+            "quantity": size_qty,
+            "size_pct": size_pct,
+            "reduce_only": bool(reduce_only),
+            "status": "pending",
+            "created_at": int(timestamp),
+            "filled_at": None,
+            "triggered": False,
+        }
+
+        needs_price = order_type in {"limit", "stop_limit"}
+        needs_stop = order_type in {"stop", "stop_limit"}
+        if needs_price and order.get("price") is None:
+            order["status"] = "cancelled"
+            await self._emit_order_event("order_cancelled", order, "missing_price")
+            return
+        if needs_stop and order.get("stop_price") is None:
+            order["status"] = "cancelled"
+            await self._emit_order_event("order_cancelled", order, "missing_stop_price")
+            return
+
+        self.pending_orders.append(order)
+        await self._emit_order_event("order_created", order)
+
+    def _cooldown_ok(self, timestamp: int) -> bool:
+        cooldown_seconds = int(getattr(self.config, "cooldown_seconds", 0))
+        if cooldown_seconds <= 0:
+            return True
+        if self.last_exit_ts is None:
+            return True
+        return (timestamp - self.last_exit_ts) >= cooldown_seconds * 1000
+
+    async def _evaluate_pending_orders(self, candle: Dict[str, Any], timestamp: int, market_price: float) -> None:
+        low = float(candle["low"])
+        high = float(candle["high"])
+        still_pending: List[Dict[str, Any]] = []
+
+        for order in self.pending_orders:
+            if str(order.get("status", "pending")) != "pending":
+                continue
+
+            side = str(order.get("side", "BUY")).upper()
+            order_type = str(order.get("order_type", "market")).lower()
+            limit_price = float(order["price"]) if order.get("price") is not None else None
+            stop_price = float(order["stop_price"]) if order.get("stop_price") is not None else None
+
+            fill_now = False
+            fill_price = float(market_price)
+
+            if order_type == "market":
+                fill_now = True
+            elif order_type == "limit":
+                if side == "BUY" and limit_price is not None and low <= limit_price:
+                    fill_now = True
+                    fill_price = float(limit_price)
+                elif side == "SELL" and limit_price is not None and high >= limit_price:
+                    fill_now = True
+                    fill_price = float(limit_price)
+            elif order_type == "stop":
+                if side == "BUY" and stop_price is not None and high >= stop_price:
+                    fill_now = True
+                elif side == "SELL" and stop_price is not None and low <= stop_price:
+                    fill_now = True
+            elif order_type == "stop_limit":
+                triggered = bool(order.get("triggered", False))
+                if not triggered:
+                    if side == "BUY" and stop_price is not None and high >= stop_price:
+                        order["triggered"] = True
+                        triggered = True
+                    elif side == "SELL" and stop_price is not None and low <= stop_price:
+                        order["triggered"] = True
+                        triggered = True
+                if triggered and limit_price is not None:
+                    if side == "BUY" and low <= limit_price:
+                        fill_now = True
+                        fill_price = float(limit_price)
+                    elif side == "SELL" and high >= limit_price:
+                        fill_now = True
+                        fill_price = float(limit_price)
+
+            if not fill_now:
+                still_pending.append(order)
+                continue
+
+            reduce_only = bool(order.get("reduce_only", False))
+            size_pct = float(order["size_pct"]) if order.get("size_pct") is not None else None
+            size_qty = float(order["quantity"]) if order.get("quantity") is not None else None
+
+            executed = False
+            if side == "BUY":
+                if reduce_only:
+                    order["status"] = "cancelled"
+                    await self._emit_order_event("order_cancelled", order, "reduce_only_buy_not_supported")
+                elif self._cooldown_ok(timestamp) and (
+                    bool(getattr(self.config, "allow_reentry", True)) or not self.reentry_blocked
+                ):
+                    executed = await self._open_position(
+                        "LONG",
+                        fill_price,
+                        timestamp,
+                        size_pct=size_pct,
+                        size_qty=size_qty,
+                    )
+                    if not executed:
+                        order["status"] = "cancelled"
+                        await self._emit_order_event("order_cancelled", order, "open_rejected")
+                else:
+                    still_pending.append(order)
+                    continue
+            else:
+                if self.position is None:
+                    order["status"] = "cancelled"
+                    await self._emit_order_event("order_cancelled", order, "no_position_to_close")
+                else:
+                    executed = await self._close_position(fill_price, timestamp)
+                    if not executed:
+                        order["status"] = "cancelled"
+                        await self._emit_order_event("order_cancelled", order, "close_rejected")
+
+            if executed:
+                order["status"] = "filled"
+                order["filled_at"] = int(timestamp)
+                await self._emit_order_event("order_filled", order)
+
+        self.pending_orders = still_pending
+
     # ==================================================
     # CORE LOGIC
     # ==================================================
@@ -396,18 +765,49 @@ class PaperSession:
         # Recompute indicators based on your existing design
         indicator_series = compute_indicator_series(self.candles, self.config)
 
-        # Equity (what strategy should see as "balance" per your paper design)
         current_equity = self.quote_balance + (max(0.0, self.base_balance) * price)
+        peak_equity = max(
+            (float(point.get("equity", 0.0)) for point in self.equity_curve),
+            default=float(current_equity),
+        )
+        drawdown_pct = (
+            ((peak_equity - current_equity) / peak_equity) * 100.0
+            if peak_equity > 0
+            else 0.0
+        )
+        position_metrics = self.portfolio.position_metrics(price)
+        exposure_pct = (
+            (float(position_metrics.get("market_value", 0.0)) / max(float(current_equity), 1e-12)) * 100.0
+            if position_metrics is not None and current_equity > 0
+            else 0.0
+        )
 
         ctx = build_context(
             index=len(self.candles) - 1,
             candles=self.candles,
             indicator_series=indicator_series,
-            position=self.portfolio.position_metrics(price),
-            balance=current_equity,
+            position=position_metrics,
+            balance=float(self.quote_balance),
             initial_balance=self.initial_balance,
             timeframe=self.timeframe,
             history_window=100,
+            exchange=self.exchange,
+            symbol=self.symbol,
+            fee_rate=float(self.fee_rate),
+            slippage_bps=float(getattr(self.config, "slippage_bps", 0.0)),
+            realized_pnl=float(self.realized_pnl),
+            unrealized_pnl=float(self._compute_unrealized_pnl(price)),
+            equity=float(current_equity),
+            cash_balance=float(self.quote_balance),
+            exposure_pct=float(exposure_pct),
+            open_positions=1 if self.position else 0,
+            current_drawdown_pct=float(drawdown_pct),
+            execution_model=str(getattr(self.config, "execution_model", "next_open")),
+            stop_fill_model=str(getattr(self.config, "stop_fill_model", "stop_price")),
+            leverage=float(getattr(self.config, "leverage", 1.0)),
+            margin_mode=str(getattr(self.config, "margin_mode", "isolated")),
+            params=dict(getattr(self.config, "params", {}) or {}),
+            open_orders=self._serialize_open_orders(),
         )
 
         # Backward compat adapter (prevents KeyError "close" in strategies)
@@ -418,6 +818,7 @@ class PaperSession:
         # ==================================================
         try:
             raw_signal = self.generate_signal(ctx)
+            structured_order = _normalize_order_instruction(raw_signal)
             intent = _safe_intent(raw_signal)
         except (KeyError, ZeroDivisionError, ValueError) as e:
             # Mirror validator philosophy: treat as HOLD and log
@@ -432,21 +833,61 @@ class PaperSession:
             if _STRATEGY_CRASH_IS_FATAL:
                 raise
             intent = "HOLD"
+            structured_order = None
         except Exception as e:
             logger.exception("[PaperTrading][%s] Strategy crashed (unexpected).", self.run_id)
             await emit_event(self.run_id, "error", {"message": f"strategy_crash:{type(e).__name__}:{str(e)}"})
             if _STRATEGY_CRASH_IS_FATAL:
                 raise
             intent = "HOLD"
+            structured_order = None
 
         # ==================================================
         # EXECUTE INTENT
         # ==================================================
-        if intent in ("CLOSE", "SELL", "SHORT") and self.position:
-            await self._close_position(price, timestamp)
+        if intent == "HOLD" and not bool(getattr(self.config, "allow_reentry", True)):
+            self.reentry_blocked = False
 
-        elif intent in ("BUY", "LONG") and not self.position:
-            await self._open_position("LONG", price, timestamp)
+        if structured_order is not None:
+            await self._create_order(
+                action=str(structured_order["action"]),
+                order_type=str(structured_order["order_type"]),
+                timestamp=timestamp,
+                price=float(structured_order["price"]) if structured_order.get("price") is not None else None,
+                stop_price=(
+                    float(structured_order["stop_price"])
+                    if structured_order.get("stop_price") is not None
+                    else None
+                ),
+                size_pct=(
+                    float(structured_order["size_pct"])
+                    if structured_order.get("size_pct") is not None
+                    else None
+                ),
+                size_qty=(
+                    float(structured_order["quantity"])
+                    if structured_order.get("quantity") is not None
+                    else None
+                ),
+                reduce_only=bool(structured_order.get("reduce_only", False)),
+            )
+        else:
+            normalized_intent = _normalize_signal(intent)
+            if normalized_intent == "BUY":
+                await self._create_order(
+                    action="BUY",
+                    order_type="market",
+                    timestamp=timestamp,
+                )
+            elif normalized_intent == "SELL":
+                await self._create_order(
+                    action="SELL",
+                    order_type="market",
+                    timestamp=timestamp,
+                    reduce_only=True,
+                )
+
+        await self._evaluate_pending_orders(candle, timestamp, price)
 
         # ==================================================
         # EMIT BALANCE SNAPSHOT
@@ -488,14 +929,28 @@ class PaperSession:
     # TRADE LOGIC
     # ==================================================
 
-    async def _open_position(self, side: str, price: float, timestamp: int) -> None:
+    async def _open_position(
+        self,
+        side: str,
+        price: float,
+        timestamp: int,
+        *,
+        size_pct: Optional[float] = None,
+        size_qty: Optional[float] = None,
+    ) -> bool:
         if self.quote_balance <= 0:
-            return
+            return False
 
         batch_size = float(getattr(self.config, "batch_size", 1.0))
         batch_type = getattr(self.config, "batch_size_type", "fixed")
+        max_open_positions = int(getattr(self.config, "max_open_positions", 1))
+        max_account_exposure_pct = float(getattr(self.config, "max_account_exposure_pct", 100.0))
 
-        if batch_type == "fixed":
+        if size_qty is not None:
+            capital_to_use = float(size_qty) * float(price)
+        elif size_pct is not None:
+            capital_to_use = self.quote_balance * (float(size_pct) / 100.0)
+        elif batch_type == "fixed":
             capital_to_use = min(batch_size, self.quote_balance)
         elif batch_type == "percent_balance":
             capital_to_use = self.quote_balance * (batch_size / 100.0)
@@ -503,10 +958,25 @@ class PaperSession:
             capital_to_use = self.quote_balance
 
         if capital_to_use <= 0:
-            return
+            return False
 
         if side != "LONG":
-            return
+            return False
+
+        if max_open_positions <= 0:
+            return False
+
+        current_equity = self.quote_balance + (max(0.0, self.base_balance) * price)
+        if current_equity <= 0:
+            return False
+
+        current_notional = max(0.0, self.base_balance) * price
+        requested_notional = float(capital_to_use)
+        projected_exposure_pct = (
+            ((current_notional + requested_notional) / max(current_equity, 1e-12)) * 100.0
+        )
+        if projected_exposure_pct > max_account_exposure_pct:
+            return False
 
         slippage_bps = float(getattr(self.config, "slippage_bps", 0.0))
         opened = self.portfolio.apply_trade_open(
@@ -518,11 +988,12 @@ class PaperSession:
             slippage_bps=slippage_bps,
         )
         if opened is None:
-            return
+            return False
 
+        fill = opened.get("fill", {})
         self._sync_from_portfolio()
-        effective_price = float(opened["entry_price"])
-        position_qty = float(opened["quantity"])
+        effective_price = float(fill.get("entry_price", price))
+        position_qty = float(fill.get("quantity", 0.0))
 
         logger.info(
             "[PaperTrading][%s] OPEN %s qty=%.6f entry=%.4f used=%.2f quote=%.2f base=%.6f",
@@ -536,39 +1007,47 @@ class PaperSession:
         )
 
         await emit_event(self.run_id, "position", self.position)
+        await emit_event(self.run_id, "position_update", self.position)
 
-        # Emit an "open trade" snapshot immediately so UI can show ongoing trade if desired
+        # Emit incremental fill event (separate from aggregated position snapshot).
+        fill_payload = {
+            "side": side,
+            "entry_price": float(effective_price),
+            "exit_price": None,
+            "quantity": float(position_qty),
+            "entry_notional": float(fill.get("entry_notional", 0.0)),
+            "exit_notional": None,
+            "entry_fee": float(fill.get("entry_fee", 0.0)),
+            "exit_fee": None,
+            "total_fee": float(fill.get("entry_fee", 0.0)),
+            "gross_pnl": 0.0,
+            "net_pnl": 0.0,
+            "fee_rate_used": float(fill.get("fee_rate_used", self.fee_rate)),
+            "pnl": 0.0,
+            "opened_at": int(timestamp),
+            "closed_at": None,
+        }
+        await emit_event(
+            self.run_id,
+            "trade_fill",
+            fill_payload,
+        )
         await emit_event(
             self.run_id,
             "trade",
-            {
-                "side": side,
-                "entry_price": float(effective_price),
-                "exit_price": None,
-                "quantity": float(position_qty),
-                "entry_notional": float(opened.get("entry_notional", 0.0)),
-                "exit_notional": None,
-                "entry_fee": float(opened.get("entry_fee", 0.0)),
-                "exit_fee": None,
-                "total_fee": float(opened.get("entry_fee", 0.0)),
-                "gross_pnl": 0.0,
-                "net_pnl": 0.0,
-                "fee_rate_used": float(opened.get("fee_rate_used", self.fee_rate)),
-                "pnl": 0.0,
-                "opened_at": int(timestamp),
-                "closed_at": None,
-            },
+            fill_payload,
         )
         self._append_equity_point(timestamp)
         await self._emit_portfolio_update()
+        return True
 
-    async def _close_position(self, price: float, timestamp: int) -> None:
+    async def _close_position(self, price: float, timestamp: int) -> bool:
         if not self.position:
-            return
+            return False
 
         side = str(self.position["side"]).upper()
         if side != "LONG":
-            return
+            return False
 
         slippage_bps = float(getattr(self.config, "slippage_bps", 0.0))
         trade = self.portfolio.apply_trade_close(
@@ -578,7 +1057,7 @@ class PaperSession:
             slippage_bps=slippage_bps,
         )
         if trade is None:
-            return
+            return False
 
         self._sync_from_portfolio()
         quantity = float(trade["quantity"])
@@ -588,6 +1067,9 @@ class PaperSession:
 
         self.trades.append(trade)
         self.position = None
+        self.last_exit_ts = int(timestamp)
+        if not bool(getattr(self.config, "allow_reentry", True)):
+            self.reentry_blocked = True
 
         logger.info(
             "[PaperTrading][%s] CLOSE %s qty=%.6f exit=%.4f pnl=%.4f quote=%.2f",
@@ -599,9 +1081,12 @@ class PaperSession:
             self.quote_balance,
         )
 
+        await emit_event(self.run_id, "trade_fill", trade)
         await emit_event(self.run_id, "trade", trade)
+        await emit_event(self.run_id, "position_update", None)
         self._append_equity_point(timestamp)
         await self._emit_portfolio_update()
+        return True
 
 
 # ======================================================

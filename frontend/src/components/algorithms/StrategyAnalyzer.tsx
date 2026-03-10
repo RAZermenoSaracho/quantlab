@@ -49,7 +49,7 @@ export default function StrategyAnalyzer({ code }: Props) {
           </h4>
 
           <div className="flex justify-between">
-            <span>generate_signal(candle)</span>
+            <span>generate_signal(ctx)</span>
             <Status condition={hasGenerateSignal} />
           </div>
 

@@ -16,6 +16,7 @@ export const PortfolioStateSchema = z.object({
   realized_pnl: z.number(),
   unrealized_pnl: z.number(),
   open_positions: z.number().int().nonnegative(),
+  pending_orders: z.number().int().nonnegative().optional(),
   trades_count: z.number().int().nonnegative(),
   equity_curve: z.array(EquityPointSchema),
 });

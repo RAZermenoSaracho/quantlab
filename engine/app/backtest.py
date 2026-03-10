@@ -1,4 +1,5 @@
 from typing import Optional, Tuple, Dict, Any, Callable
+from uuid import uuid4
 
 from .validator import SAFE_GLOBALS, ALLOWED_RETURN_VALUES
 from .metrics import calculate_metrics
@@ -93,11 +94,11 @@ def _position_with_fee_metrics(
         return None
 
     side = str(position.get("side", "LONG"))
-    entry = float(position.get("entry_price", 0.0))
+    entry = float(position.get("average_entry_price", position.get("entry_price", 0.0)))
     qty = float(position.get("quantity", 0.0))
     fee_rate_used = float(position.get("fee_rate_used", 0.0))
     entry_notional = float(position.get("entry_notional", entry * qty))
-    entry_fee = float(position.get("entry_fee", entry_notional * fee_rate_used))
+    entry_fee = float(position.get("fees_paid", position.get("entry_fee", entry_notional * fee_rate_used)))
 
     gross_pnl = _unrealized_pnl(mark_price, entry, qty, side)
     exit_notional = float(mark_price * qty)
@@ -116,6 +117,12 @@ def _position_with_fee_metrics(
 
     return {
         **position,
+        "average_entry_price": float(entry),
+        "market_value": float(mark_price * qty),
+        "realized_pnl": float(position.get("realized_pnl", 0.0)),
+        "unrealized_pnl": float(net_pnl),
+        "fees_paid": float(entry_fee),
+        "entries_count": int(position.get("entries_count", 1)),
         "entry_notional": entry_notional,
         "entry_fee": entry_fee,
         "fee_rate_used": fee_rate_used,
@@ -139,6 +146,8 @@ def _open_position(
     timestamp: int,
     fee_rate: float,
     config,
+    size_pct: Optional[float] = None,
+    size_qty: Optional[float] = None,
 ) -> Optional[dict]:
     """
     Opens a position with:
@@ -162,7 +171,13 @@ def _open_position(
 
     effective_balance = float(balance) * max(1.0, leverage)
 
-    if getattr(config, "batch_size_type", "fixed") == "fixed":
+    if size_qty is not None:
+        qty = float(size_qty)
+    elif size_pct is not None:
+        pct = float(size_pct) / 100.0
+        capital_to_use = effective_balance * pct
+        qty = capital_to_use / fill_price if fill_price > 0 else 0.0
+    elif getattr(config, "batch_size_type", "fixed") == "fixed":
         qty = float(getattr(config, "batch_size", 0.0))
     else:
         pct = float(getattr(config, "batch_size", 0.0)) / 100.0
@@ -184,15 +199,82 @@ def _open_position(
     return {
         "side": desired_side,          # LONG | SHORT
         "entry_price": float(fill_price),
+        "average_entry_price": float(fill_price),
         "quantity": float(qty),
         "entry_notional": float(notional),
         "entry_fee": float(entry_fee),
+        "fees_paid": float(entry_fee),
         "fee_rate_used": float(fee_rate_used),
+        "entries_count": 1,
+        "realized_pnl": 0.0,
         "opened_at": int(timestamp),
         # trailing tracking (intrabar)
         "max_price": float(fill_price),  # used for LONG
         "min_price": float(fill_price),  # used for SHORT
     }
+
+
+def _add_to_position(
+    position: dict,
+    balance: float,
+    max_allowed_capital: float,
+    price: float,
+    timestamp: int,
+    fee_rate: float,
+    config,
+    size_pct: Optional[float] = None,
+    size_qty: Optional[float] = None,
+) -> Optional[dict]:
+    side = str(position.get("side", "LONG"))
+    if side not in ("LONG", "SHORT"):
+        return None
+
+    slippage_bps = float(getattr(config, "slippage_bps", 0.0))
+    leverage = float(getattr(config, "leverage", 1.0))
+    entry_order_side = "BUY" if side == "LONG" else "SELL"
+    fill_price = _apply_slippage(float(price), slippage_bps, side=entry_order_side)
+    if fill_price <= 0:
+        return None
+
+    effective_balance = float(balance) * max(1.0, leverage)
+    if size_qty is not None:
+        qty = float(size_qty)
+    elif size_pct is not None:
+        pct = float(size_pct) / 100.0
+        qty = (effective_balance * pct) / fill_price if fill_price > 0 else 0.0
+    elif getattr(config, "batch_size_type", "fixed") == "fixed":
+        qty = float(getattr(config, "batch_size", 0.0))
+    else:
+        pct = float(getattr(config, "batch_size", 0.0)) / 100.0
+        qty = (effective_balance * pct) / fill_price if fill_price > 0 else 0.0
+    if qty <= 0:
+        return None
+
+    additional_notional = qty * fill_price
+    current_notional = float(position.get("entry_notional", 0.0))
+    if (current_notional + additional_notional) > float(max_allowed_capital):
+        return None
+
+    fee_rate_used = float(position.get("fee_rate_used", fee_rate))
+    additional_fee = additional_notional * fee_rate_used
+    current_qty = float(position.get("quantity", 0.0))
+    new_qty = current_qty + qty
+    if new_qty <= 0:
+        return None
+
+    current_avg = float(position.get("average_entry_price", position.get("entry_price", fill_price)))
+    new_avg = ((current_avg * current_qty) + (fill_price * qty)) / new_qty
+
+    position["quantity"] = float(new_qty)
+    position["entry_notional"] = float(current_notional + additional_notional)
+    position["entry_fee"] = float(position.get("entry_fee", 0.0) + additional_fee)
+    position["fees_paid"] = float(position.get("fees_paid", position.get("entry_fee", 0.0)) + additional_fee)
+    position["average_entry_price"] = float(new_avg)
+    position["entry_price"] = float(new_avg)
+    position["entries_count"] = int(position.get("entries_count", 1)) + 1
+    position["max_price"] = max(float(position.get("max_price", fill_price)), fill_price)
+    position["min_price"] = min(float(position.get("min_price", fill_price)), fill_price)
+    return position
 
 
 def _close_position(
@@ -209,7 +291,7 @@ def _close_position(
     Returns (trade_dict, net_pnl)
     """
     side = position["side"]  # LONG | SHORT
-    entry = float(position["entry_price"])
+    entry = float(position.get("average_entry_price", position["entry_price"]))
     qty = float(position["quantity"])
 
     slippage_bps = float(getattr(config, "slippage_bps", 0.0))
@@ -225,7 +307,7 @@ def _close_position(
     entry_notional = float(position.get("entry_notional", entry * qty))
     exit_notional = fill_exit * qty
     fee_rate_used = float(position.get("fee_rate_used", fee_rate))
-    entry_fee = float(position.get("entry_fee", entry_notional * fee_rate_used))
+    entry_fee = float(position.get("fees_paid", position.get("entry_fee", entry_notional * fee_rate_used)))
     exit_fee = exit_notional * fee_rate_used
     total_fee = entry_fee + exit_fee
     net = gross - total_fee
@@ -233,6 +315,7 @@ def _close_position(
     trade = {
         "side": side,  # LONG | SHORT
         "entry_price": float(entry),
+        "average_entry_price": float(entry),
         "exit_price": float(fill_exit),
         "entry_notional": float(entry_notional),
         "exit_notional": float(exit_notional),
@@ -243,6 +326,7 @@ def _close_position(
         "net_pnl": float(net),
         "pnl": float(net),  # backward-compatible field = net
         "fee_rate_used": float(fee_rate_used),
+        "entries_count": int(position.get("entries_count", 1)),
         "quantity": float(qty),
         "opened_at": int(position["opened_at"]),
         "closed_at": int(timestamp),
@@ -250,6 +334,34 @@ def _close_position(
     }
 
     return trade, float(net)
+
+
+def _normalize_order_instruction(raw_signal: Any) -> Optional[Dict[str, Any]]:
+    if raw_signal is None:
+        return None
+
+    if isinstance(raw_signal, dict):
+        action = str(raw_signal.get("action", "")).upper().strip()
+        if action not in ("BUY", "SELL", "CLOSE", "HOLD"):
+            return None
+        if action == "HOLD":
+            return None
+
+        order_type = str(raw_signal.get("order_type", "market")).lower().strip()
+        if order_type not in ("market", "limit", "stop", "stop_limit"):
+            order_type = "market"
+
+        return {
+            "action": action,
+            "order_type": order_type,
+            "price": raw_signal.get("price"),
+            "stop_price": raw_signal.get("stop_price"),
+            "size_pct": raw_signal.get("size_pct"),
+            "quantity": raw_signal.get("quantity"),
+            "reduce_only": bool(raw_signal.get("reduce_only", action in ("SELL", "CLOSE"))),
+        }
+
+    return None
 
 
 # ============================================================
@@ -457,6 +569,8 @@ def run_backtest(
     position = None
     trades = []
     equity_curve = []
+    pending_orders: list[dict[str, Any]] = []
+    order_events: list[dict[str, Any]] = []
 
     peak_equity = balance
     max_dd = 0.0
@@ -492,6 +606,8 @@ def run_backtest(
 
         candle = candles[i]
         ts = int(candle["timestamp"])
+        low = float(candle["low"])
+        high = float(candle["high"])
 
         # Execution price:
         # - same_close: execute on candle close
@@ -516,6 +632,22 @@ def run_backtest(
             mark_price=float(candle["close"]),
         )
 
+        if position is not None:
+            unreal_for_ctx = _unrealized_pnl(
+                price=float(candle["close"]),
+                entry=float(position.get("average_entry_price", position["entry_price"])),
+                qty=float(position["quantity"]),
+                side=str(position["side"]),
+            )
+        else:
+            unreal_for_ctx = 0.0
+        equity_for_ctx = balance + unreal_for_ctx
+        current_exposure_pct = (
+            (float(position.get("entry_notional", 0.0)) / max(equity_for_ctx, 1e-12)) * 100.0
+            if position is not None and equity_for_ctx > 0
+            else 0.0
+        )
+
         ctx = build_context(
             index=i,
             candles=candles,
@@ -525,6 +657,38 @@ def run_backtest(
             initial_balance=float(initial_balance),
             timeframe=timeframe,
             history_window=history_window,
+            exchange=exchange,
+            symbol=symbol,
+            fee_rate=float(final_fee_rate),
+            slippage_bps=float(getattr(config, "slippage_bps", 0.0)),
+            realized_pnl=float(balance - float(initial_balance)),
+            unrealized_pnl=float(unreal_for_ctx),
+            equity=float(equity_for_ctx),
+            cash_balance=float(balance),
+            exposure_pct=float(current_exposure_pct),
+            open_positions=1 if position else 0,
+            current_drawdown_pct=float(max_dd * 100.0),
+            execution_model=str(getattr(config, "execution_model", "next_open")),
+            stop_fill_model=str(getattr(config, "stop_fill_model", "stop_price")),
+            leverage=float(getattr(config, "leverage", 1.0)),
+            margin_mode=str(getattr(config, "margin_mode", "isolated")),
+            params=dict(getattr(config, "params", {}) or {}),
+            open_orders=[
+                {
+                    "id": str(order["id"]),
+                    "symbol": symbol,
+                    "side": str(order["side"]),
+                    "order_type": str(order["order_type"]),
+                    "price": order.get("price"),
+                    "stop_price": order.get("stop_price"),
+                    "quantity": order.get("quantity"),
+                    "status": str(order.get("status", "pending")),
+                    "created_at": int(order.get("created_at", ts)),
+                    "filled_at": order.get("filled_at"),
+                }
+                for order in pending_orders
+                if str(order.get("status", "pending")) == "pending"
+            ],
         )
 
         # Warmup
@@ -532,14 +696,213 @@ def run_backtest(
             intent = "HOLD"
         else:
             raw_signal = generate_signal(ctx)
+            structured_order = _normalize_order_instruction(raw_signal)
+            if structured_order is not None:
+                action = str(structured_order["action"])
+                order_type = str(structured_order["order_type"])
+                if action in ("BUY", "SELL", "CLOSE"):
+                    order = {
+                        "id": str(uuid4()),
+                        "symbol": symbol,
+                        "side": "SELL" if action == "CLOSE" else action,
+                        "order_type": order_type,
+                        "price": structured_order.get("price"),
+                        "stop_price": structured_order.get("stop_price"),
+                        "quantity": structured_order.get("quantity"),
+                        "size_pct": structured_order.get("size_pct"),
+                        "reduce_only": bool(structured_order.get("reduce_only", False)),
+                        "status": "pending",
+                        "created_at": ts,
+                        "filled_at": None,
+                        "triggered": False,
+                    }
 
-            # Support your validator’s ALLOWED_RETURN_VALUES, but normalize anyway
-            # (So user algos can return BUY/SELL/HOLD or LONG/SHORT/CLOSE/HOLD)
-            # If validator restricts, it should allow at least BUY/SELL/HOLD or LONG/SHORT/CLOSE/HOLD.
-            if raw_signal not in ALLOWED_RETURN_VALUES and str(raw_signal).upper() not in ("LONG", "SHORT", "CLOSE"):
-                raise Exception(f"Invalid signal '{raw_signal}'. Allowed: {ALLOWED_RETURN_VALUES} (+ LONG/SHORT/CLOSE).")
+                    needs_price = order_type in {"limit", "stop_limit"}
+                    needs_stop = order_type in {"stop", "stop_limit"}
+                    if needs_price and order.get("price") is None:
+                        order["status"] = "cancelled"
+                        order_events.append(
+                            {
+                                "event_type": "order_cancelled",
+                                "reason": "missing_price",
+                                **order,
+                            }
+                        )
+                    elif needs_stop and order.get("stop_price") is None:
+                        order["status"] = "cancelled"
+                        order_events.append(
+                            {
+                                "event_type": "order_cancelled",
+                                "reason": "missing_stop_price",
+                                **order,
+                            }
+                        )
+                    else:
+                        pending_orders.append(order)
+                        order_events.append({"event_type": "order_created", **order})
+                    intent = "HOLD"
+                else:
+                    intent = "HOLD"
+            else:
+                # Support your validator’s ALLOWED_RETURN_VALUES, but normalize anyway
+                # (So user algos can return BUY/SELL/HOLD or LONG/SHORT/CLOSE/HOLD)
+                # If validator restricts, it should allow at least BUY/SELL/HOLD or LONG/SHORT/CLOSE/HOLD.
+                if raw_signal not in ALLOWED_RETURN_VALUES and str(raw_signal).upper() not in ("LONG", "SHORT", "CLOSE"):
+                    raise Exception(f"Invalid signal '{raw_signal}'. Allowed: {ALLOWED_RETURN_VALUES} (+ LONG/SHORT/CLOSE).")
 
-            intent = _normalize_signal(str(raw_signal), direction)
+                intent = _normalize_signal(str(raw_signal), direction)
+
+        # Evaluate pending orders with current candle range.
+        still_pending: list[dict[str, Any]] = []
+        for order in pending_orders:
+            if str(order.get("status", "pending")) != "pending":
+                continue
+
+            side = str(order.get("side", "BUY")).upper()
+            order_type = str(order.get("order_type", "market")).lower()
+            limit_price = float(order["price"]) if order.get("price") is not None else None
+            stop_price = float(order["stop_price"]) if order.get("stop_price") is not None else None
+            fill_now = False
+            fill_price = float(exec_price)
+
+            if order_type == "market":
+                fill_now = True
+            elif order_type == "limit":
+                if side == "BUY" and limit_price is not None and low <= limit_price:
+                    fill_now = True
+                    fill_price = float(limit_price)
+                elif side == "SELL" and limit_price is not None and high >= limit_price:
+                    fill_now = True
+                    fill_price = float(limit_price)
+            elif order_type == "stop":
+                if side == "BUY" and stop_price is not None and high >= stop_price:
+                    fill_now = True
+                    fill_price = float(exec_price)
+                elif side == "SELL" and stop_price is not None and low <= stop_price:
+                    fill_now = True
+                    fill_price = float(exec_price)
+            elif order_type == "stop_limit":
+                triggered = bool(order.get("triggered", False))
+                if not triggered:
+                    if side == "BUY" and stop_price is not None and high >= stop_price:
+                        order["triggered"] = True
+                        triggered = True
+                    elif side == "SELL" and stop_price is not None and low <= stop_price:
+                        order["triggered"] = True
+                        triggered = True
+                if triggered and limit_price is not None:
+                    if side == "BUY" and low <= limit_price:
+                        fill_now = True
+                        fill_price = float(limit_price)
+                    elif side == "SELL" and high >= limit_price:
+                        fill_now = True
+                        fill_price = float(limit_price)
+
+            if not fill_now:
+                still_pending.append(order)
+                continue
+
+            size_pct = float(order["size_pct"]) if order.get("size_pct") is not None else None
+            size_qty = float(order["quantity"]) if order.get("quantity") is not None else None
+            executed = False
+
+            if side == "BUY":
+                dynamic_max_allowed_capital = max(
+                    0.0,
+                    float(balance) * (max_exposure_pct / 100.0),
+                )
+                if position is None:
+                    opened = _open_position(
+                        desired_side="LONG",
+                        balance=balance,
+                        max_allowed_capital=dynamic_max_allowed_capital,
+                        entry_price=float(fill_price),
+                        timestamp=ts,
+                        fee_rate=float(final_fee_rate),
+                        config=config,
+                        size_pct=size_pct,
+                        size_qty=size_qty,
+                    )
+                    if opened is None:
+                        order["status"] = "cancelled"
+                        order_events.append(
+                            {
+                                "event_type": "order_cancelled",
+                                "reason": "open_rejected",
+                                **order,
+                            }
+                        )
+                    else:
+                        position = opened
+                        executed = True
+                elif position["side"] == "LONG":
+                    added = _add_to_position(
+                        position=position,
+                        balance=balance,
+                        max_allowed_capital=dynamic_max_allowed_capital,
+                        price=float(fill_price),
+                        timestamp=ts,
+                        fee_rate=float(final_fee_rate),
+                        config=config,
+                        size_pct=size_pct,
+                        size_qty=size_qty,
+                    )
+                    if added is None:
+                        order["status"] = "cancelled"
+                        order_events.append(
+                            {
+                                "event_type": "order_cancelled",
+                                "reason": "add_rejected",
+                                **order,
+                            }
+                        )
+                    else:
+                        position = added
+                        executed = True
+                else:
+                    order["status"] = "cancelled"
+                    order_events.append(
+                        {
+                            "event_type": "order_cancelled",
+                            "reason": "opposite_position_open",
+                            **order,
+                        }
+                    )
+            else:
+                if position is not None:
+                    trade, pnl = _close_position(
+                        position=position,
+                        exit_price=float(fill_price),
+                        timestamp=ts,
+                        fee_rate=float(final_fee_rate),
+                        config=config,
+                    )
+                    trades.append(trade)
+                    balance += pnl
+                    (wins if pnl > 0 else losses).append(pnl)
+                    position = None
+                    last_exit_ts = ts
+                    if not allow_reentry:
+                        reentry_blocked = True
+                    executed = True
+                else:
+                    order["status"] = "cancelled"
+                    order_events.append(
+                        {
+                            "event_type": "order_cancelled",
+                            "reason": "no_position_to_close",
+                            **order,
+                        }
+                    )
+
+            if executed:
+                order["status"] = "filled"
+                order["filled_at"] = ts
+                order_events.append({"event_type": "order_filled", **order})
+            elif str(order.get("status")) != "cancelled":
+                still_pending.append(order)
+
+        pending_orders = still_pending
 
         # allow_reentry False: a HOLD unlocks the next entry
         if not allow_reentry and intent == "HOLD":
@@ -624,8 +987,25 @@ def run_backtest(
                             config=config,
                         )
                     else:
+                        # scale in if same side
+                        if position["side"] == intent:
+                            dynamic_max_allowed_capital = max(
+                                0.0,
+                                float(balance) * (max_exposure_pct / 100.0),
+                            )
+                            added = _add_to_position(
+                                position=position,
+                                balance=balance,
+                                max_allowed_capital=dynamic_max_allowed_capital,
+                                price=float(exec_price),
+                                timestamp=ts,
+                                fee_rate=float(final_fee_rate),
+                                config=config,
+                            )
+                            if added is not None:
+                                position = added
                         # flip if opposite
-                        if position["side"] != intent:
+                        else:
                             trade, pnl = _close_position(
                                 position=position,
                                 exit_price=float(exec_price),
@@ -768,6 +1148,23 @@ def run_backtest(
 
         "equity_curve": equity_curve,
         "trades": trades,
+        "order_events": order_events,
+        "open_orders_at_end": [
+            {
+                "id": str(order["id"]),
+                "symbol": symbol,
+                "side": str(order["side"]),
+                "order_type": str(order["order_type"]),
+                "price": order.get("price"),
+                "stop_price": order.get("stop_price"),
+                "quantity": order.get("quantity"),
+                "status": str(order.get("status", "pending")),
+                "created_at": int(order.get("created_at", 0)),
+                "filled_at": order.get("filled_at"),
+            }
+            for order in pending_orders
+            if str(order.get("status", "pending")) == "pending"
+        ],
         "analysis": analysis,
 
         "open_positions_at_end": int(open_positions_at_end),

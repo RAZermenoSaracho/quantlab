@@ -33,6 +33,7 @@ CANONICAL_RETURN_VALUES = {"LONG", "SHORT", "CLOSE", "HOLD"}
 ALLOWED_CONFIG_FIELDS: Set[str] = {
     # versioning
     "spec_version",
+    "params",
     # risk
     "max_account_exposure_pct",
     "max_open_positions",
@@ -155,7 +156,19 @@ def _validate_config_ast(tree: ast.AST) -> None:
                 if key.value not in ALLOWED_CONFIG_FIELDS:
                     raise AlgorithmValidationError(f"Invalid CONFIG field: '{key.value}'")
 
-            for value in node.value.values:
+            for key, value in zip(node.value.keys, node.value.values):
+                if isinstance(key, ast.Constant) and key.value == "params":
+                    if not isinstance(value, ast.Dict):
+                        raise AlgorithmValidationError("CONFIG['params'] must be a dictionary literal.")
+                    for param_key, param_value in zip(value.keys, value.values):
+                        if not isinstance(param_key, ast.Constant) or not isinstance(param_key.value, str):
+                            raise AlgorithmValidationError("CONFIG['params'] keys must be string literals.")
+                        if not isinstance(param_value, (ast.Constant, ast.UnaryOp)):
+                            raise AlgorithmValidationError(
+                                "CONFIG['params'] values must be simple literals."
+                            )
+                    continue
+
                 if not isinstance(value, (ast.Constant, ast.UnaryOp)):
                     raise AlgorithmValidationError(
                         "CONFIG values must be simple literals (numbers, strings, booleans, None)."
@@ -429,8 +442,34 @@ def _build_dummy_candles(count: int, timeframe: str = "1h") -> List[dict]:
 def _normalize_signal(raw_signal: Any, direction: str) -> str:
     if raw_signal is None:
         return "HOLD"
+    if isinstance(raw_signal, dict):
+        action = str(raw_signal.get("action", "")).upper().strip()
+        if action not in {"BUY", "SELL", "CLOSE", "HOLD"}:
+            raise AlgorithmValidationError(
+                "Structured order action must be BUY/SELL/CLOSE/HOLD."
+            )
+        order_type = str(raw_signal.get("order_type", "market")).lower().strip()
+        if order_type not in {"market", "limit", "stop", "stop_limit"}:
+            raise AlgorithmValidationError(
+                "Structured order order_type must be market/limit/stop/stop_limit."
+            )
+        for key in ("price", "stop_price", "size_pct", "quantity"):
+            value = raw_signal.get(key)
+            if value is None:
+                continue
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise AlgorithmValidationError(
+                    f"Structured order field '{key}' must be numeric when provided."
+                )
+        if action == "BUY":
+            return "LONG"
+        if action == "SELL":
+            return "CLOSE" if direction == "long_only" else "SHORT"
+        return action
     if not isinstance(raw_signal, str):
-        raise AlgorithmValidationError("generate_signal must return a string signal.")
+        raise AlgorithmValidationError(
+            "generate_signal must return a string signal or a structured order dictionary."
+        )
 
     s = raw_signal.strip().upper()
 
@@ -521,6 +560,23 @@ def validate_algorithm(code: str) -> Dict[str, Any]:
         initial_balance=1000.0,
         timeframe="1h",
         history_window=history_window,
+        exchange="binance",
+        symbol="BTCUSDT",
+        fee_rate=0.001,
+        slippage_bps=float(getattr(cfg, "slippage_bps", 0.0)),
+        realized_pnl=0.0,
+        unrealized_pnl=0.0,
+        equity=1000.0,
+        cash_balance=1000.0,
+        exposure_pct=0.0,
+        open_positions=0,
+        current_drawdown_pct=0.0,
+        execution_model=str(getattr(cfg, "execution_model", "next_open")),
+        stop_fill_model=str(getattr(cfg, "stop_fill_model", "stop_price")),
+        leverage=float(getattr(cfg, "leverage", 1.0)),
+        margin_mode=str(getattr(cfg, "margin_mode", "isolated")),
+        params=dict(getattr(cfg, "params", {}) or {}),
+        open_orders=[],
     )
 
     # 8) Test call (robust)

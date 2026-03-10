@@ -1,10 +1,10 @@
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from typing import Optional, Any, Dict, Literal
 
 
 BatchSizeType = Literal["fixed", "percent_balance"]
 DirectionType = Literal["long_only", "long_short"]
-OrderType = Literal["market", "limit"]
+OrderType = Literal["market", "limit", "stop", "stop_limit"]
 SignalModeType = Literal[
     "mean_reversion",
     "trend_following",
@@ -33,6 +33,7 @@ class AlgorithmConfig:
 
     # Versioning
     spec_version: int = 2
+    params: Dict[str, Any] = field(default_factory=dict)
 
     # ============================
     # Risk Management
@@ -124,6 +125,11 @@ def _is_number(x: Any) -> bool:
 def _is_bool(x: Any) -> bool:
     return isinstance(x, bool)
 
+def _is_safe_param_literal(x: Any) -> bool:
+    if x is None:
+        return True
+    return isinstance(x, (int, float, str, bool)) and not isinstance(x, complex)
+
 
 # =========================================================
 # VALIDATION
@@ -136,6 +142,15 @@ def validate_config(config: AlgorithmConfig) -> None:
     # -----------------------------
     if not isinstance(config.spec_version, int) or config.spec_version <= 0:
         raise ValueError("spec_version must be a positive integer")
+    if not isinstance(config.params, dict):
+        raise ValueError("params must be a dictionary")
+    for key, value in config.params.items():
+        if not isinstance(key, str):
+            raise ValueError("params keys must be strings")
+        if not _is_safe_param_literal(value):
+            raise ValueError(
+                f"params['{key}'] must be a safe literal (number/string/bool/null)"
+            )
 
     if not _is_number(config.max_account_exposure_pct) or not (0 < config.max_account_exposure_pct <= 100):
         raise ValueError("max_account_exposure_pct must be between 0 and 100")
