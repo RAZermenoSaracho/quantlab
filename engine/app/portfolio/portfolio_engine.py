@@ -316,7 +316,7 @@ class PortfolioEngine:
             "average_entry_price": float(entry_price),
             "market_value": float(exit_notional),
             "realized_pnl": float(self.state.realized_pnl),
-            "unrealized_pnl": float(self.state.unrealized_pnl),
+            "unrealized_pnl": float(net_pnl),
             "fees_paid": float(entry_fee),
             "entries_count": int(position.get("entries_count", 1)),
             "gross_pnl": float(gross_pnl),

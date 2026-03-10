@@ -93,6 +93,10 @@ export function connectSocket(): QuantlabSocket {
     emit("portfolio_update", payload);
   });
 
+  socket.on("order_update", (payload) => {
+    emit("order_update", payload);
+  });
+
   const aliasSocket = socket as unknown as UntypedSocket;
   aliasSocket.on("paper_trade", (payload) => {
     if (isTradeExecution(payload)) {

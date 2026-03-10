@@ -244,12 +244,13 @@ async function runBacktestWorker(runId: string, payload: RunBacktestPayload) {
 
       await client.query(
         `INSERT INTO trades
-        (run_id, run_type, side, entry_price, exit_price,
+        (run_id, run_type, symbol, side, entry_price, exit_price,
           quantity, entry_notional, exit_notional, entry_fee, exit_fee, total_fee,
           gross_pnl, net_pnl, fee_rate_used, pnl, pnl_percent, opened_at, closed_at, forced_close)
-        VALUES ($1,'BACKTEST',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+        VALUES ($1,'BACKTEST',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
         [
           runId,
+          String((trade as { symbol?: string }).symbol ?? payload.symbol).toUpperCase(),
           dbSide,
           entryPrice,
           exitPrice,

@@ -253,9 +253,16 @@ class PaperSession:
     # START / STOP
     # ==================================================
 
-    def _compute_unrealized_pnl(self, current_price: Optional[float] = None) -> float:
+    def _compute_unrealized_pnl(
+        self,
+        current_price: Optional[float] = None,
+        symbol: Optional[str] = None,
+    ) -> float:
         if current_price is not None:
-            self.portfolio.apply_price_update(float(current_price))
+            if symbol:
+                self.portfolio.apply_price_update_for_symbol(str(symbol), float(current_price))
+            else:
+                self.portfolio.apply_price_update(float(current_price))
             self._sync_from_portfolio()
         return float(self.portfolio.state.unrealized_pnl)
 
@@ -301,18 +308,11 @@ class PaperSession:
             self.last_price = float(self.portfolio.state.last_price)
 
     def _append_equity_point(self, timestamp: int, equity: Optional[float] = None) -> None:
+        self._sync_from_portfolio()
         point_equity = float(
             equity
             if equity is not None
-            else (
-                float(self.quote_balance)
-                + max(0.0, float(self.base_balance))
-                * (
-                    float(self.last_price)
-                    if self.last_price is not None
-                    else (float(self.position["entry_price"]) if self.position else 0.0)
-                )
-            )
+            else float(self.portfolio.state.total_equity)
         )
         point_ts = int(timestamp)
 
@@ -859,7 +859,7 @@ class PaperSession:
             fee_rate=float(self.fee_rate),
             slippage_bps=float(getattr(self.config, "slippage_bps", 0.0)),
             realized_pnl=float(self.realized_pnl),
-            unrealized_pnl=float(self._compute_unrealized_pnl(price)),
+            unrealized_pnl=float(self._compute_unrealized_pnl(price, symbol=symbol)),
             equity=float(current_equity),
             cash_balance=float(self.quote_balance),
             exposure_pct=float(exposure_pct),

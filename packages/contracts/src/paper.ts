@@ -150,6 +150,16 @@ export type PaperRunDetailResponse = z.infer<
 
 export const PaperRunChartResponseSchema = z.object({
   candles: z.array(CandleSchema),
+  candles_by_symbol: z.record(z.string(), z.array(CandleSchema)).optional(),
+  symbols: z
+    .record(
+      z.string(),
+      z.object({
+        pre_run_candles: z.array(CandleSchema),
+        run_candles: z.array(CandleSchema),
+      })
+    )
+    .optional(),
   trades: z.array(PaperTradeSchema),
 });
 

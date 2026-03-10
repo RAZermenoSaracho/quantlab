@@ -4,6 +4,7 @@ import DetailNavigator from "../../components/navigation/DetailNavigator";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
 import type {
   Candle,
+  OrderUpdateEvent,
   PaperTrade,
   PaperTick,
 } from "@quantlab/contracts";
@@ -24,6 +25,42 @@ import {
   useStopPaperRunMutation,
 } from "../../data/paper";
 
+const MAX_STORED_CANDLES = 10_000;
+
+function normalizeSymbol(value: string | null | undefined) {
+  return String(value ?? "")
+    .trim()
+    .toUpperCase();
+}
+
+function mergeCandles(
+  existing: Candle[] | undefined,
+  incoming: Candle[] | undefined
+): Candle[] {
+  const byTimestamp = new Map<number, Candle>();
+  for (const candle of existing ?? []) {
+    byTimestamp.set(Number(candle.timestamp), candle);
+  }
+  for (const candle of incoming ?? []) {
+    byTimestamp.set(Number(candle.timestamp), candle);
+  }
+  return [...byTimestamp.values()]
+    .sort((left, right) => Number(left.timestamp) - Number(right.timestamp))
+    .slice(-MAX_STORED_CANDLES);
+}
+
+function mergeChartBuckets(
+  preRunCandles: Candle[] | undefined,
+  runCandles: Candle[] | undefined,
+  liveOrCachedCandles: Candle[] | undefined
+): Candle[] {
+  // Precedence: pre-run < run < live/cached
+  return mergeCandles(
+    mergeCandles(preRunCandles, runCandles),
+    liveOrCachedCandles
+  );
+}
+
 export default function PaperRunDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -35,6 +72,7 @@ export default function PaperRunDetail() {
 
   const [candles, setCandles] = useState<Candle[]>([]);
   const [candlesBySymbol, setCandlesBySymbol] = useState<Record<string, Candle[]>>({});
+  const [pendingOrdersBySymbol, setPendingOrdersBySymbol] = useState<Record<string, number>>({});
   const [exchangeStreaming, setExchangeStreaming] = useState(false);
 
   const { data: initialData, error: detailError } = usePaperRun(runId);
@@ -89,50 +127,64 @@ export default function PaperRunDetail() {
   useEffect(() => {
     setCandles([]);
     setCandlesBySymbol({});
+    setPendingOrdersBySymbol({});
     setExchangeStreaming(false);
   }, [runId]);
 
   useEffect(() => {
-    if (!chartData?.candles?.length) {
+    if (!chartData) {
       return;
     }
 
-    const defaultSymbol =
-      initialData?.run?.symbols?.[0] ??
-      initialData?.run?.symbol?.split(",")[0]?.trim()?.toUpperCase() ??
-      run?.symbol?.split(",")[0]?.trim()?.toUpperCase() ??
-      "UNKNOWN";
-
-    setCandles((current) => {
-      if (current.length === 0) {
-        return [...chartData.candles];
-      }
-
-      const byTimestamp = new Map<number, Candle>();
-      for (const candle of chartData.candles) {
-        byTimestamp.set(candle.timestamp, candle);
-      }
-      for (const candle of current) {
-        byTimestamp.set(candle.timestamp, candle);
-      }
-      return [...byTimestamp.values()].sort((left, right) => left.timestamp - right.timestamp);
-    });
-
     setCandlesBySymbol((current) => {
-      const existing = current[defaultSymbol] ?? [];
-      const byTimestamp = new Map<number, Candle>();
-      for (const candle of existing) {
-        byTimestamp.set(candle.timestamp, candle);
+      const next: Record<string, Candle[]> = { ...current };
+      const symbolBuckets = chartData.symbols ?? {};
+      const chartBySymbol = chartData.candles_by_symbol ?? {};
+
+      for (const [symbolKey, bucket] of Object.entries(symbolBuckets)) {
+        const normalizedSymbol = normalizeSymbol(symbolKey);
+        if (!normalizedSymbol) {
+          continue;
+        }
+        next[normalizedSymbol] = mergeChartBuckets(
+          bucket.pre_run_candles,
+          bucket.run_candles,
+          next[normalizedSymbol]
+        );
       }
-      for (const candle of chartData.candles) {
-        byTimestamp.set(candle.timestamp, candle);
+
+      for (const [symbolKey, symbolCandles] of Object.entries(chartBySymbol)) {
+        const normalizedSymbol = normalizeSymbol(symbolKey);
+        if (!normalizedSymbol) {
+          continue;
+        }
+        next[normalizedSymbol] = mergeCandles(symbolCandles, next[normalizedSymbol]);
       }
-      return {
-        ...current,
-        [defaultSymbol]: [...byTimestamp.values()].sort((left, right) => left.timestamp - right.timestamp),
-      };
+
+      if (
+        Object.keys(symbolBuckets).length === 0 &&
+        Object.keys(chartBySymbol).length === 0 &&
+        chartData.candles?.length
+      ) {
+        const defaultSymbol = normalizeSymbol(
+          initialData?.run?.symbols?.[0] ??
+            initialData?.run?.symbol?.split(",")[0] ??
+            run?.symbol?.split(",")[0] ??
+            "UNKNOWN"
+        );
+        next[defaultSymbol] = mergeCandles(chartData.candles, next[defaultSymbol]);
+      }
+
+      return next;
     });
-  }, [chartData?.candles]);
+  }, [chartData, initialData?.run?.symbol, initialData?.run?.symbols, run?.symbol]);
+
+  useEffect(() => {
+    const primarySymbol = normalizeSymbol(
+      run?.symbols?.[0] ?? run?.symbol?.split(",")[0] ?? "UNKNOWN"
+    );
+    setCandles(candlesBySymbol[primarySymbol] ?? []);
+  }, [candlesBySymbol, run?.symbol, run?.symbols]);
 
   const shouldSubscribeToRealtime = Boolean(
     runId &&
@@ -145,6 +197,12 @@ export default function PaperRunDetail() {
 
   const tradeColumns: ListColumn<PaperTrade>[] = useMemo(
     () => [
+      {
+        key: "symbol",
+        header: "Symbol",
+        render: (t) => normalizeSymbol(t.symbol) || "—",
+      },
+
       {
         key: "side",
         header: "Side",
@@ -293,52 +351,14 @@ export default function PaperRunDetail() {
     {
     onTick: (candle: PaperTick) => {
       setExchangeStreaming(true);
-      const symbolKey =
+      const symbolKey = normalizeSymbol(
         candle.symbol ??
-        run?.symbols?.[0] ??
-        run?.symbol?.split(",")[0]?.trim()?.toUpperCase() ??
-        "UNKNOWN";
-
-      setCandles((prev) => {
-        const nextCandle: Candle = {
-          timestamp: candle.timestamp,
-          open: candle.open,
-          high: candle.high,
-          low: candle.low,
-          close: candle.close,
-          volume: candle.volume,
-        };
-
-        if (prev.length === 0) {
-          return [nextCandle];
-        }
-
-        const lastIndex = prev.length - 1;
-        const lastCandle = prev[lastIndex];
-
-        if (lastCandle.timestamp === nextCandle.timestamp) {
-          const next = [...prev];
-          next[lastIndex] = nextCandle;
-          return next;
-        }
-
-        if (Number(nextCandle.timestamp) > Number(lastCandle.timestamp)) {
-          return [...prev, nextCandle];
-        }
-
-        const existingIndex = prev.findIndex(
-          (item) => item.timestamp === nextCandle.timestamp
-        );
-        if (existingIndex >= 0) {
-          const next = [...prev];
-          next[existingIndex] = nextCandle;
-          return next;
-        }
-        return [...prev, nextCandle].sort((left, right) => left.timestamp - right.timestamp);
-      });
+          run?.symbols?.[0] ??
+          run?.symbol?.split(",")[0] ??
+          "UNKNOWN"
+      );
 
       setCandlesBySymbol((prev) => {
-        const current = prev[symbolKey] ?? [];
         const nextCandle: Candle = {
           timestamp: candle.timestamp,
           open: candle.open,
@@ -347,38 +367,26 @@ export default function PaperRunDetail() {
           close: candle.close,
           volume: candle.volume,
         };
-
-        if (current.length === 0) {
-          return { ...prev, [symbolKey]: [nextCandle] };
-        }
-
-        const lastIndex = current.length - 1;
-        const lastCandle = current[lastIndex];
-
-        if (lastCandle.timestamp === nextCandle.timestamp) {
-          const next = [...current];
-          next[lastIndex] = nextCandle;
-          return { ...prev, [symbolKey]: next };
-        }
-
-        if (Number(nextCandle.timestamp) > Number(lastCandle.timestamp)) {
-          return { ...prev, [symbolKey]: [...current, nextCandle] };
-        }
-
-        const existingIndex = current.findIndex(
-          (item) => item.timestamp === nextCandle.timestamp
-        );
-        if (existingIndex >= 0) {
-          const next = [...current];
-          next[existingIndex] = nextCandle;
-          return { ...prev, [symbolKey]: next };
-        }
         return {
           ...prev,
-          [symbolKey]: [...current, nextCandle].sort(
-            (left, right) => left.timestamp - right.timestamp
-          ),
+          [symbolKey]: mergeCandles(prev[symbolKey], [nextCandle]),
         };
+      });
+    },
+    onOrderUpdate: (payload: OrderUpdateEvent) => {
+      const symbolKey = normalizeSymbol(payload.order.symbol);
+      if (!symbolKey) {
+        return;
+      }
+      setPendingOrdersBySymbol((prev) => {
+        const current = Number(prev[symbolKey] ?? 0);
+        if (payload.event_type === "order_created") {
+          return { ...prev, [symbolKey]: current + 1 };
+        }
+        if (payload.event_type === "order_filled" || payload.event_type === "order_cancelled") {
+          return { ...prev, [symbolKey]: Math.max(0, current - 1) };
+        }
+        return prev;
       });
     },
   });
@@ -431,7 +439,6 @@ export default function PaperRunDetail() {
           .map((item) => item.trim().toUpperCase())
           .filter(Boolean);
   const primarySymbol = configuredSymbols[0] ?? run.symbol;
-  const baseAsset = run.symbol.replace("USDT", "");
   const quoteAsset = "USDT";
 
   const initialBalance = Number(run.initial_balance ?? 0);
@@ -443,17 +450,11 @@ export default function PaperRunDetail() {
       run.current_balance ??
       initialBalance
   );
-  const btcHeld = Math.max(
-    0,
-    Number(
-      portfolioState?.btc_balance ??
-        run.base_balance ??
-        0
-    )
-  );
   const realizedPnl = Number(portfolioState?.realized_pnl ?? 0);
   const unrealizedPnl = Number(portfolioState?.unrealized_pnl ?? 0);
-  const portfolioOpenPositions = Number(portfolioState?.open_positions ?? 0);
+  const positionsBySymbol = (portfolioState?.positions ?? {}) as Record<string, Record<string, unknown>>;
+  const lastPricesBySymbol = (portfolioState?.last_prices ?? {}) as Record<string, number>;
+  const globalPendingOrders = Number(portfolioState?.pending_orders ?? 0);
   const equityCurve =
     portfolioState?.equity_curve && portfolioState.equity_curve.length > 0
       ? portfolioState.equity_curve
@@ -463,18 +464,12 @@ export default function PaperRunDetail() {
             equity: initialBalance,
           },
         ];
-  const lastPrice = Number(run.last_price ?? 0);
   const totalTrades = Number(portfolioState?.trades_count ?? sortedTrades.length);
 
   const netPnl = realizedPnl + unrealizedPnl;
   const returnPct = initialBalance
     ? (netPnl / initialBalance) * 100
     : 0;
-
-  const hasPosition = portfolioOpenPositions > 0 && !!run.position;
-  const positionSide = run.position?.side ?? null;
-  const entryPrice = Number(run.position?.entry_price ?? 0);
-  const positionValue = btcHeld * lastPrice;
 
   /* ===== ADVANCED METRICS ===== */
 
@@ -491,10 +486,6 @@ export default function PaperRunDetail() {
 
   const avgLoss = lossTrades.length
     ? lossTrades.reduce((a, t) => a + getTradeNetPnl(t), 0) / lossTrades.length
-    : 0;
-
-  const exposurePct = equity
-    ? (positionValue / equity) * 100
     : 0;
 
   const maxEquity = Math.max(...equityCurve.map(e => e.equity ?? 0), equity);
@@ -561,6 +552,66 @@ export default function PaperRunDetail() {
   ];
   const effectiveChartSymbols =
     chartSymbols.length > 0 ? chartSymbols : [primarySymbol];
+  const pairOverview = effectiveChartSymbols.map((symbolItem) => {
+    const symbolPosition = positionsBySymbol[symbolItem] ?? null;
+    const symbolCandles =
+      candlesBySymbol[symbolItem] ??
+      (symbolItem === primarySymbol ? candles : []);
+    const latestCandle = symbolCandles[symbolCandles.length - 1];
+    const livePrice = Number(
+      lastPricesBySymbol[symbolItem] ??
+        latestCandle?.close ??
+        run.last_price ??
+        0
+    );
+    const quantity = Math.max(
+      0,
+      Number(
+        symbolPosition?.quantity ??
+          symbolPosition?.base_qty ??
+          0
+      )
+    );
+    const marketValue = Number(
+      symbolPosition?.market_value ?? quantity * livePrice
+    );
+    const symbolExposurePct =
+      equity > 0 ? (marketValue / equity) * 100 : 0;
+    const symbolUnrealizedPnl = Number(
+      symbolPosition?.unrealized_pnl ?? 0
+    );
+    const symbolEntryPrice = Number(
+      symbolPosition?.entry_price ?? 0
+    );
+    const symbolAvgEntryPrice = Number(
+      symbolPosition?.average_entry_price ?? symbolEntryPrice
+    );
+    const symbolPendingOrders = Number(
+      pendingOrdersBySymbol[symbolItem] ??
+        (globalPendingOrders > 0 && symbolItem === primarySymbol ? globalPendingOrders : 0)
+    );
+    const symbolTrades = sortedTrades.filter((trade) => {
+      if (trade.symbol) {
+        return normalizeSymbol(trade.symbol) === symbolItem;
+      }
+      return effectiveChartSymbols.length === 1 || symbolItem === primarySymbol;
+    });
+
+    return {
+      symbol: symbolItem,
+      livePrice,
+      quantity,
+      side: String(symbolPosition?.side ?? "FLAT"),
+      entryPrice: symbolEntryPrice,
+      averageEntryPrice: symbolAvgEntryPrice,
+      exposurePct: symbolExposurePct,
+      unrealizedPnl: symbolUnrealizedPnl,
+      pendingOrders: symbolPendingOrders,
+      lastCandleTimestamp: latestCandle?.timestamp ?? null,
+      entriesCount: Number(symbolPosition?.entries_count ?? 0),
+      tradesCount: symbolTrades.length,
+    };
+  });
 
   /* ================= UI ================= */
 
@@ -721,22 +772,6 @@ export default function PaperRunDetail() {
           tooltip="Current drawdown from peak equity"
         />
 
-        {/* ===== ACCOUNT STRUCTURE ===== */}
-
-        <KpiCard
-          title={`${quoteAsset} Available`}
-          value={usdtBalance}
-          size="compact"
-          format={(v) => `${v.toFixed(2)} ${quoteAsset}`}
-        />
-
-        <KpiCard
-          title={`${baseAsset} Held`}
-          value={btcHeld}
-          size="compact"
-          format={(v) => `${v.toFixed(6)} ${baseAsset}`}
-        />
-
         <KpiCard
           title="Total Trades"
           value={totalTrades}
@@ -750,51 +785,6 @@ export default function PaperRunDetail() {
           size="compact"
           format={(v) => `${v.toFixed(1)}%`}
         />
-
-        {/* ===== POSITION ===== */}
-
-        {hasPosition && (
-          <>
-            <KpiCard
-              title="Position"
-              value={positionSide === "LONG" ? 1 : -1}
-              positive={positionSide === "LONG"}
-              size="compact"
-              format={() => positionSide ?? "-"}
-            />
-
-            <KpiCard
-              title="Exposure"
-              value={exposurePct}
-              positive={exposurePct < 50}
-              size="compact"
-              format={(v) => `${v.toFixed(1)}%`}
-              tooltip="Position value as % of total equity"
-            />
-
-            <KpiCard
-              title="Entry"
-              value={entryPrice}
-              size="compact"
-              format={(v) => `${v.toFixed(2)} ${quoteAsset}`}
-            />
-
-            <KpiCard
-              title="Live Price"
-              value={lastPrice}
-              size="compact"
-              format={(v) => `${v.toFixed(2)} ${quoteAsset}`}
-            />
-
-            <KpiCard
-              title="Unrealized PnL"
-              value={unrealizedPnl}
-              positive={unrealizedPnl >= 0}
-              size="compact"
-              format={(v) => `${v.toFixed(2)} ${quoteAsset}`}
-            />
-          </>
-        )}
 
         {/* ===== TRADE QUALITY ===== */}
 
@@ -870,6 +860,68 @@ export default function PaperRunDetail() {
 
       </div>
 
+      <div className="w-full min-w-0 max-w-full bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-white font-semibold text-lg">Pair Overview</h2>
+          <span className="text-xs text-slate-400">
+            {effectiveChartSymbols.length} pair{effectiveChartSymbols.length === 1 ? "" : "s"}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {pairOverview.map((pair) => (
+            <div
+              key={pair.symbol}
+              className="bg-slate-800/70 border border-slate-700 rounded-xl p-4 space-y-2"
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="text-white font-semibold">{pair.symbol}</h3>
+                <span className="text-xs text-slate-400">
+                  {pair.side}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                <span className="text-slate-400">Live Price</span>
+                <span className="text-right text-slate-200">{pair.livePrice.toFixed(4)}</span>
+
+                <span className="text-slate-400">Base Held</span>
+                <span className="text-right text-slate-200">{pair.quantity.toFixed(6)}</span>
+
+                <span className="text-slate-400">Entry Price</span>
+                <span className="text-right text-slate-200">
+                  {pair.entryPrice > 0 ? pair.entryPrice.toFixed(4) : "—"}
+                </span>
+
+                <span className="text-slate-400">Avg Entry</span>
+                <span className="text-right text-slate-200">
+                  {pair.averageEntryPrice > 0 ? pair.averageEntryPrice.toFixed(4) : "—"}
+                </span>
+
+                <span className="text-slate-400">Exposure</span>
+                <span className="text-right text-slate-200">{pair.exposurePct.toFixed(2)}%</span>
+
+                <span className="text-slate-400">Unrealized PnL</span>
+                <span className={pair.unrealizedPnl >= 0 ? "text-right text-emerald-300" : "text-right text-red-300"}>
+                  {pair.unrealizedPnl.toFixed(2)}
+                </span>
+
+                <span className="text-slate-400">Pending Orders</span>
+                <span className="text-right text-slate-200">{pair.pendingOrders}</span>
+
+                <span className="text-slate-400">Entries/Fills</span>
+                <span className="text-right text-slate-200">{pair.entriesCount || pair.tradesCount}</span>
+
+                <span className="text-slate-400">Last Candle</span>
+                <span className="text-right text-slate-200">
+                  {pair.lastCandleTimestamp ? formatDateTime(new Date(pair.lastCandleTimestamp).toISOString()) : "—"}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* CHARTS */}
       <div className="w-full min-w-0 max-w-full space-y-4">
         {effectiveChartSymbols.map((symbolItem) => {
@@ -878,7 +930,7 @@ export default function PaperRunDetail() {
             (symbolItem === primarySymbol ? candles : []);
           const symbolTrades = sortedTrades.filter((trade) => {
             if (trade.symbol) {
-              return trade.symbol === symbolItem;
+              return normalizeSymbol(trade.symbol) === symbolItem;
             }
             return effectiveChartSymbols.length === 1 || symbolItem === primarySymbol;
           });
@@ -921,7 +973,7 @@ export default function PaperRunDetail() {
       {/* TRADES */}
       <div className="w-full min-w-0 overflow-x-auto">
         <ListView
-          tableId="paper_trades"
+          tableId="paper_trades_v2"
           title="Trades"
           description="Executed trades"
           columns={tradeColumns}

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type {
+  OrderUpdateEvent,
   PaperRunErrorEvent,
   PaperRunStatusEvent,
   PaperRunUpdateEvent,
@@ -15,6 +16,7 @@ type Handlers = {
   onRunUpdate?: (payload: PaperRunUpdateEvent) => void;
   onRunStatus?: (payload: PaperRunStatusEvent) => void;
   onRunError?: (payload: PaperRunErrorEvent) => void;
+  onOrderUpdate?: (payload: OrderUpdateEvent) => void;
 };
 
 export function usePaperRunEvents(runId: string, handlers: Handlers) {
@@ -91,6 +93,18 @@ export function usePaperRunEvents(runId: string, handlers: Handlers) {
       }
 
       handlersRef.current.onRunStatus?.(payload);
+    },
+    Boolean(runId)
+  );
+
+  useEventSubscription(
+    "order_update",
+    (payload: OrderUpdateEvent) => {
+      if (payload.run_id !== runId) {
+        return;
+      }
+
+      handlersRef.current.onOrderUpdate?.(payload);
     },
     Boolean(runId)
   );

@@ -30,6 +30,21 @@ import { sendError, sendSuccess } from "../utils/apiResponse";
 import { toIsoOrNull } from "../utils/dateUtils";
 import { z } from "zod";
 
+const PRE_RUN_CONTEXT_CANDLES = 3000;
+const PRE_RUN_CONTEXT_TIMEFRAME = "1m";
+
+function mergeCandlesPreferRight(...series: Array<Candle[] | undefined>): Candle[] {
+  const byTimestamp = new Map<number, Candle>();
+  for (const candles of series) {
+    for (const candle of candles ?? []) {
+      byTimestamp.set(Number(candle.timestamp), candle);
+    }
+  }
+  return [...byTimestamp.values()].sort(
+    (left, right) => Number(left.timestamp) - Number(right.timestamp)
+  );
+}
+
 const StartPaperRunLegacyRequestSchema = z
   .object({
     algorithm_id: z.string().uuid().optional(),
@@ -396,6 +411,10 @@ export async function getPaperRunById(
     }
 
     const rawRun = runResult.rows[0];
+    const primarySymbol = String(rawRun.symbol ?? "")
+      .split(",")[0]
+      ?.trim()
+      .toUpperCase();
 
     /* =========================
        NORMALIZE POSITION JSON
@@ -484,6 +503,7 @@ export async function getPaperRunById(
       SELECT
         id,
         run_id,
+        symbol,
         side,
         entry_price,
         exit_price,
@@ -516,6 +536,7 @@ export async function getPaperRunById(
     const normalizedTrades = tradesResult.rows.map((t) => ({
       id: t.id,
       run_id: t.run_id,
+      symbol: t.symbol ? String(t.symbol).toUpperCase() : primarySymbol,
       run_type: "PAPER" as const,
 
       side: t.side,
@@ -573,7 +594,12 @@ export async function getPaperRunById(
 ===================================================== */
 export async function getPaperRunChart(
   req: Request,
-  res: Response<ApiResponse<{ candles: Candle[]; trades: PaperTrade[] }>>,
+  res: Response<ApiResponse<{
+    candles: Candle[];
+    candles_by_symbol?: Record<string, Candle[]>;
+    symbols?: Record<string, { pre_run_candles: Candle[]; run_candles: Candle[] }>;
+    trades: PaperTrade[];
+  }>>,
   next: NextFunction
 ) {
   try {
@@ -598,12 +624,17 @@ export async function getPaperRunChart(
     }
 
     const run = runResult.rows[0];
+    const tradeFallbackSymbol = String(run.symbol ?? "")
+      .split(",")[0]
+      ?.trim()
+      .toUpperCase();
 
     const tradesResult = await pool.query(
       `
       SELECT
         id,
         run_id,
+        symbol,
         side,
         entry_price,
         exit_price,
@@ -632,6 +663,7 @@ export async function getPaperRunChart(
     const normalizedTrades = tradesResult.rows.map((t) => ({
       id: t.id,
       run_id: t.run_id,
+      symbol: t.symbol ? String(t.symbol).toUpperCase() : tradeFallbackSymbol,
       run_type: "PAPER" as const,
       side: t.side,
       entry_price: Number(t.entry_price),
@@ -674,23 +706,82 @@ export async function getPaperRunChart(
       sortedByOpenedAt[0]?.opened_at ??
       nowIso;
     const endTime = lastTradeClose ?? nowIso;
+    const runStartMs = Date.parse(startTime);
+    const nowMs = Date.parse(nowIso);
+    const anchorMs = Number.isFinite(runStartMs) ? runStartMs : nowMs;
+    const preRunEndIso = new Date(anchorMs).toISOString();
+    const preRunStartIso = new Date(
+      anchorMs - PRE_RUN_CONTEXT_CANDLES * 60_000
+    ).toISOString();
 
     const configuredSymbols = String(run.symbol ?? "")
       .split(",")
       .map((item) => item.trim().toUpperCase())
       .filter(Boolean);
-    const chartSymbol = configuredSymbols[0] ?? String(run.symbol ?? "").trim().toUpperCase();
+    const symbolsToFetch =
+      configuredSymbols.length > 0
+        ? configuredSymbols
+        : [String(run.symbol ?? "").trim().toUpperCase()].filter(Boolean);
 
-    const candles = await getEngineCandles({
-      exchange: String(run.exchange ?? "binance"),
-      symbol: chartSymbol,
-      timeframe: String(run.timeframe),
-      start: startTime,
-      end: endTime,
-    });
+    const symbolBucketEntries = await Promise.all(
+      symbolsToFetch.map(async (symbolItem) => {
+        let preRunCandles: Candle[] = [];
+        let runCandles: Candle[] = [];
+
+        try {
+          preRunCandles = await getEngineCandles({
+            exchange: String(run.exchange ?? "binance"),
+            symbol: symbolItem,
+            timeframe: PRE_RUN_CONTEXT_TIMEFRAME,
+            start: preRunStartIso,
+            end: preRunEndIso,
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.warn(
+            `[PaperChart] Failed fetching pre-run candles run_id=${runId} symbol=${symbolItem}: ${message}`
+          );
+        }
+
+        try {
+          runCandles = await getEngineCandles({
+            exchange: String(run.exchange ?? "binance"),
+            symbol: symbolItem,
+            timeframe: String(run.timeframe),
+            start: startTime,
+            end: endTime,
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.warn(
+            `[PaperChart] Failed fetching run candles run_id=${runId} symbol=${symbolItem}: ${message}`
+          );
+        }
+
+        return [
+          symbolItem,
+          {
+            pre_run_candles: preRunCandles.slice(-PRE_RUN_CONTEXT_CANDLES),
+            run_candles: runCandles,
+          },
+        ] as const;
+      })
+    );
+
+    const symbols = Object.fromEntries(symbolBucketEntries);
+    const candlesBySymbol: Record<string, Candle[]> = Object.fromEntries(
+      symbolBucketEntries.map(([symbolKey, bucket]) => [
+        symbolKey,
+        mergeCandlesPreferRight(bucket.pre_run_candles, bucket.run_candles),
+      ])
+    );
+    const primarySymbol = symbolsToFetch[0];
+    const candles = candlesBySymbol[primarySymbol] ?? [];
 
     return sendSuccess(res, {
       candles,
+      candles_by_symbol: candlesBySymbol,
+      symbols,
       trades: normalizedTrades,
     });
   } catch (err) {

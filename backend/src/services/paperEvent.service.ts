@@ -182,17 +182,41 @@ async function handleTradeEvent(
       : null;
 
     const forcedClose = trade.forced_close === true;
+    const directSymbol = extractSymbol(trade);
+    let tradeSymbol =
+      directSymbol && directSymbol.trim().length > 0
+        ? directSymbol.trim().toUpperCase()
+        : "";
+
+    if (!tradeSymbol) {
+      const runSymbolResult = await client.query<{ symbol: string }>(
+        `
+        SELECT symbol
+        FROM paper_runs
+        WHERE id = $1
+        LIMIT 1
+        `,
+        [runId]
+      );
+      const runSymbol = String(runSymbolResult.rows[0]?.symbol ?? "")
+        .split(",")[0]
+        ?.trim()
+        .toUpperCase();
+      tradeSymbol = runSymbol || "UNKNOWN";
+    }
+
     const existingTradeResult = await client.query<{ id: string }>(
       `
       SELECT id
       FROM trades
       WHERE run_id = $1
         AND run_type = 'PAPER'
-        AND opened_at = $2
+        AND symbol = $2
+        AND opened_at = $3
       ORDER BY created_at DESC
       LIMIT 1
       `,
-      [runId, openedAt]
+      [runId, tradeSymbol, openedAt]
     );
 
     const existingTrade = existingTradeResult.rows[0];
@@ -202,25 +226,27 @@ async function handleTradeEvent(
         `
         UPDATE trades
         SET side = $1,
-            entry_price = $2,
-            exit_price = $3,
-            quantity = $4,
-            entry_notional = $5,
-            exit_notional = $6,
-            entry_fee = $7,
-            exit_fee = $8,
-            total_fee = $9,
-            gross_pnl = $10,
-            net_pnl = $11,
-            fee_rate_used = $12,
-            pnl = $13,
-            pnl_percent = $14,
-            closed_at = $15,
-            forced_close = $16
-        WHERE id = $17
+            symbol = $2,
+            entry_price = $3,
+            exit_price = $4,
+            quantity = $5,
+            entry_notional = $6,
+            exit_notional = $7,
+            entry_fee = $8,
+            exit_fee = $9,
+            total_fee = $10,
+            gross_pnl = $11,
+            net_pnl = $12,
+            fee_rate_used = $13,
+            pnl = $14,
+            pnl_percent = $15,
+            closed_at = $16,
+            forced_close = $17
+        WHERE id = $18
         `,
         [
           dbSide,
+          tradeSymbol,
           entryPrice,
           exitPrice,
           quantity,
@@ -242,12 +268,13 @@ async function handleTradeEvent(
     } else {
       await client.query(
         `INSERT INTO trades
-         (run_id, run_type, side, entry_price, exit_price,
+         (run_id, run_type, symbol, side, entry_price, exit_price,
           quantity, entry_notional, exit_notional, entry_fee, exit_fee, total_fee,
           gross_pnl, net_pnl, fee_rate_used, pnl, pnl_percent, opened_at, closed_at, forced_close)
-         VALUES ($1,'PAPER',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+         VALUES ($1,'PAPER',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
         [
           runId,
+          tradeSymbol,
           dbSide,
           entryPrice,
           exitPrice,
@@ -276,7 +303,7 @@ async function handleTradeEvent(
       "trade_execution",
       TradeExecutionSchema.parse({
         run_id: runId,
-        symbol: extractSymbol(trade),
+        symbol: tradeSymbol,
         side: dbSide,
         entry_price: entryPrice,
         exit_price: exitPrice,

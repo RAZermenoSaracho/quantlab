@@ -118,7 +118,7 @@ CREATE TABLE paper_runs (
 
     -- Market info
     exchange VARCHAR(50) NOT NULL DEFAULT 'binance',
-    symbol VARCHAR(20) NOT NULL,
+    symbol TEXT NOT NULL,
     timeframe VARCHAR(10) NOT NULL,
 
     -- Fees
@@ -159,6 +159,7 @@ CREATE TABLE trades (
 
     run_id UUID NOT NULL,
     run_type trade_type NOT NULL,
+    symbol TEXT NOT NULL,
 
     side trade_side NOT NULL,
 
