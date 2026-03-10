@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import asyncio
 import os
 import logging
@@ -11,6 +11,8 @@ from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
 from .backtest import run_backtest
+from .clients import ExchangeFactory
+from .data.candle_aggregator import expand_minute_candles_to_subminute
 from .validator import AlgorithmValidationError, validate_algorithm
 
 # ======================================================
@@ -430,5 +432,82 @@ async def market_history(
     return {
         "exchange": exchange,
         "symbol": symbol,
+        "candles": candles,
+    }
+
+
+def _parse_iso_datetime(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _normalize_kline_rows(rows: list[list[Any]]) -> list[dict[str, float]]:
+    return [
+        {
+            "timestamp": int(row[0]),
+            "open": float(row[1]),
+            "high": float(row[2]),
+            "low": float(row[3]),
+            "close": float(row[4]),
+            "volume": float(row[5]),
+        }
+        for row in rows
+    ]
+
+
+@app.get("/market/candles")
+async def market_candles(
+    symbol: str = Query(...),
+    timeframe: str = Query("1m"),
+    start: str = Query(...),
+    end: str = Query(...),
+    exchange: str = Query("binance"),
+):
+    try:
+        start_dt = _parse_iso_datetime(start)
+        end_dt = _parse_iso_datetime(end)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid start/end datetime format")
+
+    if end_dt <= start_dt:
+        raise HTTPException(status_code=400, detail="end must be greater than start")
+
+    requested_timeframe = timeframe.lower()
+    source_timeframe = (
+        "1m"
+        if requested_timeframe in {"1s", "5s", "15s", "30s"}
+        else timeframe
+    )
+
+    try:
+        client = ExchangeFactory.create(exchange=exchange)
+        raw_rows = await asyncio.to_thread(
+            client.fetch_candles,
+            symbol.upper(),
+            source_timeframe,
+            start_dt.isoformat(),
+            end_dt.isoformat(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.exception(
+            "Failed to fetch market candles exchange=%s symbol=%s timeframe=%s",
+            exchange,
+            symbol,
+            timeframe,
+        )
+        raise HTTPException(status_code=502, detail=f"Unable to fetch candles: {exc}")
+
+    candles = _normalize_kline_rows(raw_rows)
+    if requested_timeframe in {"1s", "5s", "15s", "30s"}:
+        candles = expand_minute_candles_to_subminute(candles, requested_timeframe)
+
+    return {
+        "exchange": exchange,
+        "symbol": symbol.upper(),
+        "timeframe": requested_timeframe,
         "candles": candles,
     }

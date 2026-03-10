@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { PortfolioStateSchema } from "./portfolio";
-import { MarketTimeframeSchema } from "./market";
+import { CandleSchema, MarketTimeframeSchema } from "./market";
 
 /* ======================================================
    ENUMS
@@ -112,6 +112,15 @@ export const PaperRunDetailResponseSchema = z.object({
 
 export type PaperRunDetailResponse = z.infer<
   typeof PaperRunDetailResponseSchema
+>;
+
+export const PaperRunChartResponseSchema = z.object({
+  candles: z.array(CandleSchema),
+  trades: z.array(PaperTradeSchema),
+});
+
+export type PaperRunChartResponse = z.infer<
+  typeof PaperRunChartResponseSchema
 >;
 
 export const PaperRunsListResponseSchema = z.object({

@@ -17,27 +17,12 @@ import { usePaperRunEvents } from "../../hooks/usePaperRunEvents";
 import {
   useDeletePaperRunMutation,
   usePaperRun,
+  usePaperRunChart,
   usePaperRuns,
   useRestartPaperRunMutation,
   usePaperState,
   useStopPaperRunMutation,
 } from "../../data/paper";
-import { useCandles } from "../../data/market";
-
-function getHistoryLimit(timeframe: string): number {
-  switch (timeframe) {
-    case "1s":
-      return 30000;
-    case "5s":
-      return 6000;
-    case "15s":
-      return 2000;
-    case "1m":
-      return 500;
-    default:
-      return 500;
-  }
-}
 
 export default function PaperRunDetail() {
   const { id } = useParams<{ id: string }>();
@@ -52,22 +37,14 @@ export default function PaperRunDetail() {
   const [exchangeStreaming, setExchangeStreaming] = useState(false);
 
   const { data: initialData, error: detailError } = usePaperRun(runId);
+  const { data: chartData, error: chartError } = usePaperRunChart(runId);
   const { data: portfolioState, error: stateError } = usePaperState(runId);
   const { data: runs, error: runsError } = usePaperRuns();
   const run = initialData?.run ?? null;
-  const historyLimit = useMemo(
-    () => getHistoryLimit(run?.timeframe ?? "1m"),
-    [run?.timeframe]
-  );
-  const { data: historicalCandles, error: candlesError } = useCandles(
-    run?.symbol ?? "",
-    run?.timeframe ?? "",
-    historyLimit
-  );
   const stopMutation = useStopPaperRunMutation();
   const restartMutation = useRestartPaperRunMutation();
   const deleteMutation = useDeletePaperRunMutation();
-  const trades = initialData?.trades ?? [];
+  const trades = initialData?.trades ?? chartData?.trades ?? [];
   const getTradeNetPnl = (trade: PaperTrade) =>
     Number(trade.net_pnl ?? trade.pnl ?? 0);
   const getTradeGrossPnl = (trade: PaperTrade) =>
@@ -114,17 +91,17 @@ export default function PaperRunDetail() {
   }, [runId]);
 
   useEffect(() => {
-    if (!historicalCandles?.length) {
+    if (!chartData?.candles?.length) {
       return;
     }
 
     setCandles((current) => {
       if (current.length === 0) {
-        return [...historicalCandles];
+        return [...chartData.candles];
       }
 
       const byTimestamp = new Map<number, Candle>();
-      for (const candle of historicalCandles) {
+      for (const candle of chartData.candles) {
         byTimestamp.set(candle.timestamp, candle);
       }
       for (const candle of current) {
@@ -132,13 +109,13 @@ export default function PaperRunDetail() {
       }
       return [...byTimestamp.values()].sort((left, right) => left.timestamp - right.timestamp);
     });
-  }, [historicalCandles]);
+  }, [chartData?.candles]);
 
   const shouldSubscribeToRealtime = Boolean(
     runId &&
       run &&
-      !candlesError &&
-      historicalCandles !== undefined
+      !chartError &&
+      chartData !== undefined
   );
 
   /* ================= TRADE TABLE ================= */
@@ -367,8 +344,8 @@ export default function PaperRunDetail() {
   /* ================= UI GUARDS ================= */
 
   if (!runId) return <div className="p-6 text-slate-400">Invalid run.</div>;
-  if (detailError || runsError || stateError || candlesError) {
-    return <div className="p-6 text-red-400">{detailError || runsError || stateError || candlesError}</div>;
+  if (detailError || runsError || stateError || chartError) {
+    return <div className="p-6 text-red-400">{detailError || runsError || stateError || chartError}</div>;
   }
   if (!run) return <div className="p-6 text-slate-400">Loading...</div>;
 

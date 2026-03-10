@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import type {
   MessageResponse,
   PaperRun,
+  PaperRunChartResponse,
   PaperRunDetailResponse,
   PaperTrade,
   PortfolioState,
@@ -13,6 +14,7 @@ import {
   deletePaperRun,
   getAllPaperRuns,
   getPaperRunById,
+  getPaperRunChart,
   getPaperRunState as fetchPaperRunState,
   restartPaperRun,
   startPaperRun,
@@ -213,6 +215,14 @@ export function usePaperRun(id: string) {
   return useQuery({
     key: paperRunKey(id),
     fetcher: () => getPaperRunById(id),
+    enabled: Boolean(id),
+  });
+}
+
+export function usePaperRunChart(id: string) {
+  return useQuery<PaperRunChartResponse>({
+    key: `${paperRunKey(id)}:chart`,
+    fetcher: () => getPaperRunChart(id),
     enabled: Boolean(id),
   });
 }

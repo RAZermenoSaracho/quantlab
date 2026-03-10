@@ -312,7 +312,7 @@ export default function AlgorithmDetail() {
         </div>
       </div>
 
-      <div className="flex gap-8 border-b border-slate-800 text-sm">
+      <div className="flex flex-wrap gap-2 sm:gap-4 border-b border-slate-800 text-sm">
         {(["overview", "backtests", "paper"] as Tab[]).map((tab) => (
           <Button
             key={tab}

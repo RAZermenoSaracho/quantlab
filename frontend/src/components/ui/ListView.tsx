@@ -168,7 +168,7 @@ export default function ListView<T>({
 
       {/* Header */}
       {(title || actions || canToggleColumns) && (
-        <div className="flex w-full min-w-0 max-w-full justify-between items-start">
+        <div className="flex w-full min-w-0 max-w-full flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
 
           <div className="min-w-0 space-y-1">
             {title && (
@@ -183,8 +183,12 @@ export default function ListView<T>({
             )}
           </div>
 
-          <div className="flex items-center gap-3">
-            {actions && <div className="flex gap-3">{actions}</div>}
+          <div className="flex w-full min-w-0 flex-wrap items-center justify-end gap-2 sm:w-auto sm:flex-nowrap sm:gap-3">
+            {actions && (
+              <div className="flex w-full flex-wrap justify-end gap-2 sm:w-auto sm:flex-nowrap sm:gap-3">
+                {actions}
+              </div>
+            )}
 
             {canToggleColumns && (
               <div className="relative" ref={columnsMenuRef}>

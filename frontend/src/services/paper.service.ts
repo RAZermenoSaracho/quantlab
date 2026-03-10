@@ -3,6 +3,7 @@ import api from "./api.service";
 import type {
   PortfolioState,
   PaperRunDetailResponse,
+  PaperRunChartResponse,
   PaperRunsListResponse,
   StartPaperRunRequest,
   StartPaperRunResponse,
@@ -39,6 +40,12 @@ export function deletePaperRun(runId: string): Promise<MessageResponse> {
 
 export function getPaperRunById(runId: string): Promise<PaperRunDetailResponse> {
   return api.get<PaperRunDetailResponse>(`/paper/${runId}`);
+}
+
+/* ================= GET CHART DATA ================= */
+
+export function getPaperRunChart(runId: string): Promise<PaperRunChartResponse> {
+  return api.get<PaperRunChartResponse>(`/paper/${runId}/chart`);
 }
 
 /* ================= GET PORTFOLIO STATE ================= */

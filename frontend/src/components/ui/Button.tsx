@@ -37,13 +37,13 @@ export default function Button({
   const isDisabled = disabled || loading;
 
   const base =
-    "inline-flex items-center justify-center gap-2 rounded-xl font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-900";
+    "inline-flex max-w-full shrink-0 items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap rounded-xl font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-900";
 
   const sizes: Record<ButtonSize, string> = {
-    sm: "px-3 py-1 text-xs",
-    md: "px-4 py-2 text-sm",
-    lg: "px-6 py-3 text-base",
-    icon: "p-2 rounded-lg",
+    sm: "px-2.5 py-1 text-[11px] sm:px-3 sm:py-1 sm:text-xs",
+    md: "px-3 py-1.5 text-xs sm:px-4 sm:py-2 sm:text-sm",
+    lg: "px-4 py-2 text-sm sm:px-6 sm:py-3 sm:text-base",
+    icon: "p-1.5 rounded-lg sm:p-2",
   };
 
   const variants: Record<ButtonVariant, string> = {
@@ -80,10 +80,10 @@ export default function Button({
       {...props}
     >
       {loading && (
-        <span className="h-4 w-4 border-2 border-white/70 border-t-transparent rounded-full animate-spin" />
+        <span className="h-3 w-3 sm:h-4 sm:w-4 border-2 border-white/70 border-t-transparent rounded-full animate-spin" />
       )}
 
-      <span>
+      <span className="block max-w-full truncate">
         {loading ? loadingText ?? "Processing..." : children}
       </span>
     </button>

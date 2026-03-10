@@ -3,6 +3,7 @@ import { pool } from "../config/db";
 import {
   startPaperOnEngine,
   stopPaperOnEngine,
+  getEngineCandles,
 } from "../services/pythonEngine.service";
 import {
   getLatestPortfolioState,
@@ -15,7 +16,9 @@ import {
 import { getConcurrentRunsCount } from "../services/runConcurrency.service";
 import {
   type ApiResponse,
+  type Candle,
   type MessageResponse,
+  type PaperTrade,
   type PortfolioState,
   type PaperRunDetailResponse,
   type PaperRunsListResponse,
@@ -531,6 +534,130 @@ export async function getPaperRunById(
     };
 
     return sendSuccess(res, response);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/* =====================================================
+   GET PAPER RUN CHART (HISTORICAL CANDLES + TRADES)
+===================================================== */
+export async function getPaperRunChart(
+  req: Request,
+  res: Response<ApiResponse<{ candles: Candle[]; trades: PaperTrade[] }>>,
+  next: NextFunction
+) {
+  try {
+    const rawId = req.params.id;
+    if (!rawId || Array.isArray(rawId)) {
+      return sendError(res, "Invalid id parameter", 400);
+    }
+    const runId = rawId;
+    const userId = req.user!.id;
+
+    const runResult = await pool.query(
+      `
+      SELECT id, exchange, symbol, timeframe, started_at
+      FROM paper_runs
+      WHERE id = $1 AND user_id = $2
+      `,
+      [runId, userId]
+    );
+
+    if (!runResult.rowCount) {
+      return sendError(res, "Paper run not found", 404);
+    }
+
+    const run = runResult.rows[0];
+
+    const tradesResult = await pool.query(
+      `
+      SELECT
+        id,
+        run_id,
+        side,
+        entry_price,
+        exit_price,
+        quantity,
+        entry_notional,
+        exit_notional,
+        entry_fee,
+        exit_fee,
+        total_fee,
+        gross_pnl,
+        net_pnl,
+        fee_rate_used,
+        pnl,
+        pnl_percent,
+        opened_at,
+        closed_at,
+        created_at,
+        forced_close
+      FROM trades
+      WHERE run_id = $1 AND run_type = 'PAPER'
+      ORDER BY created_at ASC
+      `,
+      [runId]
+    );
+
+    const normalizedTrades = tradesResult.rows.map((t) => ({
+      id: t.id,
+      run_id: t.run_id,
+      run_type: "PAPER" as const,
+      side: t.side,
+      entry_price: Number(t.entry_price),
+      exit_price: t.exit_price != null ? Number(t.exit_price) : null,
+      quantity: Number(t.quantity),
+      entry_notional: t.entry_notional != null ? Number(t.entry_notional) : null,
+      exit_notional: t.exit_notional != null ? Number(t.exit_notional) : null,
+      entry_fee: t.entry_fee != null ? Number(t.entry_fee) : null,
+      exit_fee: t.exit_fee != null ? Number(t.exit_fee) : null,
+      total_fee: t.total_fee != null ? Number(t.total_fee) : null,
+      gross_pnl: t.gross_pnl != null ? Number(t.gross_pnl) : null,
+      net_pnl: t.net_pnl != null ? Number(t.net_pnl) : null,
+      fee_rate_used: t.fee_rate_used != null ? Number(t.fee_rate_used) : null,
+      pnl:
+        t.pnl != null
+          ? Number(t.pnl)
+          : t.net_pnl != null
+            ? Number(t.net_pnl)
+            : null,
+      pnl_percent: t.pnl_percent != null ? Number(t.pnl_percent) : null,
+      opened_at: toIsoOrNull(t.opened_at),
+      closed_at: toIsoOrNull(t.closed_at),
+      created_at: toIsoOrNull(t.created_at),
+      forced_close: Boolean(t.forced_close),
+    }));
+
+    const sortedByOpenedAt = [...normalizedTrades].sort((left, right) => {
+      const leftTs = Date.parse(left.opened_at ?? left.created_at ?? "");
+      const rightTs = Date.parse(right.opened_at ?? right.created_at ?? "");
+      return (Number.isFinite(leftTs) ? leftTs : 0) - (Number.isFinite(rightTs) ? rightTs : 0);
+    });
+
+    const lastTradeClose = [...normalizedTrades]
+      .reverse()
+      .find((trade) => trade.closed_at != null)?.closed_at;
+
+    const nowIso = new Date().toISOString();
+    const startTime =
+      toIsoOrNull(run.started_at) ??
+      sortedByOpenedAt[0]?.opened_at ??
+      nowIso;
+    const endTime = lastTradeClose ?? nowIso;
+
+    const candles = await getEngineCandles({
+      exchange: String(run.exchange ?? "binance"),
+      symbol: String(run.symbol),
+      timeframe: String(run.timeframe),
+      start: startTime,
+      end: endTime,
+    });
+
+    return sendSuccess(res, {
+      candles,
+      trades: normalizedTrades,
+    });
   } catch (err) {
     next(err);
   }

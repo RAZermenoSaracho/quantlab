@@ -57,7 +57,7 @@ export default function Dashboard() {
       </div>
 
       {/* ================= TABS ================= */}
-      <div className="flex gap-4 border-b border-slate-800 pb-3">
+      <div className="flex flex-wrap gap-2 sm:gap-4 border-b border-slate-800 pb-3">
 
         <Button
           variant={activeTab === "backtests" ? "PRIMARY" : "GHOST"}

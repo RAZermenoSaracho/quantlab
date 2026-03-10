@@ -5,6 +5,7 @@ import {
   stopPaperRun,
   receivePaperEvent,
   getPaperRunById,
+  getPaperRunChart,
   getPaperRunState,
   getAllPaperRuns,
   deletePaperRun,
@@ -27,6 +28,7 @@ router.post("/start", requireAuth, startPaperRun);
 router.post("/restart/:id", requireAuth, restartPaperRun);
 router.post("/stop/:id", requireAuth, stopPaperRun);
 router.get("/", requireAuth, getAllPaperRuns);
+router.get("/:id/chart", requireAuth, getPaperRunChart);
 router.get("/:id/state", requireAuth, getPaperRunState);
 router.get("/:id", requireAuth, getPaperRunById);
 router.delete("/:id", requireAuth, deletePaperRun);

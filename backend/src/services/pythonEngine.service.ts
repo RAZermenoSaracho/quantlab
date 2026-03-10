@@ -3,11 +3,13 @@ import { env } from "../config/env";
 import {
   AlgorithmValidationRequestSchema,
   AlgorithmValidationResponseSchema,
+  CandlesResponseSchema,
   StartPaperEngineRequestSchema,
   StartPaperEngineResponseSchema,
   StopPaperEngineResponseSchema,
   type AlgorithmValidationResult,
   type ApiSuccess,
+  type Candle,
   type PaperEngineActionResult,
   type StartPaperEngineRequest,
 } from "@quantlab/contracts";
@@ -90,6 +92,25 @@ export async function stopPaperOnEngine(
     return unwrapEngineResult(
       StopPaperEngineResponseSchema.parse(response.data)
     );
+  } catch (error: unknown) {
+    handleEngineError(error);
+  }
+}
+
+export async function getEngineCandles(params: {
+  exchange: string;
+  symbol: string;
+  timeframe: string;
+  start: string;
+  end: string;
+}): Promise<Candle[]> {
+  try {
+    const response = await engineClient.get("/market/candles", { params });
+    const unwrapped = unwrapEngineResult(response.data as {
+      candles: Candle[];
+    } | ApiSuccess<{ candles: Candle[] }>);
+    const parsed = CandlesResponseSchema.parse(unwrapped);
+    return parsed.candles;
   } catch (error: unknown) {
     handleEngineError(error);
   }
