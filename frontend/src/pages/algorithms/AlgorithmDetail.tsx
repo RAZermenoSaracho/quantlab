@@ -20,6 +20,7 @@ import {
 } from "../../data/algorithms";
 
 type Tab = "overview" | "backtests" | "paper";
+type MobileTab = "overview" | "code" | "backtests" | "paper";
 
 function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
@@ -30,6 +31,7 @@ export default function AlgorithmDetail() {
   const navigate = useNavigate();
 
   const [activeTab, setActiveTab] = useState<Tab>("overview");
+  const [mobileTab, setMobileTab] = useState<MobileTab>("overview");
 
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -255,15 +257,15 @@ export default function AlgorithmDetail() {
   ];
 
   return (
-    <div className="max-w-[1600px] mx-auto px-8 py-10 space-y-10">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-lg">
-        <div className="flex flex-col lg:flex-row justify-between gap-8">
+    <div className="max-w-[1600px] mx-auto px-4 lg:px-8 py-6 lg:py-10 space-y-8 lg:space-y-10">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 lg:p-8 shadow-lg">
+        <div className="flex flex-col lg:flex-row justify-between gap-4 lg:gap-8">
           <div>
             {!editing ? (
-              <h1 className="text-4xl font-bold text-white">{algorithm.name}</h1>
+              <h1 className="text-2xl lg:text-4xl font-bold text-white">{algorithm.name}</h1>
             ) : (
               <input
-                className="text-4xl font-bold bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white w-full"
+                className="text-2xl lg:text-4xl font-bold bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white w-full"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
               />
@@ -312,7 +314,24 @@ export default function AlgorithmDetail() {
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 sm:gap-4 border-b border-slate-800 text-sm">
+      <div className="lg:hidden flex gap-2 overflow-x-auto whitespace-nowrap border-b border-slate-800 p-2 text-sm">
+        {(["overview", "code", "backtests", "paper"] as MobileTab[]).map((tab) => (
+          <Button
+            key={tab}
+            className="flex-shrink-0"
+            variant={mobileTab === tab ? "PRIMARY" : "GHOST"}
+            size="sm"
+            onClick={() => setMobileTab(tab)}
+          >
+            {tab === "overview" && "Overview"}
+            {tab === "code" && "Code"}
+            {tab === "backtests" && `Backtests (${backtests.length})`}
+            {tab === "paper" && `Paper Runs (${paperRuns.length})`}
+          </Button>
+        ))}
+      </div>
+
+      <div className="hidden lg:flex flex-wrap gap-2 sm:gap-4 border-b border-slate-800 text-sm">
         {(["overview", "backtests", "paper"] as Tab[]).map((tab) => (
           <Button
             key={tab}
@@ -328,7 +347,7 @@ export default function AlgorithmDetail() {
       </div>
 
       {activeTab === "overview" && (
-        <div className="space-y-10">
+        <div className="hidden lg:block space-y-10">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8">
             <h2 className="text-lg font-semibold text-white mb-4">Strategy Notes</h2>
 
@@ -359,26 +378,93 @@ export default function AlgorithmDetail() {
       )}
 
       {activeTab === "backtests" && (
-        <ListView
-          title="Backtests"
-          description="Historical runs for this strategy."
-          columns={backtestColumns}
-          data={backtests}
-          loading={false}
-          emptyMessage="No backtests yet."
-          onRowClick={(bt) => navigate(`/backtests/${bt.id}`)}
-        />
+        <div className="hidden lg:block">
+          <ListView
+            title="Backtests"
+            description="Historical runs for this strategy."
+            columns={backtestColumns}
+            data={backtests}
+            loading={false}
+            emptyMessage="No backtests yet."
+            onRowClick={(bt) => navigate(`/backtests/${bt.id}`)}
+          />
+        </div>
       )}
 
       {activeTab === "paper" && (
-        <ListView
-          title="Paper Runs"
-          description="Live and past simulated trading sessions."
-          columns={paperColumns}
-          data={paperRuns}
-          emptyMessage="No paper runs yet."
-          onRowClick={(run) => navigate(`/paper/${run.id}`)}
-        />
+        <div className="hidden lg:block">
+          <ListView
+            title="Paper Runs"
+            description="Live and past simulated trading sessions."
+            columns={paperColumns}
+            data={paperRuns}
+            emptyMessage="No paper runs yet."
+            onRowClick={(run) => navigate(`/paper/${run.id}`)}
+          />
+        </div>
+      )}
+
+      {mobileTab === "overview" && (
+        <div className="lg:hidden">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+            <h2 className="text-lg font-semibold text-white mb-4">Strategy Notes</h2>
+
+            {editing ? (
+              <textarea
+                rows={4}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white"
+                value={notesHtml}
+                onChange={(e) => setNotesHtml(e.target.value)}
+              />
+            ) : (
+              <div
+                className="prose prose-invert max-w-none text-slate-300"
+                dangerouslySetInnerHTML={{
+                  __html: algorithm.notes_html || "",
+                }}
+              />
+            )}
+          </div>
+        </div>
+      )}
+
+      {mobileTab === "code" && (
+        <div className="lg:hidden">
+          <AlgorithmWorkspace
+            code={code}
+            onChange={setCode}
+            disabled={!editing || isGithub}
+            isGithub={isGithub}
+            initialDocsOpen={false}
+          />
+        </div>
+      )}
+
+      {mobileTab === "backtests" && (
+        <div className="lg:hidden">
+          <ListView
+            title="Backtests"
+            description="Historical runs for this strategy."
+            columns={backtestColumns}
+            data={backtests}
+            loading={false}
+            emptyMessage="No backtests yet."
+            onRowClick={(bt) => navigate(`/backtests/${bt.id}`)}
+          />
+        </div>
+      )}
+
+      {mobileTab === "paper" && (
+        <div className="lg:hidden">
+          <ListView
+            title="Paper Runs"
+            description="Live and past simulated trading sessions."
+            columns={paperColumns}
+            data={paperRuns}
+            emptyMessage="No paper runs yet."
+            onRowClick={(run) => navigate(`/paper/${run.id}`)}
+          />
+        </div>
       )}
     </div>
   );

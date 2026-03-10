@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import AlgorithmWorkspace from "../../components/algorithms/AlgorithmWorkspace";
+import DocumentationPanel from "../../components/algorithms/DocumentationPanel";
 import Button from "../../components/ui/Button";
 import { useCreateAlgorithmMutation } from "../../data/algorithms";
 
 export default function CreateAlgorithm() {
   const navigate = useNavigate();
+  const [mobileTab, setMobileTab] = useState<"details" | "code" | "docs">("details");
 
   const [name, setName] = useState("");
   const [notesHtml, setNotesHtml] = useState("");
@@ -46,7 +48,7 @@ export default function CreateAlgorithm() {
   }
 
   return (
-    <div className="max-w-[1600px] mx-auto px-8 py-10 space-y-10">
+    <div className="max-w-[1600px] mx-auto px-4 lg:px-8 py-6 lg:py-10 space-y-8 lg:space-y-10">
 
       {/* HEADER */}
       <div>
@@ -71,9 +73,35 @@ export default function CreateAlgorithm() {
         onSubmit={handleSubmit}
         className="space-y-10"
       >
+        <div className="lg:hidden flex gap-2 overflow-x-auto whitespace-nowrap border-b border-slate-800 p-2">
+          <Button
+            size="sm"
+            className="flex-shrink-0"
+            variant={mobileTab === "details" ? "PRIMARY" : "GHOST"}
+            onClick={() => setMobileTab("details")}
+          >
+            Details
+          </Button>
+          <Button
+            size="sm"
+            className="flex-shrink-0"
+            variant={mobileTab === "code" ? "PRIMARY" : "GHOST"}
+            onClick={() => setMobileTab("code")}
+          >
+            Code
+          </Button>
+          <Button
+            size="sm"
+            className="flex-shrink-0"
+            variant={mobileTab === "docs" ? "PRIMARY" : "GHOST"}
+            onClick={() => setMobileTab("docs")}
+          >
+            Docs
+          </Button>
+        </div>
 
         {/* TOP SECTION – META + IMPORT */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-lg space-y-6">
+        <div className={`bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-lg space-y-6 ${mobileTab === "details" ? "" : "hidden lg:block"}`}>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
@@ -105,13 +133,22 @@ export default function CreateAlgorithm() {
         </div>
 
         {/* WORKSPACE */}
-        <AlgorithmWorkspace
-          code={code}
-          onChange={setCode}
-          disabled={false}
-          isGithub={false}
-          initialDocsOpen={true}
-        />
+        <div className={mobileTab === "code" ? "" : "hidden lg:block"}>
+          <AlgorithmWorkspace
+            key="workspace-code"
+            code={code}
+            onChange={setCode}
+            disabled={false}
+            isGithub={false}
+            initialDocsOpen={false}
+          />
+        </div>
+
+        <div className={mobileTab === "docs" ? "lg:hidden" : "hidden"}>
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-lg overflow-hidden">
+            <DocumentationPanel code={code} />
+          </div>
+        </div>
 
         {/* SUBMIT BUTTON */}
         <div className="pt-6">

@@ -78,7 +78,7 @@ export default function AlgorithmWorkspace({
       </div>
 
       {/* IMPORTANT: min-w-0 + overflow-hidden prevents horizontal overflow */}
-      <div className="flex gap-6 h-[70vh] min-w-0 overflow-hidden">
+      <div className="flex gap-4 lg:gap-6 h-[60vh] lg:h-[70vh] min-w-0 overflow-hidden">
         {/* Editor column */}
         <div
           className={[
