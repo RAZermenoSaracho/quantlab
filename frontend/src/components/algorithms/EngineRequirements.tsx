@@ -47,6 +47,7 @@ export default function EngineRequirements() {
 
       # Account state
       "balance": float,
+      "cash_balance": float,
       "initial_balance": float,
       "equity": float,
       "realized_pnl": float,
@@ -59,7 +60,10 @@ export default function EngineRequirements() {
       # Market info
       "exchange": str,
       "symbol": str,
+      "symbols": list[str],
       "timeframe": str,
+      "markets": dict[str, dict],
+      "positions": dict[str, dict],
 
       # Precomputed indicators
       "indicators": {
@@ -80,14 +84,28 @@ export default function EngineRequirements() {
       "stop_fill_model": str,
       "leverage": float,
       "margin_mode": str,
+      "open_orders": list[dict],
       "params": dict,
+      "execution": dict,
+      "portfolio": dict,
 
       # Current bar index
       "index": int,
     }
     """
 
+    # Return formats supported by engine:
     return "LONG" | "SHORT" | "CLOSE" | "HOLD"
+    # or structured order dict:
+    # {
+    #   "action": "BUY" | "SELL" | "CLOSE" | "HOLD",
+    #   "order_type": "market" | "limit" | "stop" | "stop_limit",
+    #   "price": float | None,
+    #   "stop_price": float | None,
+    #   "size_pct": float | None,
+    #   "quantity": float | None,
+    #   "reduce_only": bool
+    # }
 `}
         </pre>
 
@@ -101,6 +119,7 @@ export default function EngineRequirements() {
           <div>• <b>SHORT</b> → open a short position (requires direction="long_short")</div>
           <div>• <b>CLOSE</b> → close the current open position</div>
           <div>• <b>HOLD</b> → take no action</div>
+          <div>• Structured order dicts are supported for market/limit/stop/stop_limit orders.</div>
 
           <div className="pt-2">
             Legacy aliases (supported for compatibility):

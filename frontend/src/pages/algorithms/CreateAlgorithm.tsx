@@ -58,7 +58,7 @@ export default function CreateAlgorithm() {
         <p className="text-slate-400 text-sm mt-3">
           Build a QuantLab strategy. Your code must define{" "}
           <span className="text-white font-medium">
-            generate_signal(candle)
+            generate_signal(ctx)
           </span>.
         </p>
       </div>
