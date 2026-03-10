@@ -30,6 +30,7 @@ class BinanceClient(BaseExchangeClient):
         self._async_client: Optional[AsyncClient] = None
         self._socket_manager: Optional[BinanceSocketManager] = None
         self._stream_active = False
+        self._max_inflight_callbacks = 2000
 
     # ==========================================================
     # STREAMING
@@ -88,6 +89,15 @@ class BinanceClient(BaseExchangeClient):
 
         logger.info("[WS][%s] CONNECTING symbol=%s timeframe=%s testnet=%s", rid, sym, timeframe, self.testnet)
 
+        inflight_tasks: set[asyncio.Task[Any]] = set()
+
+        async def _drain_inflight() -> None:
+            if not inflight_tasks:
+                return
+            done, _ = await asyncio.wait(inflight_tasks, timeout=0, return_when=asyncio.ALL_COMPLETED)
+            for task in done:
+                inflight_tasks.discard(task)
+
         async with socket as stream:
             logger.info("[WS][%s] CONNECTED symbol=%s timeframe=%s", rid, sym, timeframe)
 
@@ -140,7 +150,15 @@ class BinanceClient(BaseExchangeClient):
                         candle["close"],
                     )
 
-                    await on_message(candle)
+                    if len(inflight_tasks) >= self._max_inflight_callbacks:
+                        await _drain_inflight()
+                        if len(inflight_tasks) >= self._max_inflight_callbacks:
+                            logger.warning("[WS][%s] kline callback backlog=%s; dropping tick", rid, len(inflight_tasks))
+                            continue
+
+                    task = asyncio.create_task(on_message(candle))
+                    inflight_tasks.add(task)
+                    task.add_done_callback(lambda t: inflight_tasks.discard(t))
 
                 except asyncio.CancelledError:
                     logger.info("[WS][%s] CancelledError - exiting websocket loop.", rid)
@@ -152,6 +170,8 @@ class BinanceClient(BaseExchangeClient):
                     continue
 
         logger.info("[WS][%s] Websocket context exited symbol=%s timeframe=%s", rid, sym, timeframe)
+        if inflight_tasks:
+            await asyncio.gather(*inflight_tasks, return_exceptions=True)
 
     async def subscribe_trades(
         self,
@@ -169,6 +189,15 @@ class BinanceClient(BaseExchangeClient):
         rid = run_id or "unknown"
         sym = symbol.upper()
         msg_count = 0
+
+        inflight_tasks: set[asyncio.Task[Any]] = set()
+
+        async def _drain_inflight() -> None:
+            if not inflight_tasks:
+                return
+            done, _ = await asyncio.wait(inflight_tasks, timeout=0, return_when=asyncio.ALL_COMPLETED)
+            for task in done:
+                inflight_tasks.discard(task)
 
         while self._stream_active:
             try:
@@ -207,13 +236,25 @@ class BinanceClient(BaseExchangeClient):
                             "qty": float(msg["q"]),
                             "timestamp": int(msg["T"]),
                         }
-                        await on_message(trade)
+                        if len(inflight_tasks) >= self._max_inflight_callbacks:
+                            await _drain_inflight()
+                            if len(inflight_tasks) >= self._max_inflight_callbacks:
+                                logger.warning("[WS][%s] trade callback backlog=%s; dropping trade", rid, len(inflight_tasks))
+                                continue
+
+                        task = asyncio.create_task(on_message(trade))
+                        inflight_tasks.add(task)
+                        task.add_done_callback(lambda t: inflight_tasks.discard(t))
 
                 if self._stream_active:
                     logger.warning("[WS][%s] WS CLOSED trades symbol=%s", rid, sym)
                     logger.info("[WS][%s] WS RECONNECTING trades symbol=%s", rid, sym)
                     await self._reset_async_stream_client()
-                    await asyncio.sleep(1)
+                    try:
+                        await asyncio.sleep(1)
+                    except asyncio.CancelledError:
+                        logger.info("[WS][%s] Trade stream cancelled during reconnect backoff.", rid)
+                        break
 
             except asyncio.CancelledError:
                 logger.info("[WS][%s] Trade stream cancelled.", rid)
@@ -228,14 +269,26 @@ class BinanceClient(BaseExchangeClient):
                         rid,
                         sym,
                     )
+                elif "BinanceWebsocketQueueOverflow" in err.__class__.__name__:
+                    logger.warning(
+                        "[WS][%s] WS queue overflow symbol=%s; resetting websocket.",
+                        rid,
+                        sym,
+                    )
                 else:
                     logger.exception("[WS][%s] Trade stream error.", rid)
 
                 logger.info("[WS][%s] WS RECONNECTING trades symbol=%s", rid, sym)
                 await self._reset_async_stream_client()
-                await asyncio.sleep(1)
+                try:
+                    await asyncio.sleep(1)
+                except asyncio.CancelledError:
+                    logger.info("[WS][%s] Trade stream cancelled during error backoff.", rid)
+                    break
 
         logger.info("[WS][%s] Trade websocket loop stopped symbol=%s", rid, sym)
+        if inflight_tasks:
+            await asyncio.gather(*inflight_tasks, return_exceptions=True)
 
     async def close_stream(self) -> None:
         self._stream_active = False

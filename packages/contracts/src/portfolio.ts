@@ -9,6 +9,9 @@ export type EquityPoint = z.infer<typeof EquityPointSchema>;
 
 export const PortfolioStateSchema = z.object({
   run_id: z.string().uuid(),
+  symbols: z.array(z.string()).optional(),
+  positions: z.record(z.string(), z.unknown()).optional(),
+  last_prices: z.record(z.string(), z.number()).optional(),
   balance: z.number(),
   usdt_balance: z.number(),
   btc_balance: z.number().nonnegative(),

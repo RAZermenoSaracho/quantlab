@@ -34,6 +34,7 @@ export default function PaperRunDetail() {
   const [deleting, setDeleting] = useState(false);
 
   const [candles, setCandles] = useState<Candle[]>([]);
+  const [candlesBySymbol, setCandlesBySymbol] = useState<Record<string, Candle[]>>({});
   const [exchangeStreaming, setExchangeStreaming] = useState(false);
 
   const { data: initialData, error: detailError } = usePaperRun(runId);
@@ -87,6 +88,7 @@ export default function PaperRunDetail() {
 
   useEffect(() => {
     setCandles([]);
+    setCandlesBySymbol({});
     setExchangeStreaming(false);
   }, [runId]);
 
@@ -94,6 +96,12 @@ export default function PaperRunDetail() {
     if (!chartData?.candles?.length) {
       return;
     }
+
+    const defaultSymbol =
+      initialData?.run?.symbols?.[0] ??
+      initialData?.run?.symbol?.split(",")[0]?.trim()?.toUpperCase() ??
+      run?.symbol?.split(",")[0]?.trim()?.toUpperCase() ??
+      "UNKNOWN";
 
     setCandles((current) => {
       if (current.length === 0) {
@@ -108,6 +116,21 @@ export default function PaperRunDetail() {
         byTimestamp.set(candle.timestamp, candle);
       }
       return [...byTimestamp.values()].sort((left, right) => left.timestamp - right.timestamp);
+    });
+
+    setCandlesBySymbol((current) => {
+      const existing = current[defaultSymbol] ?? [];
+      const byTimestamp = new Map<number, Candle>();
+      for (const candle of existing) {
+        byTimestamp.set(candle.timestamp, candle);
+      }
+      for (const candle of chartData.candles) {
+        byTimestamp.set(candle.timestamp, candle);
+      }
+      return {
+        ...current,
+        [defaultSymbol]: [...byTimestamp.values()].sort((left, right) => left.timestamp - right.timestamp),
+      };
     });
   }, [chartData?.candles]);
 
@@ -270,6 +293,12 @@ export default function PaperRunDetail() {
     {
     onTick: (candle: PaperTick) => {
       setExchangeStreaming(true);
+      const symbolKey =
+        candle.symbol ??
+        run?.symbols?.[0] ??
+        run?.symbol?.split(",")[0]?.trim()?.toUpperCase() ??
+        "UNKNOWN";
+
       setCandles((prev) => {
         const nextCandle: Candle = {
           timestamp: candle.timestamp,
@@ -306,6 +335,50 @@ export default function PaperRunDetail() {
           return next;
         }
         return [...prev, nextCandle].sort((left, right) => left.timestamp - right.timestamp);
+      });
+
+      setCandlesBySymbol((prev) => {
+        const current = prev[symbolKey] ?? [];
+        const nextCandle: Candle = {
+          timestamp: candle.timestamp,
+          open: candle.open,
+          high: candle.high,
+          low: candle.low,
+          close: candle.close,
+          volume: candle.volume,
+        };
+
+        if (current.length === 0) {
+          return { ...prev, [symbolKey]: [nextCandle] };
+        }
+
+        const lastIndex = current.length - 1;
+        const lastCandle = current[lastIndex];
+
+        if (lastCandle.timestamp === nextCandle.timestamp) {
+          const next = [...current];
+          next[lastIndex] = nextCandle;
+          return { ...prev, [symbolKey]: next };
+        }
+
+        if (Number(nextCandle.timestamp) > Number(lastCandle.timestamp)) {
+          return { ...prev, [symbolKey]: [...current, nextCandle] };
+        }
+
+        const existingIndex = current.findIndex(
+          (item) => item.timestamp === nextCandle.timestamp
+        );
+        if (existingIndex >= 0) {
+          const next = [...current];
+          next[existingIndex] = nextCandle;
+          return { ...prev, [symbolKey]: next };
+        }
+        return {
+          ...prev,
+          [symbolKey]: [...current, nextCandle].sort(
+            (left, right) => left.timestamp - right.timestamp
+          ),
+        };
       });
     },
   });
@@ -350,6 +423,14 @@ export default function PaperRunDetail() {
   if (!run) return <div className="p-6 text-slate-400">Loading...</div>;
 
   const isRunning = run.status === "ACTIVE";
+  const configuredSymbols =
+    run.symbols && run.symbols.length > 0
+      ? run.symbols
+      : run.symbol
+          .split(",")
+          .map((item) => item.trim().toUpperCase())
+          .filter(Boolean);
+  const primarySymbol = configuredSymbols[0] ?? run.symbol;
   const baseAsset = run.symbol.replace("USDT", "");
   const quoteAsset = "USDT";
 
@@ -473,6 +554,13 @@ export default function PaperRunDetail() {
       : riskScore > 30
       ? "Risky"
       : "Critical";
+
+  const fromDataSymbols = Object.keys(candlesBySymbol);
+  const chartSymbols = [
+    ...new Set([...configuredSymbols, ...fromDataSymbols]),
+  ];
+  const effectiveChartSymbols =
+    chartSymbols.length > 0 ? chartSymbols : [primarySymbol];
 
   /* ================= UI ================= */
 
@@ -783,12 +871,34 @@ export default function PaperRunDetail() {
       </div>
 
       {/* CHARTS */}
-      <div id="candle-chart-wrapper" className="w-full min-w-0 max-w-full bg-slate-800 p-6 rounded-xl border border-slate-700">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-white font-semibold">Price Chart (Candles + Trades)</h3>
-        </div>
-      
-        <CandlestickChart candles={candles} trades={sortedTrades} />
+      <div className="w-full min-w-0 max-w-full space-y-4">
+        {effectiveChartSymbols.map((symbolItem) => {
+          const symbolCandles =
+            candlesBySymbol[symbolItem] ??
+            (symbolItem === primarySymbol ? candles : []);
+          const symbolTrades = sortedTrades.filter((trade) => {
+            if (trade.symbol) {
+              return trade.symbol === symbolItem;
+            }
+            return effectiveChartSymbols.length === 1 || symbolItem === primarySymbol;
+          });
+
+          return (
+            <div
+              key={symbolItem}
+              id={`candle-chart-wrapper-${symbolItem}`}
+              className="w-full min-w-0 max-w-full bg-slate-800 p-6 rounded-xl border border-slate-700"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-white font-semibold">
+                  Price Chart ({symbolItem}) - Candles + Trades
+                </h3>
+              </div>
+
+              <CandlestickChart candles={symbolCandles} trades={symbolTrades} />
+            </div>
+          );
+        })}
       </div>
 
       <div id="equity-chart-wrapper" className="w-full min-w-0 max-w-full bg-slate-800 p-6 rounded-xl border border-slate-700">

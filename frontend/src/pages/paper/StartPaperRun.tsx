@@ -25,6 +25,7 @@ export default function StartPaperRun() {
 
   const [symbolQuery, setSymbolQuery] = useState("");
   const [debouncedSymbolQuery, setDebouncedSymbolQuery] = useState("");
+  const [selectedSymbols, setSelectedSymbols] = useState<string[]>([]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -86,6 +87,15 @@ export default function StartPaperRun() {
   }, [feeRateData]);
 
   useEffect(() => {
+    setSelectedSymbols([]);
+    setForm((prev) => ({
+      ...prev,
+      symbol: "",
+      symbols: undefined,
+    }));
+  }, [form.exchange]);
+
+  useEffect(() => {
     if (!error) {
       return;
     }
@@ -107,15 +117,26 @@ export default function StartPaperRun() {
       return setError("Please select an algorithm.");
     }
 
-    if (!form.symbol) {
-      return setError("Please select a symbol.");
+    const symbolsToSubmit =
+      selectedSymbols.length > 0
+        ? selectedSymbols
+        : form.symbol
+          ? [form.symbol]
+          : [];
+
+    if (symbolsToSubmit.length === 0) {
+      return setError("Please select at least one symbol.");
     }
 
     try {
 
       setLoading(true);
 
-      const res = await startMutation.mutate(form);
+      const res = await startMutation.mutate({
+        ...form,
+        symbol: symbolsToSubmit[0],
+        symbols: symbolsToSubmit,
+      });
 
       navigate(`/paper/${res.run_id}`);
 
@@ -276,18 +297,29 @@ export default function StartPaperRun() {
                     <div
                       key={s.symbol}
                       onClick={() => {
-
-                        setForm({
-                          ...form,
-                          symbol: s.symbol,
+                        setSelectedSymbols((prev) => {
+                          const exists = prev.includes(s.symbol);
+                          const next = exists
+                            ? prev.filter((item) => item !== s.symbol)
+                            : [...prev, s.symbol];
+                          const primary = next[0] ?? "";
+                          setForm((current) => ({
+                            ...current,
+                            symbol: primary,
+                          }));
+                          return next;
                         });
-
                         setSymbolQuery(s.symbol);
 
                       }}
-                      className="px-4 py-2 hover:bg-slate-800 cursor-pointer text-white"
+                      className={`px-4 py-2 hover:bg-slate-800 cursor-pointer text-white flex items-center justify-between ${
+                        selectedSymbols.includes(s.symbol) ? "bg-slate-800/80" : ""
+                      }`}
                     >
-                      {s.symbol}
+                      <span>{s.symbol}</span>
+                      {selectedSymbols.includes(s.symbol) && (
+                        <span className="text-emerald-400 text-xs font-medium">Selected</span>
+                      )}
                     </div>
 
                   ))}
@@ -296,11 +328,16 @@ export default function StartPaperRun() {
 
               )}
 
-              {form.symbol && (
+              {selectedSymbols.length > 0 ? (
+                <Hint>
+                  Selected pairs:{" "}
+                  <span className="text-sky-400">{selectedSymbols.join(", ")}</span>
+                </Hint>
+              ) : form.symbol ? (
                 <Hint>
                   Selected: <span className="text-sky-400">{form.symbol}</span>
                 </Hint>
-              )}
+              ) : null}
 
             </Field>
 

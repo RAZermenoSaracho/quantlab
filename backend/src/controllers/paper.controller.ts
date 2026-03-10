@@ -36,6 +36,7 @@ const StartPaperRunLegacyRequestSchema = z
     code: z.string().min(1).optional(),
     exchange: z.string(),
     symbol: z.string(),
+    symbols: z.array(z.string()).optional(),
     timeframe: MarketTimeframeSchema,
     initial_balance: z.number(),
     fee_rate: z.number().optional(),
@@ -60,10 +61,22 @@ export async function startPaperRun(
     const {
       exchange,
       symbol,
+      symbols,
       timeframe,
       initial_balance,
       fee_rate,
     } = payload;
+    const normalizedSymbols =
+      symbols && symbols.length > 0
+        ? symbols.map((item) => item.trim().toUpperCase()).filter(Boolean)
+        : symbol
+            .split(",")
+            .map((item) => item.trim().toUpperCase())
+            .filter(Boolean);
+    if (normalizedSymbols.length === 0) {
+      return sendError(res, "At least one symbol is required", 400);
+    }
+    const symbolValue = normalizedSymbols.join(",");
 
     const parsedBalance = Number(initial_balance);
     if (!Number.isFinite(parsedBalance) || parsedBalance <= 0) {
@@ -112,7 +125,7 @@ export async function startPaperRun(
         algorithmId,
         exchange ?? "binance",
         fee_rate ?? 0.001,
-        symbol,
+        symbolValue,
         timeframe,
         parsedBalance,
       ]
@@ -129,7 +142,8 @@ export async function startPaperRun(
       run_id: runId,
       code,
       exchange: exchange ?? "binance",
-      symbol,
+      symbol: symbolValue,
+      symbols: normalizedSymbols,
       timeframe,
       initial_balance: parsedBalance,
       fee_rate: fee_rate ?? 0.001,
@@ -177,7 +191,14 @@ export async function stopPaperRun(
       return sendError(res, "Paper run not found", 404);
     }
 
-    await stopPaperOnEngine(runId);
+    try {
+      await stopPaperOnEngine(runId);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `[PaperStop] Engine stop failed run_id=${runId} message=${message}. Marking run stopped in backend anyway.`
+      );
+    }
     unmarkRecoveredPaperRun(runId);
 
     await pool.query(
@@ -281,6 +302,10 @@ export async function restartPaperRun(
       code,
       exchange: String(run.exchange ?? "binance"),
       symbol: String(run.symbol),
+      symbols: String(run.symbol)
+        .split(",")
+        .map((item) => item.trim().toUpperCase())
+        .filter(Boolean),
       timeframe: run.timeframe,
       initial_balance: Number(run.initial_balance ?? 0),
       fee_rate: Number(run.fee_rate ?? 0.001),
@@ -406,6 +431,10 @@ export async function getPaperRunById(
 
       exchange: rawRun.exchange,
       symbol: rawRun.symbol,
+      symbols: String(rawRun.symbol ?? "")
+        .split(",")
+        .map((item) => item.trim().toUpperCase())
+        .filter(Boolean),
       timeframe: rawRun.timeframe,
 
       status: rawRun.status,
@@ -646,9 +675,15 @@ export async function getPaperRunChart(
       nowIso;
     const endTime = lastTradeClose ?? nowIso;
 
+    const configuredSymbols = String(run.symbol ?? "")
+      .split(",")
+      .map((item) => item.trim().toUpperCase())
+      .filter(Boolean);
+    const chartSymbol = configuredSymbols[0] ?? String(run.symbol ?? "").trim().toUpperCase();
+
     const candles = await getEngineCandles({
       exchange: String(run.exchange ?? "binance"),
-      symbol: String(run.symbol),
+      symbol: chartSymbol,
       timeframe: String(run.timeframe),
       start: startTime,
       end: endTime,

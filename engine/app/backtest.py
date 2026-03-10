@@ -458,6 +458,24 @@ def _check_intrabar_risk_exit(
     return True, float(max(candidates))
 
 
+def _compute_total_unrealized(
+    positions_by_symbol: Dict[str, Optional[dict]],
+    last_prices: Dict[str, float],
+) -> float:
+    total = 0.0
+    for symbol, position in positions_by_symbol.items():
+        if position is None:
+            continue
+        mark = float(last_prices.get(symbol, position.get("entry_price", 0.0)))
+        total += _unrealized_pnl(
+            price=mark,
+            entry=float(position.get("average_entry_price", position.get("entry_price", 0.0))),
+            qty=float(position.get("quantity", 0.0)),
+            side=str(position.get("side", "LONG")),
+        )
+    return float(total)
+
+
 # ============================================================
 # Backtest
 # ============================================================
@@ -500,6 +518,9 @@ def run_backtest(
     cooldown_seconds = int(getattr(config, "cooldown_seconds", 0))
     allow_reentry = bool(getattr(config, "allow_reentry", True))
     min_bars = int(getattr(config, "min_bars", 0))
+    symbols = [item.strip().upper() for item in str(symbol).split(",") if item.strip()]
+    if not symbols:
+        symbols = [str(symbol).upper()]
 
     # ============================
     # EXCHANGE CLIENT
@@ -512,6 +533,442 @@ def run_backtest(
     )
 
     final_fee_rate = fee_rate if fee_rate is not None else client.get_default_fee_rate()
+
+    if len(symbols) > 1:
+        source_timeframe = "1m" if timeframe in SUB_MINUTE_TIMEFRAMES else timeframe
+        symbol_candles: Dict[str, list[dict[str, float]]] = {}
+        symbol_indicator_series: Dict[str, Dict[str, list[Any]]] = {}
+        first_ts = None
+        last_ts = None
+
+        for sym in symbols:
+            candles_raw = client.fetch_candles(
+                symbol=sym,
+                timeframe=source_timeframe,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            if not candles_raw:
+                continue
+
+            candles_for_symbol: list[dict[str, float]] = []
+            for c in candles_raw:
+                candles_for_symbol.append({
+                    "open": float(c[1]),
+                    "high": float(c[2]),
+                    "low": float(c[3]),
+                    "close": float(c[4]),
+                    "volume": float(c[5]),
+                    "timestamp": int(c[0]),
+                })
+
+            if timeframe in SUB_MINUTE_TIMEFRAMES:
+                candles_for_symbol = expand_minute_candles_to_subminute(candles_for_symbol, timeframe)
+
+            if not candles_for_symbol:
+                continue
+
+            symbol_candles[sym] = candles_for_symbol
+            symbol_indicator_series[sym] = compute_indicator_series(candles_for_symbol, config)
+            first_ts = (
+                int(candles_for_symbol[0]["timestamp"])
+                if first_ts is None
+                else min(first_ts, int(candles_for_symbol[0]["timestamp"]))
+            )
+            last_ts = (
+                int(candles_for_symbol[-1]["timestamp"])
+                if last_ts is None
+                else max(last_ts, int(candles_for_symbol[-1]["timestamp"]))
+            )
+
+        if not symbol_candles:
+            raise Exception("No candles returned for the selected period.")
+
+        balance = float(initial_balance)
+        max_exposure_pct = float(getattr(config, "max_account_exposure_pct", 100.0))
+        positions_by_symbol: Dict[str, Optional[dict]] = {sym: None for sym in symbols}
+        pending_orders_by_symbol: Dict[str, list[dict[str, Any]]] = {sym: [] for sym in symbols}
+        last_prices: Dict[str, float] = {}
+        last_exit_ts_by_symbol: Dict[str, Optional[int]] = {sym: None for sym in symbols}
+        reentry_blocked_by_symbol: Dict[str, bool] = {sym: False for sym in symbols}
+
+        trades: list[dict[str, Any]] = []
+        order_events: list[dict[str, Any]] = []
+        equity_curve: list[dict[str, float]] = []
+        wins: list[float] = []
+        losses: list[float] = []
+        peak_equity = float(initial_balance)
+        max_dd = 0.0
+
+        history_window = max(
+            int(getattr(config, "min_bars", 1)),
+            int(getattr(config, "lookback_window", 1)),
+            int(getattr(config, "volume_window", 1)),
+            int(getattr(config, "volatility_window", 1)),
+            int(getattr(config, "fast_ma_window", 1)),
+            int(getattr(config, "slow_ma_window", 1)),
+            int(getattr(config, "rsi_window", 1)),
+        ) + 5
+
+        timeline: list[tuple[int, str, int]] = []
+        for sym, candles_for_symbol in symbol_candles.items():
+            for idx, c in enumerate(candles_for_symbol):
+                timeline.append((int(c["timestamp"]), sym, idx))
+        timeline.sort(key=lambda item: (item[0], item[1]))
+
+        total = max(len(timeline), 1)
+        for step, (ts, sym, idx) in enumerate(timeline):
+            if progress_callback:
+                progress_callback(max(int((step / total) * 100), 55))
+
+            candles_for_symbol = symbol_candles[sym]
+            candle = candles_for_symbol[idx]
+            low = float(candle["low"])
+            high = float(candle["high"])
+            close = float(candle["close"])
+            last_prices[sym] = close
+
+            if execution_model == "same_close":
+                exec_price = close
+            else:
+                if idx + 1 < len(candles_for_symbol):
+                    exec_price = float(candles_for_symbol[idx + 1]["open"])
+                else:
+                    exec_price = close
+
+            current_position = positions_by_symbol.get(sym)
+            if current_position is not None:
+                if current_position["side"] == "LONG":
+                    current_position["max_price"] = max(float(current_position.get("max_price", current_position["entry_price"])), float(candle["high"]))
+                else:
+                    current_position["min_price"] = min(float(current_position.get("min_price", current_position["entry_price"])), float(candle["low"]))
+
+            position_for_ctx = _position_with_fee_metrics(
+                position=current_position,
+                mark_price=close,
+            )
+            positions_for_ctx = {
+                k: _position_with_fee_metrics(v, float(last_prices.get(k, v.get("entry_price", 0.0)))) if v is not None else None
+                for k, v in positions_by_symbol.items()
+            }
+
+            unreal_for_ctx = _compute_total_unrealized(positions_by_symbol, last_prices)
+            equity_for_ctx = balance + unreal_for_ctx
+            current_notional = float(current_position.get("entry_notional", 0.0)) if current_position is not None else 0.0
+            current_exposure_pct = (
+                (current_notional / max(equity_for_ctx, 1e-12)) * 100.0
+                if current_position is not None and equity_for_ctx > 0
+                else 0.0
+            )
+
+            ctx = build_context(
+                index=idx,
+                candles=candles_for_symbol,
+                indicator_series=symbol_indicator_series[sym],
+                position=position_for_ctx,
+                balance=balance,
+                initial_balance=float(initial_balance),
+                timeframe=timeframe,
+                history_window=history_window,
+                exchange=exchange,
+                symbol=sym,
+                fee_rate=float(final_fee_rate),
+                slippage_bps=float(getattr(config, "slippage_bps", 0.0)),
+                realized_pnl=float(balance - float(initial_balance)),
+                unrealized_pnl=float(unreal_for_ctx),
+                equity=float(equity_for_ctx),
+                cash_balance=float(balance),
+                exposure_pct=float(current_exposure_pct),
+                open_positions=len([value for value in positions_by_symbol.values() if value is not None]),
+                current_drawdown_pct=float(max_dd * 100.0),
+                execution_model=str(getattr(config, "execution_model", "next_open")),
+                stop_fill_model=str(getattr(config, "stop_fill_model", "stop_price")),
+                leverage=float(getattr(config, "leverage", 1.0)),
+                margin_mode=str(getattr(config, "margin_mode", "isolated")),
+                params=dict(getattr(config, "params", {}) or {}),
+                open_orders=[
+                    {
+                        "id": str(order["id"]),
+                        "symbol": sym,
+                        "side": str(order["side"]),
+                        "order_type": str(order["order_type"]),
+                        "price": order.get("price"),
+                        "stop_price": order.get("stop_price"),
+                        "quantity": order.get("quantity"),
+                        "status": str(order.get("status", "pending")),
+                        "created_at": int(order.get("created_at", ts)),
+                        "filled_at": order.get("filled_at"),
+                    }
+                    for order in pending_orders_by_symbol[sym]
+                    if str(order.get("status", "pending")) == "pending"
+                ],
+                symbols=symbols,
+                markets={item: {"exchange": exchange, "symbol": item, "timeframe": timeframe, "last_price": last_prices.get(item)} for item in symbols},
+                positions={item: value for item, value in positions_for_ctx.items() if value is not None},
+            )
+
+            if idx < min_bars:
+                intent = "HOLD"
+            else:
+                raw_signal = generate_signal(ctx)
+                structured_order = _normalize_order_instruction(raw_signal)
+                if structured_order is not None:
+                    action = str(structured_order["action"])
+                    order_type = str(structured_order["order_type"])
+                    if action in ("BUY", "SELL", "CLOSE"):
+                        order = {
+                            "id": str(uuid4()),
+                            "symbol": sym,
+                            "side": "SELL" if action == "CLOSE" else action,
+                            "order_type": order_type,
+                            "price": structured_order.get("price"),
+                            "stop_price": structured_order.get("stop_price"),
+                            "quantity": structured_order.get("quantity"),
+                            "size_pct": structured_order.get("size_pct"),
+                            "reduce_only": bool(structured_order.get("reduce_only", False)),
+                            "status": "pending",
+                            "created_at": ts,
+                            "filled_at": None,
+                            "triggered": False,
+                        }
+                        needs_price = order_type in {"limit", "stop_limit"}
+                        needs_stop = order_type in {"stop", "stop_limit"}
+                        if needs_price and order.get("price") is None:
+                            order["status"] = "cancelled"
+                            order_events.append({"event_type": "order_cancelled", "reason": "missing_price", **order})
+                        elif needs_stop and order.get("stop_price") is None:
+                            order["status"] = "cancelled"
+                            order_events.append({"event_type": "order_cancelled", "reason": "missing_stop_price", **order})
+                        else:
+                            pending_orders_by_symbol[sym].append(order)
+                            order_events.append({"event_type": "order_created", **order})
+                    intent = "HOLD"
+                else:
+                    if raw_signal not in ALLOWED_RETURN_VALUES and str(raw_signal).upper() not in ("LONG", "SHORT", "CLOSE"):
+                        raise Exception(f"Invalid signal '{raw_signal}'. Allowed: {ALLOWED_RETURN_VALUES} (+ LONG/SHORT/CLOSE).")
+                    intent = _normalize_signal(str(raw_signal), direction)
+
+            still_pending: list[dict[str, Any]] = []
+            for order in pending_orders_by_symbol[sym]:
+                if str(order.get("status", "pending")) != "pending":
+                    continue
+                side = str(order.get("side", "BUY")).upper()
+                order_type = str(order.get("order_type", "market")).lower()
+                limit_price = float(order["price"]) if order.get("price") is not None else None
+                stop_price = float(order["stop_price"]) if order.get("stop_price") is not None else None
+                fill_now = False
+                fill_price = float(exec_price)
+
+                if order_type == "market":
+                    fill_now = True
+                elif order_type == "limit":
+                    if side == "BUY" and limit_price is not None and low <= limit_price:
+                        fill_now = True
+                        fill_price = float(limit_price)
+                    elif side == "SELL" and limit_price is not None and high >= limit_price:
+                        fill_now = True
+                        fill_price = float(limit_price)
+                elif order_type == "stop":
+                    if side == "BUY" and stop_price is not None and high >= stop_price:
+                        fill_now = True
+                    elif side == "SELL" and stop_price is not None and low <= stop_price:
+                        fill_now = True
+                elif order_type == "stop_limit":
+                    triggered = bool(order.get("triggered", False))
+                    if not triggered:
+                        if side == "BUY" and stop_price is not None and high >= stop_price:
+                            order["triggered"] = True
+                            triggered = True
+                        elif side == "SELL" and stop_price is not None and low <= stop_price:
+                            order["triggered"] = True
+                            triggered = True
+                    if triggered and limit_price is not None:
+                        if side == "BUY" and low <= limit_price:
+                            fill_now = True
+                            fill_price = float(limit_price)
+                        elif side == "SELL" and high >= limit_price:
+                            fill_now = True
+                            fill_price = float(limit_price)
+
+                if not fill_now:
+                    still_pending.append(order)
+                    continue
+
+                size_pct = float(order["size_pct"]) if order.get("size_pct") is not None else None
+                size_qty = float(order["quantity"]) if order.get("quantity") is not None else None
+                current_position = positions_by_symbol[sym]
+                executed = False
+
+                if side == "BUY":
+                    dynamic_max_allowed_capital = max(0.0, float(balance) * (max_exposure_pct / 100.0))
+                    if current_position is None:
+                        opened = _open_position("LONG", balance, dynamic_max_allowed_capital, float(fill_price), ts, float(final_fee_rate), config, size_pct=size_pct, size_qty=size_qty)
+                        if opened is not None:
+                            positions_by_symbol[sym] = opened
+                            executed = True
+                    elif current_position["side"] == "LONG":
+                        added = _add_to_position(current_position, balance, dynamic_max_allowed_capital, float(fill_price), ts, float(final_fee_rate), config, size_pct=size_pct, size_qty=size_qty)
+                        if added is not None:
+                            positions_by_symbol[sym] = added
+                            executed = True
+                else:
+                    if current_position is not None:
+                        trade, pnl = _close_position(current_position, float(fill_price), ts, float(final_fee_rate), config)
+                        trade["symbol"] = sym
+                        trades.append(trade)
+                        balance += pnl
+                        (wins if pnl > 0 else losses).append(pnl)
+                        positions_by_symbol[sym] = None
+                        last_exit_ts_by_symbol[sym] = ts
+                        if not allow_reentry:
+                            reentry_blocked_by_symbol[sym] = True
+                        executed = True
+
+                if executed:
+                    order["status"] = "filled"
+                    order["filled_at"] = ts
+                    order_events.append({"event_type": "order_filled", **order})
+                else:
+                    still_pending.append(order)
+
+            pending_orders_by_symbol[sym] = still_pending
+
+            if not allow_reentry and intent == "HOLD":
+                reentry_blocked_by_symbol[sym] = False
+
+            def _cooldown_ok() -> bool:
+                if cooldown_seconds <= 0:
+                    return True
+                last_exit_ts = last_exit_ts_by_symbol.get(sym)
+                if last_exit_ts is None:
+                    return True
+                return (ts - last_exit_ts) >= cooldown_seconds * 1000
+
+            current_position = positions_by_symbol[sym]
+            if current_position is not None:
+                hit, fill_price = _check_intrabar_risk_exit(current_position, candle, config)
+                if hit and fill_price is not None:
+                    trade, pnl = _close_position(current_position, float(fill_price), ts, float(final_fee_rate), config)
+                    trade["symbol"] = sym
+                    trades.append(trade)
+                    balance += pnl
+                    (wins if pnl > 0 else losses).append(pnl)
+                    positions_by_symbol[sym] = None
+                    last_exit_ts_by_symbol[sym] = ts
+                    if not allow_reentry:
+                        reentry_blocked_by_symbol[sym] = True
+
+            current_position = positions_by_symbol[sym]
+            if intent == "CLOSE":
+                if current_position is not None:
+                    trade, pnl = _close_position(current_position, float(exec_price), ts, float(final_fee_rate), config)
+                    trade["symbol"] = sym
+                    trades.append(trade)
+                    balance += pnl
+                    (wins if pnl > 0 else losses).append(pnl)
+                    positions_by_symbol[sym] = None
+                    last_exit_ts_by_symbol[sym] = ts
+                    if not allow_reentry:
+                        reentry_blocked_by_symbol[sym] = True
+            elif intent in ("LONG", "SHORT"):
+                if direction == "long_only" and intent == "SHORT":
+                    pass
+                elif not allow_reentry and reentry_blocked_by_symbol[sym]:
+                    pass
+                elif not _cooldown_ok():
+                    pass
+                else:
+                    dynamic_max_allowed_capital = max(0.0, float(balance) * (max_exposure_pct / 100.0))
+                    if current_position is None:
+                        positions_by_symbol[sym] = _open_position(intent, balance, dynamic_max_allowed_capital, float(exec_price), ts, float(final_fee_rate), config)
+                    elif current_position["side"] == intent:
+                        added = _add_to_position(current_position, balance, dynamic_max_allowed_capital, float(exec_price), ts, float(final_fee_rate), config)
+                        if added is not None:
+                            positions_by_symbol[sym] = added
+                    else:
+                        trade, pnl = _close_position(current_position, float(exec_price), ts, float(final_fee_rate), config)
+                        trade["symbol"] = sym
+                        trades.append(trade)
+                        balance += pnl
+                        (wins if pnl > 0 else losses).append(pnl)
+                        positions_by_symbol[sym] = None
+                        last_exit_ts_by_symbol[sym] = ts
+                        if not allow_reentry:
+                            reentry_blocked_by_symbol[sym] = True
+                        if allow_reentry and _cooldown_ok():
+                            positions_by_symbol[sym] = _open_position(intent, balance, dynamic_max_allowed_capital, float(exec_price), ts, float(final_fee_rate), config)
+
+            equity = balance + _compute_total_unrealized(positions_by_symbol, last_prices)
+            if equity <= 0:
+                break
+            equity_curve.append({"timestamp": ts, "equity": float(equity)})
+            if equity > peak_equity:
+                peak_equity = equity
+            dd = (peak_equity - equity) / peak_equity if peak_equity else 0.0
+            max_dd = max(max_dd, dd)
+            if getattr(config, "max_drawdown_pct", None) is not None and (dd * 100.0) >= float(config.max_drawdown_pct):
+                break
+
+        open_positions_at_end = len([p for p in positions_by_symbol.values() if p is not None])
+        if open_positions_at_end > 0:
+            for sym, position in list(positions_by_symbol.items()):
+                if position is None:
+                    continue
+                final_exit_price = float(last_prices.get(sym, position.get("entry_price", 0.0)))
+                final_ts = int(last_ts or 0)
+                trade, pnl = _close_position(position, final_exit_price, final_ts, float(final_fee_rate), config)
+                trade["forced_close"] = True
+                trade["symbol"] = sym
+                trades.append(trade)
+                balance += pnl
+                (wins if pnl > 0 else losses).append(pnl)
+                positions_by_symbol[sym] = None
+            if equity_curve:
+                equity_curve[-1]["equity"] = float(balance)
+            else:
+                equity_curve.append({"timestamp": int(last_ts or 0), "equity": float(balance)})
+
+        total_return_usdt = balance - float(initial_balance)
+        total_return_percent = (total_return_usdt / float(initial_balance)) * 100.0 if initial_balance else 0.0
+        total_trades = len(trades)
+        win_rate_percent = (len([x for x in wins if x > 0]) / total_trades * 100.0) if total_trades else 0.0
+        total_wins = float(sum([x for x in wins if x > 0]))
+        total_losses = float(abs(sum([x for x in losses if x < 0]))) if losses else 0.0
+        profit_factor = (total_wins / total_losses) if total_losses > 0 else 0.0
+        analysis = calculate_metrics(
+            equity_curve=equity_curve,
+            trades=trades,
+            initial_balance=float(initial_balance),
+            timeframe=timeframe,
+            risk_free_rate=0.0,
+        )
+        primary_symbol = symbols[0]
+        primary_candles = symbol_candles.get(primary_symbol, [])
+        return {
+            "exchange": exchange,
+            "symbols": symbols,
+            "fee_rate": float(final_fee_rate),
+            "config_used": config_used,
+            "initial_balance": float(initial_balance),
+            "final_balance": float(balance),
+            "total_return_usdt": float(total_return_usdt),
+            "total_return_percent": float(total_return_percent),
+            "max_drawdown_percent": float(max_dd * 100.0),
+            "win_rate_percent": float(win_rate_percent),
+            "profit_factor": float(profit_factor),
+            "total_trades": int(total_trades),
+            "candles_count": int(len(primary_candles)),
+            "candles_start_ts": first_ts,
+            "candles_end_ts": last_ts,
+            "candles": primary_candles,
+            "candles_by_symbol": symbol_candles,
+            "equity_curve": equity_curve,
+            "trades": trades,
+            "order_events": order_events,
+            "analysis": analysis,
+            "open_positions_at_end": int(open_positions_at_end),
+            "had_forced_close": open_positions_at_end > 0,
+        }
 
     if progress_callback:
         progress_callback(30)
@@ -1127,6 +1584,7 @@ def run_backtest(
 
     return {
         "exchange": exchange,
+        "symbols": [symbol],
         "fee_rate": float(final_fee_rate),
         "config_used": config_used,
 

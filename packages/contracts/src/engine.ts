@@ -106,6 +106,7 @@ export const StartPaperEngineRequestSchema = z.object({
   code: z.string(),
   exchange: z.string(),
   symbol: z.string(),
+  symbols: z.array(z.string()).optional(),
   timeframe: MarketTimeframeSchema,
   initial_balance: z.number().positive(),
   fee_rate: z.number().optional(),

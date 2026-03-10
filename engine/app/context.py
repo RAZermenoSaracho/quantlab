@@ -28,12 +28,18 @@ def build_context(
     margin_mode: str = "isolated",
     params: Optional[Dict[str, Any]] = None,
     open_orders: Optional[List[Dict[str, Any]]] = None,
+    symbols: Optional[List[str]] = None,
+    markets: Optional[Dict[str, Dict[str, Any]]] = None,
+    positions: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict:
     safe_equity = float(balance if equity is None else equity)
     safe_cash_balance = float(balance if cash_balance is None else cash_balance)
     safe_params = dict(params or {})
     safe_open_orders = list(open_orders or [])
     safe_position = position
+    safe_symbols = [str(item) for item in (symbols or ([symbol] if symbol else []))]
+    safe_markets = dict(markets or ({symbol: {"exchange": exchange, "symbol": symbol, "timeframe": timeframe}} if symbol else {}))
+    safe_positions = dict(positions or ({symbol: safe_position} if symbol and isinstance(safe_position, dict) else {}))
     average_entry_price = (
         float(safe_position.get("average_entry_price"))
         if isinstance(safe_position, dict) and safe_position.get("average_entry_price") is not None
@@ -87,6 +93,9 @@ def build_context(
             },
             "params": safe_params,
             "open_orders": safe_open_orders,
+            "symbols": safe_symbols,
+            "markets": safe_markets,
+            "positions": safe_positions,
             "portfolio": {
                 "balance": float(balance),
                 "cash_balance": float(safe_cash_balance),

@@ -69,7 +69,7 @@ export async function validateAlgorithm(
 }
 
 export async function startPaperOnEngine(
-  payload: StartPaperEngineRequest
+  payload: StartPaperEngineRequest & { symbols?: string[] }
 ): Promise<PaperEngineActionResult> {
   try {
     const parsedPayload = StartPaperEngineRequestSchema.parse(payload);

@@ -47,6 +47,18 @@ type PaperPositionPayload = z.infer<
   typeof PaperPositionEventSchema
 >["payload"];
 
+function extractSymbol(value: unknown): string | undefined {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "symbol" in value &&
+    typeof (value as { symbol?: unknown }).symbol === "string"
+  ) {
+    return (value as { symbol: string }).symbol;
+  }
+  return undefined;
+}
+
 const latestPortfolioStates = new Map<string, PortfolioState>();
 
 export function getLatestPortfolioState(
@@ -264,6 +276,7 @@ async function handleTradeEvent(
       "trade_execution",
       TradeExecutionSchema.parse({
         run_id: runId,
+        symbol: extractSymbol(trade),
         side: dbSide,
         entry_price: entryPrice,
         exit_price: exitPrice,
@@ -342,6 +355,7 @@ async function handleBalanceEvent(
       "paper_run_update",
       PaperRunUpdateEventSchema.parse({
         run_id: runId,
+        symbol: extractSymbol(payload),
         quote_balance: quoteBalance,
         base_balance: baseBalance,
         equity,
@@ -380,6 +394,7 @@ async function handlePositionEvent(
     "paper_run_update",
     PaperRunUpdateEventSchema.parse({
       run_id: runId,
+      symbol: extractSymbol(payload),
       position: {
         ...payload,
         opened_at: toIsoOrNull(

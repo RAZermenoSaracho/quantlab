@@ -45,6 +45,7 @@ export type PaperPosition = z.infer<typeof PaperPositionSchema>;
 export const PaperTradeSchema = z.object({
   id: z.string().uuid(),
   run_id: z.string().uuid(),
+  symbol: z.string().optional(),
 
   run_type: z.literal("PAPER").optional(),
 
@@ -110,6 +111,7 @@ export const PaperRunSchema = z.object({
 
   exchange: z.string(),
   symbol: z.string(),
+  symbols: z.array(z.string()).optional(),
   timeframe: MarketTimeframeSchema,
 
   status: PaperRunStatusSchema,
@@ -171,6 +173,7 @@ export const StartPaperRunRequestSchema = z.object({
   algorithm_id: z.string().uuid(),
   exchange: z.string(),
   symbol: z.string(),
+  symbols: z.array(z.string()).optional(),
   timeframe: MarketTimeframeSchema,
   initial_balance: z.number(),
   fee_rate: z.number().optional(),
@@ -226,6 +229,7 @@ export const PaperTradeEventSchema = z.object({
   run_id: z.string().uuid(),
   event_type: z.literal("trade"),
   payload: z.object({
+    symbol: z.string().optional(),
     side: PaperTradeSideSchema,
     entry_price: z.number(),
     exit_price: z.number().nullable().optional(),
@@ -253,6 +257,7 @@ export const PaperBalanceEventSchema = z.object({
   run_id: z.string().uuid(),
   event_type: z.literal("balance"),
   payload: z.object({
+    symbol: z.string().optional(),
     quote_balance: z.number(),
     base_balance: z.number(),
     equity: z.number(),
@@ -276,7 +281,9 @@ export const PaperStatusEventSchema = z.object({
 export const PaperPositionEventSchema = z.object({
   run_id: z.string().uuid(),
   event_type: z.literal("position"),
-  payload: PaperEnginePositionSchema,
+  payload: PaperEnginePositionSchema.extend({
+    symbol: z.string().optional(),
+  }),
 });
 
 /* ================= POSITION UPDATE EVENT ================= */
@@ -284,7 +291,9 @@ export const PaperPositionEventSchema = z.object({
 export const PaperPositionUpdateEventSchema = z.object({
   run_id: z.string().uuid(),
   event_type: z.literal("position_update"),
-  payload: PaperEnginePositionSchema.nullable(),
+  payload: PaperEnginePositionSchema.extend({
+    symbol: z.string().optional(),
+  }).nullable(),
 });
 
 /* ================= ERROR EVENT ================= */
@@ -303,6 +312,7 @@ export const PaperCandleEventSchema = z.object({
   run_id: z.string().uuid(),
   event_type: z.literal("candle"),
   payload: z.object({
+    symbol: z.string().optional(),
     open: z.number(),
     high: z.number(),
     low: z.number(),

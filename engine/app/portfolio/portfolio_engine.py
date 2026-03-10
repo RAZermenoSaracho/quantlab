@@ -6,6 +6,9 @@ from typing import Any, Dict, Optional
 from .portfolio_state import PortfolioState
 
 
+_DEFAULT_SYMBOL = "__default__"
+
+
 @dataclass
 class PortfolioEngine:
     initial_cash: float
@@ -15,46 +18,100 @@ class PortfolioEngine:
             cash_balance=float(self.initial_cash),
             total_equity=float(self.initial_cash),
         )
+        self.primary_symbol = _DEFAULT_SYMBOL
 
-    @property
-    def position(self) -> Optional[Dict[str, Any]]:
-        if not self.state.positions:
+    def _symbol_key(self, symbol: Optional[str]) -> str:
+        if symbol is None or not str(symbol).strip():
+            return _DEFAULT_SYMBOL
+        return str(symbol).upper()
+
+    def _position_row(self, symbol: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        key = self._symbol_key(symbol)
+        row = self.state.positions.get(key)
+        if isinstance(row, dict):
+            return row
+        return None
+
+    def position_for_symbol(self, symbol: str) -> Optional[Dict[str, Any]]:
+        row = self._position_row(symbol)
+        if row is None:
             return None
+
         avg_entry = float(
-            self.state.positions.get(
-                "average_entry_price",
-                self.state.positions.get("entry_price", 0.0),
+            row.get("average_entry_price", row.get("entry_price", 0.0))
+        )
+        qty = float(row.get("base_qty", 0.0))
+        if qty <= 0:
+            return None
+
+        key = self._symbol_key(symbol)
+        mark_price = float(
+            self.state.last_prices.get(
+                key,
+                self.state.last_price if self.state.last_price is not None else avg_entry,
             )
         )
-        qty = float(self.state.positions.get("base_qty", 0.0))
-        mark_price = float(self.state.last_price if self.state.last_price is not None else avg_entry)
         market_value = max(0.0, qty) * mark_price
+
         return {
+            "symbol": key,
             "side": "LONG",
             "entry_price": avg_entry,
             "average_entry_price": avg_entry,
             "quantity": qty,
-            "opened_at": int(self.state.positions.get("opened_at", 0)),
-            "entry_notional": float(self.state.positions.get("entry_notional", 0.0)),
+            "opened_at": int(row.get("opened_at", 0)),
+            "entry_notional": float(row.get("entry_notional", 0.0)),
             "entry_fee": float(
-                self.state.positions.get(
-                    "fees_paid_quote",
-                    self.state.positions.get("entry_fee_quote", 0.0),
-                )
+                row.get("fees_paid_quote", row.get("entry_fee_quote", 0.0))
             ),
-            "fee_rate_used": float(self.state.positions.get("fee_rate_used", 0.0)),
+            "fee_rate_used": float(row.get("fee_rate_used", 0.0)),
             "fees_paid": float(
-                self.state.positions.get(
-                    "fees_paid_quote",
-                    self.state.positions.get("entry_fee_quote", 0.0),
-                )
+                row.get("fees_paid_quote", row.get("entry_fee_quote", 0.0))
             ),
-            "entries_count": int(self.state.positions.get("entries_count", 1)),
+            "entries_count": int(row.get("entries_count", 1)),
             "market_value": market_value,
         }
 
-    def apply_price_update(self, price: float) -> None:
+    @property
+    def position(self) -> Optional[Dict[str, Any]]:
+        if self.primary_symbol in self.state.positions:
+            pos = self.position_for_symbol(self.primary_symbol)
+            if pos is not None:
+                return pos
+        for symbol in self.state.positions.keys():
+            pos = self.position_for_symbol(symbol)
+            if pos is not None:
+                return pos
+        return None
+
+    def positions_by_symbol(self) -> Dict[str, Dict[str, Any]]:
+        out: Dict[str, Dict[str, Any]] = {}
+        for symbol in self.state.positions.keys():
+            pos = self.position_for_symbol(symbol)
+            if pos is not None:
+                out[symbol] = pos
+        return out
+
+    def open_positions_count(self) -> int:
+        return len(self.positions_by_symbol())
+
+    def apply_price_update_for_symbol(self, symbol: str, price: float) -> None:
+        key = self._symbol_key(symbol)
+        self.state.last_prices[key] = float(price)
         self.state.last_price = float(price)
+        self.state.recalc()
+
+    def apply_price_update(self, price: float, symbol: Optional[str] = None) -> None:
+        key = self._symbol_key(symbol if symbol is not None else self.primary_symbol)
+        self.state.last_prices[key] = float(price)
+        self.state.last_price = float(price)
+        self.state.recalc()
+
+    def apply_price_update_bulk(self, prices: Dict[str, float]) -> None:
+        for symbol, price in prices.items():
+            key = self._symbol_key(symbol)
+            self.state.last_prices[key] = float(price)
+            self.state.last_price = float(price)
         self.state.recalc()
 
     def apply_trade_open(
@@ -65,15 +122,20 @@ class PortfolioEngine:
         fee_rate: float,
         timestamp: int,
         slippage_bps: float = 0.0,
+        symbol: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         if side != "LONG":
             return None
         if capital_to_use <= 0:
             return None
 
+        key = self._symbol_key(symbol)
+        self.primary_symbol = key
+
         effective_price = float(price) * (1 + float(slippage_bps) / 10_000.0)
         if effective_price <= 0:
             return None
+
         capital_to_use = min(float(capital_to_use), float(self.state.cash_balance))
         if capital_to_use <= 0:
             return None
@@ -83,14 +145,17 @@ class PortfolioEngine:
         net_quote = entry_notional - entry_fee_quote
         if net_quote <= 0:
             return None
+
         net_qty = net_quote / effective_price
         if net_qty <= 0:
             return None
 
-        fill_payload: Dict[str, Any] = {}
-        if self.position is None:
+        row = self._position_row(key)
+        fill_payload: Dict[str, Any]
+
+        if row is None:
             self.state.cash_balance -= entry_notional
-            self.state.positions = {
+            self.state.positions[key] = {
                 "base_qty": float(net_qty),
                 "entry_price": float(effective_price),
                 "average_entry_price": float(effective_price),
@@ -103,6 +168,7 @@ class PortfolioEngine:
             }
             self.state.fees_paid += float(entry_fee_quote)
             fill_payload = {
+                "symbol": key,
                 "side": "LONG",
                 "entry_price": float(effective_price),
                 "quantity": float(net_qty),
@@ -112,26 +178,16 @@ class PortfolioEngine:
                 "entries_count_after_fill": 1,
             }
         else:
-            prev_qty = float(self.state.positions.get("base_qty", 0.0))
-            prev_avg_entry = float(
-                self.state.positions.get(
-                    "average_entry_price",
-                    self.state.positions.get("entry_price", 0.0),
-                )
-            )
-            prev_entry_notional = float(self.state.positions.get("entry_notional", 0.0))
-            prev_fees_paid = float(
-                self.state.positions.get(
-                    "fees_paid_quote",
-                    self.state.positions.get("entry_fee_quote", 0.0),
-                )
-            )
+            prev_qty = float(row.get("base_qty", 0.0))
+            prev_avg_entry = float(row.get("average_entry_price", row.get("entry_price", 0.0)))
+            prev_entry_notional = float(row.get("entry_notional", 0.0))
+            prev_fees_paid = float(row.get("fees_paid_quote", row.get("entry_fee_quote", 0.0)))
             new_qty = prev_qty + float(net_qty)
             if new_qty <= 0:
                 return None
             new_avg_entry = ((prev_avg_entry * prev_qty) + (effective_price * float(net_qty))) / new_qty
             self.state.cash_balance -= entry_notional
-            self.state.positions.update({
+            row.update({
                 "base_qty": float(new_qty),
                 "entry_price": float(new_avg_entry),
                 "average_entry_price": float(new_avg_entry),
@@ -139,23 +195,25 @@ class PortfolioEngine:
                 "fees_paid_quote": float(prev_fees_paid + entry_fee_quote),
                 "entry_fee_quote": float(prev_fees_paid + entry_fee_quote),
                 "fee_rate_used": float(fee_rate),
-                "entries_count": int(self.state.positions.get("entries_count", 1)) + 1,
+                "entries_count": int(row.get("entries_count", 1)) + 1,
             })
             self.state.fees_paid += float(entry_fee_quote)
             fill_payload = {
+                "symbol": key,
                 "side": "LONG",
                 "entry_price": float(effective_price),
                 "quantity": float(net_qty),
                 "entry_notional": float(entry_notional),
                 "entry_fee": float(entry_fee_quote),
                 "fee_rate_used": float(fee_rate),
-                "entries_count_after_fill": int(self.state.positions.get("entries_count", 1)),
+                "entries_count_after_fill": int(row.get("entries_count", 1)),
             }
 
+        self.state.last_prices[key] = float(price)
         self.state.last_price = float(price)
         self.state.recalc()
         return {
-            "position": self.position,
+            "position": self.position_for_symbol(key),
             "fill": fill_payload,
         }
 
@@ -165,8 +223,10 @@ class PortfolioEngine:
         fee_rate: float,
         timestamp: int,
         slippage_bps: float = 0.0,
+        symbol: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        position = self.position
+        key = self._symbol_key(symbol if symbol is not None else self.primary_symbol)
+        position = self.position_for_symbol(key)
         if position is None:
             return None
 
@@ -181,19 +241,17 @@ class PortfolioEngine:
         net_quote = exit_notional - exit_fee
 
         self.state.cash_balance += net_quote
-        pnl = (
-            (effective_exit - entry_price) * qty
-            - entry_fee
-            - exit_fee
-        )
+        pnl = ((effective_exit - entry_price) * qty) - entry_fee - exit_fee
         self.state.realized_pnl += float(pnl)
         self.state.fees_paid += float(exit_fee)
         opened_at = int(position.get("opened_at", timestamp))
-        self.state.positions = {}
+        self.state.positions.pop(key, None)
+        self.state.last_prices[key] = float(price)
         self.state.last_price = float(price)
         self.state.recalc()
 
         return {
+            "symbol": key,
             "side": "LONG",
             "entry_price": entry_price,
             "exit_price": float(effective_exit),
@@ -212,39 +270,30 @@ class PortfolioEngine:
         }
 
     def snapshot(self, run_id: str) -> Dict[str, Any]:
-        base_qty = float(self.state.positions.get("base_qty", 0.0))
-        avg_entry = float(
-            self.state.positions.get(
-                "average_entry_price",
-                self.state.positions.get("entry_price", 0.0),
-            )
-        )
-        market_value = base_qty * float(self.state.last_price or avg_entry or 0.0)
+        positions = self.positions_by_symbol()
+        total_market_value = sum(float(p.get("market_value", 0.0)) for p in positions.values())
         equity = float(self.state.total_equity)
-        exposure_pct = float((market_value / equity) * 100.0) if equity > 0 else 0.0
+        exposure_pct = float((total_market_value / equity) * 100.0) if equity > 0 else 0.0
+        primary = positions.get(self.primary_symbol) or next(iter(positions.values()), None)
+
         return {
             "run_id": run_id,
             "balance": float(self.state.cash_balance),
             "equity": float(self.state.total_equity),
             "pnl": float(self.state.realized_pnl + self.state.unrealized_pnl),
-            "positions": {
-                "base_qty": base_qty,
-                "entry_price": avg_entry,
-                "average_entry_price": avg_entry,
-                "entries_count": int(self.state.positions.get("entries_count", 1)),
-            }
-            if self.state.positions
-            else None,
+            "positions": positions,
+            "position": primary,
             "unrealized_pnl": float(self.state.unrealized_pnl),
             "realized_pnl": float(self.state.realized_pnl),
             "cash_balance": float(self.state.cash_balance),
             "fees_paid": float(self.state.fees_paid),
-            "open_positions": 1 if self.state.positions else 0,
+            "open_positions": len(positions),
             "exposure_pct": exposure_pct,
         }
 
-    def position_metrics(self, mark_price: float) -> Optional[Dict[str, Any]]:
-        position = self.position
+    def position_metrics(self, mark_price: float, symbol: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        key = self._symbol_key(symbol if symbol is not None else self.primary_symbol)
+        position = self.position_for_symbol(key)
         if position is None:
             return None
 
@@ -263,6 +312,7 @@ class PortfolioEngine:
 
         return {
             **position,
+            "symbol": key,
             "average_entry_price": float(entry_price),
             "market_value": float(exit_notional),
             "realized_pnl": float(self.state.realized_pnl),

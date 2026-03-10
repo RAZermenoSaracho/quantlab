@@ -81,6 +81,9 @@ class MarketStreamManager:
             state.task.cancel()
             try:
                 await asyncio.wait_for(state.task, timeout=3.0)
+            except asyncio.CancelledError:
+                # Expected when we cancel a running stream task during unsubscribe/stop.
+                pass
             except Exception:
                 logger.exception(
                     "[MarketStream][%s:%s] Failed stopping stream task cleanly.",

@@ -73,6 +73,7 @@ function findTradeIndex(
 function mergeTrade(existing: PaperTrade, payload: TradeExecution): PaperTrade {
   return {
     ...existing,
+    symbol: payload.symbol ?? existing.symbol,
     side: payload.side,
     entry_price: payload.entry_price,
     exit_price: payload.exit_price ?? existing.exit_price ?? null,
@@ -107,6 +108,7 @@ function makeTrade(payload: TradeExecution): PaperTrade {
   return {
     id: `${payload.run_id}:${identity}`,
     run_id: payload.run_id,
+    symbol: payload.symbol,
     run_type: "PAPER",
     side: payload.side,
     entry_price: payload.entry_price,

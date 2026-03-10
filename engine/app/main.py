@@ -389,6 +389,14 @@ async def stop_paper(run_id: str):
             "run_id": run_id,
         }
 
+    except asyncio.CancelledError:
+        ACTIVE_PAPER_SESSIONS.pop(run_id, None)
+        logger.info("Paper session stop cancelled but treated as stopped run_id=%s", run_id)
+        return {
+            "success": True,
+            "message": "Paper trading session stopped",
+            "run_id": run_id,
+        }
     except Exception as e:
         logger.exception("Failed to stop paper session")
         raise HTTPException(status_code=500, detail=str(e))

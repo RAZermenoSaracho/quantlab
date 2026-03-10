@@ -8,12 +8,14 @@ export const LeavePaperRunSchema = z.string().uuid();
 
 export const PaperTickSchema = CandleSchema.extend({
   run_id: z.string().uuid(),
+  symbol: z.string().optional(),
 });
 
 export type PaperTick = z.infer<typeof PaperTickSchema>;
 
 export const TradeExecutionSchema = z.object({
   run_id: z.string().uuid(),
+  symbol: z.string().optional(),
   side: z.enum(["LONG", "SHORT"]),
   entry_price: z.number(),
   exit_price: z.number().nullable().optional(),
@@ -38,6 +40,7 @@ export type TradeExecution = z.infer<typeof TradeExecutionSchema>;
 
 export const PaperRunUpdateEventSchema = z.object({
   run_id: z.string().uuid(),
+  symbol: z.string().optional(),
   quote_balance: z.number().optional(),
   base_balance: z.number().optional(),
   equity: z.number().optional(),
