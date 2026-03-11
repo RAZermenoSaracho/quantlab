@@ -1,5 +1,12 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import List, Any, Dict, Optional, Callable, Awaitable
+
+
+@dataclass(frozen=True)
+class FeeModel:
+    maker_fee: float
+    taker_fee: float
 
 
 class BaseExchangeClient(ABC):
@@ -141,6 +148,10 @@ class BaseExchangeClient(ABC):
     # ==========================================================
     # FEES
     # ==========================================================
+
+    @abstractmethod
+    def get_fee_model(self, symbol: Optional[str] = None) -> FeeModel:
+        pass
 
     @abstractmethod
     def get_default_fee_rate(self) -> float:

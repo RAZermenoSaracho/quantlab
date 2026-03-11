@@ -190,7 +190,23 @@ class PaperSession:
         self.base_balance = 0.0                              # e.g. BTC in BTCUSDT
         self.last_price: Optional[float] = None
 
-        self.fee_rate = float(request.fee_rate) if request.fee_rate is not None else 0.001
+        if request.fee_rate is not None:
+            self.fee_rate = float(request.fee_rate)
+        else:
+            try:
+                fee_client = ExchangeFactory.create(
+                    exchange=self.exchange,
+                    api_key=request.api_key,
+                    api_secret=request.api_secret,
+                    testnet=request.testnet,
+                )
+                self.fee_rate = float(fee_client.get_fee_model(self.symbol).taker_fee)
+            except Exception:
+                logger.exception(
+                    "[PaperTrading][%s] Failed to load exchange fee model; using fallback taker fee.",
+                    self.run_id,
+                )
+                self.fee_rate = 0.001
 
         self.position: Optional[Dict[str, Any]] = None
         self.positions: Dict[str, Dict[str, Any]] = {}

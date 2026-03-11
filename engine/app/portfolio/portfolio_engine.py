@@ -3,6 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+from .fee_model import (
+    compute_fee,
+    compute_gross_pnl,
+    compute_net_pnl,
+    compute_notional,
+    compute_total_fee,
+)
 from .portfolio_state import PortfolioState
 
 
@@ -140,13 +147,26 @@ class PortfolioEngine:
         if capital_to_use <= 0:
             return None
 
-        entry_notional = float(capital_to_use)
-        entry_fee_quote = entry_notional * float(fee_rate)
-        net_quote = entry_notional - entry_fee_quote
-        if net_quote <= 0:
+        fee_rate_used = float(fee_rate)
+        if fee_rate_used < 0:
             return None
 
-        net_qty = net_quote / effective_price
+        # Keep notional strictly tied to quantity*price.
+        gross_qty = capital_to_use / effective_price
+        if gross_qty <= 0:
+            return None
+        entry_notional = compute_notional(gross_qty, effective_price)
+        entry_fee_quote = compute_fee(entry_notional, fee_rate_used)
+        total_cash_out = entry_notional + entry_fee_quote
+        if total_cash_out > float(self.state.cash_balance):
+            max_notional = float(self.state.cash_balance) / (1.0 + fee_rate_used)
+            if max_notional <= 0:
+                return None
+            gross_qty = max_notional / effective_price
+            entry_notional = compute_notional(gross_qty, effective_price)
+            entry_fee_quote = compute_fee(entry_notional, fee_rate_used)
+            total_cash_out = entry_notional + entry_fee_quote
+        net_qty = gross_qty
         if net_qty <= 0:
             return None
 
@@ -154,7 +174,7 @@ class PortfolioEngine:
         fill_payload: Dict[str, Any]
 
         if row is None:
-            self.state.cash_balance -= entry_notional
+            self.state.cash_balance -= total_cash_out
             self.state.positions[key] = {
                 "base_qty": float(net_qty),
                 "entry_price": float(effective_price),
@@ -163,7 +183,7 @@ class PortfolioEngine:
                 "entry_notional": float(entry_notional),
                 "fees_paid_quote": float(entry_fee_quote),
                 "entry_fee_quote": float(entry_fee_quote),
-                "fee_rate_used": float(fee_rate),
+                "fee_rate_used": float(fee_rate_used),
                 "entries_count": 1,
             }
             self.state.fees_paid += float(entry_fee_quote)
@@ -174,7 +194,7 @@ class PortfolioEngine:
                 "quantity": float(net_qty),
                 "entry_notional": float(entry_notional),
                 "entry_fee": float(entry_fee_quote),
-                "fee_rate_used": float(fee_rate),
+                "fee_rate_used": float(fee_rate_used),
                 "entries_count_after_fill": 1,
             }
         else:
@@ -186,7 +206,7 @@ class PortfolioEngine:
             if new_qty <= 0:
                 return None
             new_avg_entry = ((prev_avg_entry * prev_qty) + (effective_price * float(net_qty))) / new_qty
-            self.state.cash_balance -= entry_notional
+            self.state.cash_balance -= total_cash_out
             row.update({
                 "base_qty": float(new_qty),
                 "entry_price": float(new_avg_entry),
@@ -194,7 +214,7 @@ class PortfolioEngine:
                 "entry_notional": float(prev_entry_notional + entry_notional),
                 "fees_paid_quote": float(prev_fees_paid + entry_fee_quote),
                 "entry_fee_quote": float(prev_fees_paid + entry_fee_quote),
-                "fee_rate_used": float(fee_rate),
+                "fee_rate_used": float(fee_rate_used),
                 "entries_count": int(row.get("entries_count", 1)) + 1,
             })
             self.state.fees_paid += float(entry_fee_quote)
@@ -205,7 +225,7 @@ class PortfolioEngine:
                 "quantity": float(net_qty),
                 "entry_notional": float(entry_notional),
                 "entry_fee": float(entry_fee_quote),
-                "fee_rate_used": float(fee_rate),
+                "fee_rate_used": float(fee_rate_used),
                 "entries_count_after_fill": int(row.get("entries_count", 1)),
             }
 
@@ -236,12 +256,14 @@ class PortfolioEngine:
         entry_notional = float(position.get("entry_notional", entry_price * qty))
         entry_fee = float(position.get("fees_paid", position.get("entry_fee", 0.0)))
         fee_rate_used = float(position.get("fee_rate_used", fee_rate))
-        exit_notional = qty * effective_exit
-        exit_fee = exit_notional * fee_rate_used
+        exit_notional = compute_notional(qty, effective_exit)
+        exit_fee = compute_fee(exit_notional, fee_rate_used)
         net_quote = exit_notional - exit_fee
 
         self.state.cash_balance += net_quote
-        pnl = ((effective_exit - entry_price) * qty) - entry_fee - exit_fee
+        gross_pnl = compute_gross_pnl("LONG", entry_price, effective_exit, qty)
+        total_fee = compute_total_fee(entry_fee, exit_fee)
+        pnl = compute_net_pnl(gross_pnl, total_fee)
         self.state.realized_pnl += float(pnl)
         self.state.fees_paid += float(exit_fee)
         opened_at = int(position.get("opened_at", timestamp))
@@ -259,8 +281,8 @@ class PortfolioEngine:
             "exit_notional": float(exit_notional),
             "entry_fee": float(entry_fee),
             "exit_fee": float(exit_fee),
-            "total_fee": float(entry_fee + exit_fee),
-            "gross_pnl": float((effective_exit - entry_price) * qty),
+            "total_fee": float(total_fee),
+            "gross_pnl": float(gross_pnl),
             "net_pnl": float(pnl),
             "pnl": float(pnl),
             "fee_rate_used": float(fee_rate_used),

@@ -141,7 +141,7 @@ async function handleTradeEvent(
     const entryPrice = trade.entry_price;
     const exitPrice = trade.exit_price ?? null;
     const quantity = trade.quantity;
-    const feeRateUsed = trade.fee_rate_used ?? 0.001;
+    let feeRateUsed = trade.fee_rate_used ?? null;
     const entryNotional =
       trade.entry_notional ??
       calculateTradeNotional(entryPrice, quantity);
@@ -149,6 +149,48 @@ async function handleTradeEvent(
       exitPrice != null
         ? (trade.exit_notional ?? calculateTradeNotional(exitPrice, quantity))
         : null;
+
+    const openedAt = trade.opened_at
+      ? toDateFromEngineTs(trade.opened_at)
+      : new Date();
+
+    const closedAt = trade.closed_at
+      ? toDateFromEngineTs(trade.closed_at)
+      : null;
+
+    const forcedClose = trade.forced_close === true;
+    const directSymbol = extractSymbol(trade);
+    let tradeSymbol =
+      directSymbol && directSymbol.trim().length > 0
+        ? directSymbol.trim().toUpperCase()
+        : "";
+
+    if (!tradeSymbol || feeRateUsed == null) {
+      const runSymbolResult = await client.query<{ symbol: string; fee_rate: string | number | null }>(
+        `
+        SELECT symbol, fee_rate
+        FROM paper_runs
+        WHERE id = $1
+        LIMIT 1
+        `,
+        [runId]
+      );
+      if (!tradeSymbol) {
+        const runSymbol = String(runSymbolResult.rows[0]?.symbol ?? "")
+          .split(",")[0]
+          ?.trim()
+          .toUpperCase();
+        tradeSymbol = runSymbol || "UNKNOWN";
+      }
+      if (feeRateUsed == null) {
+        feeRateUsed = Number(runSymbolResult.rows[0]?.fee_rate ?? 0);
+      }
+    }
+
+    if (feeRateUsed == null) {
+      feeRateUsed = 0;
+    }
+
     const entryFee =
       trade.entry_fee ??
       calculateTradeFees(entryNotional, feeRateUsed);
@@ -172,38 +214,6 @@ async function handleTradeEvent(
     const computedPnlPercent =
       trade.pnl_percent ??
       calculateTradePnlPercent(pnl, entryPrice, quantity);
-
-    const openedAt = trade.opened_at
-      ? toDateFromEngineTs(trade.opened_at)
-      : new Date();
-
-    const closedAt = trade.closed_at
-      ? toDateFromEngineTs(trade.closed_at)
-      : null;
-
-    const forcedClose = trade.forced_close === true;
-    const directSymbol = extractSymbol(trade);
-    let tradeSymbol =
-      directSymbol && directSymbol.trim().length > 0
-        ? directSymbol.trim().toUpperCase()
-        : "";
-
-    if (!tradeSymbol) {
-      const runSymbolResult = await client.query<{ symbol: string }>(
-        `
-        SELECT symbol
-        FROM paper_runs
-        WHERE id = $1
-        LIMIT 1
-        `,
-        [runId]
-      );
-      const runSymbol = String(runSymbolResult.rows[0]?.symbol ?? "")
-        .split(",")[0]
-        ?.trim()
-        .toUpperCase();
-      tradeSymbol = runSymbol || "UNKNOWN";
-    }
 
     const existingTradeResult = await client.query<{ id: string }>(
       `

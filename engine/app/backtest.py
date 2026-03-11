@@ -9,6 +9,14 @@ from .spec import load_config_from_env
 from .indicators import compute_indicator_series
 from .context import build_context
 from .data.candle_aggregator import expand_minute_candles_to_subminute
+from .portfolio.fee_model import (
+    compute_fee,
+    compute_gross_pnl,
+    compute_net_pnl,
+    compute_notional,
+    compute_pnl_percent,
+    compute_total_fee,
+)
 
 
 SUB_MINUTE_TIMEFRAMES = {"1s", "5s", "15s", "30s"}
@@ -97,14 +105,14 @@ def _position_with_fee_metrics(
     entry = float(position.get("average_entry_price", position.get("entry_price", 0.0)))
     qty = float(position.get("quantity", 0.0))
     fee_rate_used = float(position.get("fee_rate_used", 0.0))
-    entry_notional = float(position.get("entry_notional", entry * qty))
-    entry_fee = float(position.get("fees_paid", position.get("entry_fee", entry_notional * fee_rate_used)))
+    entry_notional = float(position.get("entry_notional", compute_notional(qty, entry)))
+    entry_fee = float(position.get("fees_paid", position.get("entry_fee", compute_fee(entry_notional, fee_rate_used))))
 
     gross_pnl = _unrealized_pnl(mark_price, entry, qty, side)
-    exit_notional = float(mark_price * qty)
-    estimated_exit_fee = float(exit_notional * fee_rate_used)
-    total_fee_so_far = float(entry_fee + estimated_exit_fee)
-    net_pnl = float(gross_pnl - total_fee_so_far)
+    exit_notional = float(compute_notional(qty, mark_price))
+    estimated_exit_fee = float(compute_fee(exit_notional, fee_rate_used))
+    total_fee_so_far = float(compute_total_fee(entry_fee, estimated_exit_fee))
+    net_pnl = float(compute_net_pnl(gross_pnl, total_fee_so_far))
 
     if side == "LONG":
         breakeven_price = (
@@ -187,14 +195,14 @@ def _open_position(
     if qty <= 0:
         return None
 
-    notional = qty * fill_price
+    notional = compute_notional(qty, fill_price)
 
     # Exposure cap (based on initial balance)
     if notional > float(max_allowed_capital):
         return None
 
     fee_rate_used = float(fee_rate)
-    entry_fee = notional * fee_rate_used
+    entry_fee = compute_fee(notional, fee_rate_used)
 
     return {
         "side": desired_side,          # LONG | SHORT
@@ -250,13 +258,13 @@ def _add_to_position(
     if qty <= 0:
         return None
 
-    additional_notional = qty * fill_price
+    additional_notional = compute_notional(qty, fill_price)
     current_notional = float(position.get("entry_notional", 0.0))
     if (current_notional + additional_notional) > float(max_allowed_capital):
         return None
 
     fee_rate_used = float(position.get("fee_rate_used", fee_rate))
-    additional_fee = additional_notional * fee_rate_used
+    additional_fee = compute_fee(additional_notional, fee_rate_used)
     current_qty = float(position.get("quantity", 0.0))
     new_qty = current_qty + qty
     if new_qty <= 0:
@@ -299,18 +307,15 @@ def _close_position(
     exit_order_side = "SELL" if side == "LONG" else "BUY"
     fill_exit = _apply_slippage(float(exit_price), slippage_bps, side=exit_order_side)
 
-    if side == "LONG":
-        gross = (fill_exit - entry) * qty
-    else:
-        gross = (entry - fill_exit) * qty
+    gross = compute_gross_pnl(side, entry, fill_exit, qty)
 
-    entry_notional = float(position.get("entry_notional", entry * qty))
-    exit_notional = fill_exit * qty
+    entry_notional = float(position.get("entry_notional", compute_notional(qty, entry)))
+    exit_notional = compute_notional(qty, fill_exit)
     fee_rate_used = float(position.get("fee_rate_used", fee_rate))
-    entry_fee = float(position.get("fees_paid", position.get("entry_fee", entry_notional * fee_rate_used)))
-    exit_fee = exit_notional * fee_rate_used
-    total_fee = entry_fee + exit_fee
-    net = gross - total_fee
+    entry_fee = float(position.get("fees_paid", position.get("entry_fee", compute_fee(entry_notional, fee_rate_used))))
+    exit_fee = compute_fee(exit_notional, fee_rate_used)
+    total_fee = compute_total_fee(entry_fee, exit_fee)
+    net = compute_net_pnl(gross, total_fee)
 
     trade = {
         "side": side,  # LONG | SHORT
@@ -325,6 +330,7 @@ def _close_position(
         "gross_pnl": float(gross),
         "net_pnl": float(net),
         "pnl": float(net),  # backward-compatible field = net
+        "pnl_percent": float(compute_pnl_percent(net, entry_notional)),
         "fee_rate_used": float(fee_rate_used),
         "entries_count": int(position.get("entries_count", 1)),
         "quantity": float(qty),
@@ -620,7 +626,13 @@ def run_backtest(
         testnet=testnet,
     )
 
-    final_fee_rate = fee_rate if fee_rate is not None else client.get_default_fee_rate()
+    if fee_rate is not None:
+        final_fee_rate = float(fee_rate)
+    else:
+        try:
+            final_fee_rate = float(client.get_fee_model(symbol).taker_fee)
+        except Exception:
+            final_fee_rate = float(client.get_default_fee_rate())
 
     if len(symbols) > 1:
         source_timeframe = "1m" if timeframe in SUB_MINUTE_TIMEFRAMES else timeframe

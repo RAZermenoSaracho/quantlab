@@ -1,12 +1,13 @@
 import asyncio
 import logging
+import os
 from datetime import datetime
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from binance.client import Client
 from binance import AsyncClient, BinanceSocketManager
 
-from ..base import BaseExchangeClient
+from ..base import BaseExchangeClient, FeeModel
 
 logger = logging.getLogger("quantlab.exchange.binance")
 
@@ -309,8 +310,31 @@ class BinanceClient(BaseExchangeClient):
         end_str = datetime.fromisoformat(end_date).strftime("%d %b, %Y %H:%M:%S")
         return self.client.get_historical_klines(symbol.upper(), timeframe, start_str, end_str)
 
+    def get_fee_model(self, symbol: Optional[str] = None) -> FeeModel:
+        default_maker = float(os.getenv("BINANCE_DEFAULT_MAKER_FEE", "0.0002"))
+        default_taker = float(os.getenv("BINANCE_DEFAULT_TAKER_FEE", "0.001"))
+
+        if not self.api_enabled:
+            return FeeModel(maker_fee=default_maker, taker_fee=default_taker)
+
+        try:
+            kwargs: Dict[str, Any] = {}
+            if symbol:
+                kwargs["symbol"] = str(symbol).upper()
+            fees = self.client.get_trade_fee(**kwargs)
+            if not isinstance(fees, list) or not fees:
+                return FeeModel(maker_fee=default_maker, taker_fee=default_taker)
+
+            fee = fees[0]
+            maker = float(fee.get("makerCommission", default_maker))
+            taker = float(fee.get("takerCommission", default_taker))
+            return FeeModel(maker_fee=maker, taker_fee=taker)
+        except Exception:
+            logger.warning("Failed to fetch Binance trade fees; using defaults.", exc_info=True)
+            return FeeModel(maker_fee=default_maker, taker_fee=default_taker)
+
     def get_default_fee_rate(self) -> float:
-        return 0.001
+        return float(self.get_fee_model().taker_fee)
 
     def get_latest_price(self, symbol: str) -> float:
         ticker = self.client.get_symbol_ticker(symbol=symbol.upper())
