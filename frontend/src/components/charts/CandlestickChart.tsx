@@ -123,10 +123,12 @@ export default function CandlestickChart({
   candles,
   trades,
   height = 420,
+  showTimeframeSelector = true,
 }: {
   candles: Candle[];
   trades: Trade[];
   height?: number;
+  showTimeframeSelector?: boolean;
 }) {
   const resolvedHeight = Math.max(height, 320);
   const [chartTimeframe, setChartTimeframe] = useState<ChartTimeframe>("1m");
@@ -360,22 +362,24 @@ export default function CandlestickChart({
 
   return (
     <div className="relative w-full max-w-full min-w-0 overflow-hidden">
-      <div className="mb-3 flex items-center justify-end gap-2">
-        {CHART_TIMEFRAMES.map((timeframe) => (
-          <button
-            key={timeframe}
-            type="button"
-            onClick={() => setChartTimeframe(timeframe)}
-            className={`rounded-md border px-2 py-1 text-xs ${
-              chartTimeframe === timeframe
-                ? "border-sky-500 bg-sky-600/20 text-sky-300"
-                : "border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-500"
-            }`}
-          >
-            {timeframe}
-          </button>
-        ))}
-      </div>
+      {showTimeframeSelector && (
+        <div className="mb-3 flex items-center justify-end gap-2">
+          {CHART_TIMEFRAMES.map((timeframe) => (
+            <button
+              key={timeframe}
+              type="button"
+              onClick={() => setChartTimeframe(timeframe)}
+              className={`rounded-md border px-2 py-1 text-xs ${
+                chartTimeframe === timeframe
+                  ? "border-sky-500 bg-sky-600/20 text-sky-300"
+                  : "border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-500"
+              }`}
+            >
+              {timeframe}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div
         className="relative w-full max-w-full min-w-0 overflow-hidden"

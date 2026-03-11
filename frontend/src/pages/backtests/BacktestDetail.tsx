@@ -813,7 +813,7 @@ export default function BacktestDetail() {
           </span>
         </div>
 
-        <CandlestickChart candles={candles} trades={trades} />
+        <CandlestickChart candles={candles} trades={trades} showTimeframeSelector={false} />
       </div>
 
       {/* PERIOD ANALYSIS */}
