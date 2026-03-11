@@ -37,7 +37,7 @@ export const BacktestAnalysisSchema = z.object({
       max_drawdown_pct: z.number().optional(),
     })
     .optional(),
-});
+}).passthrough();
 
 export type BacktestAnalysis = z.infer<typeof BacktestAnalysisSchema>;
 
@@ -114,6 +114,28 @@ export const BacktestMetricsSchema = z
   .passthrough();
 
 export type BacktestMetrics = z.infer<typeof BacktestMetricsSchema>;
+
+export const BacktestAssetHoldingSchema = z.object({
+  symbol: z.string(),
+  base_asset: z.string().optional(),
+  quantity: z.number(),
+  last_price: z.number(),
+  value_usdt: z.number(),
+});
+
+export const BacktestPortfolioSummarySchema = z.object({
+  final_cash_balance: z.number().optional(),
+  final_asset_holdings: BacktestAssetHoldingSchema.nullable().optional(),
+  final_asset_holdings_by_symbol: z.array(BacktestAssetHoldingSchema).optional(),
+  average_holding_time_seconds: z.number().optional(),
+  average_holding_time_minutes: z.number().optional(),
+  exposure_time_seconds: z.number().optional(),
+  exposure_time_percent: z.number().optional(),
+  time_in_market_percent: z.number().optional(),
+  average_capital_utilization_percent: z.number().optional(),
+});
+
+export type BacktestPortfolioSummary = z.infer<typeof BacktestPortfolioSummarySchema>;
 
 /* =========================
    Create Backtest
@@ -200,6 +222,8 @@ export const BacktestDetailResponseSchema = z.object({
   open_positions_at_end: z.number(),
 
   had_forced_close: z.boolean(),
+
+  portfolio_summary: BacktestPortfolioSummarySchema.nullable().optional(),
 });
 
 export type BacktestDetailResponse = z.infer<

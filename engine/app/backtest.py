@@ -520,6 +520,50 @@ def _compute_portfolio_valuation(
     return float(equity), float(total_unrealized)
 
 
+def _compute_capital_deployed(
+    positions_by_symbol: Dict[str, Optional[dict]],
+    last_prices: Dict[str, float],
+) -> float:
+    deployed = 0.0
+    for symbol, position in positions_by_symbol.items():
+        if position is None:
+            continue
+        qty = float(position.get("quantity", 0.0))
+        if qty <= 0:
+            continue
+        entry = float(position.get("average_entry_price", position.get("entry_price", 0.0)))
+        mark = float(last_prices.get(symbol, entry))
+        deployed += float(qty * mark)
+    return float(deployed)
+
+
+def _derive_base_asset(symbol: str) -> str:
+    sym = str(symbol).upper().strip()
+    for quote in ("USDT", "USDC", "BUSD", "USD", "BTC", "ETH"):
+        if sym.endswith(quote) and len(sym) > len(quote):
+            return sym[: -len(quote)]
+    return sym
+
+
+def _compute_average_holding_seconds(trades: list[dict[str, Any]]) -> float:
+    durations: list[float] = []
+    for trade in trades:
+        opened = trade.get("opened_at")
+        closed = trade.get("closed_at")
+        if opened is None or closed is None:
+            continue
+        try:
+            opened_ms = float(opened)
+            closed_ms = float(closed)
+            if closed_ms >= opened_ms:
+                durations.append((closed_ms - opened_ms) / 1000.0)
+        except Exception:
+            continue
+    if not durations:
+        return 0.0
+    return float(sum(durations) / len(durations))
+
+
 # ============================================================
 # Backtest
 # ============================================================
@@ -644,6 +688,15 @@ def run_backtest(
         losses: list[float] = []
         peak_equity = float(initial_balance)
         max_dd = 0.0
+        exposure_time_ms = 0.0
+        exposure_open_ts: Optional[int] = None
+        previous_has_position = False
+        candles_with_position = 0
+        total_candles_processed = 0
+        capital_utilization_sum = 0.0
+        capital_utilization_points = 0
+        first_processed_ts: Optional[int] = None
+        last_processed_ts: Optional[int] = None
 
         history_window = max(
             int(getattr(config, "min_bars", 1)),
@@ -663,6 +716,9 @@ def run_backtest(
 
         total = max(len(timeline), 1)
         for step, (ts, sym, idx) in enumerate(timeline):
+            if first_processed_ts is None:
+                first_processed_ts = int(ts)
+            last_processed_ts = int(ts)
             if progress_callback:
                 progress_callback(max(int((step / total) * 100), 55))
 
@@ -955,6 +1011,22 @@ def run_backtest(
                 last_prices=last_prices,
                 cash_balance=balance,
             )
+            current_has_position = any(value is not None for value in positions_by_symbol.values())
+            if current_has_position and not previous_has_position:
+                exposure_open_ts = int(ts)
+            elif (not current_has_position) and previous_has_position and exposure_open_ts is not None:
+                exposure_time_ms += max(0.0, float(int(ts) - exposure_open_ts))
+                exposure_open_ts = None
+            previous_has_position = current_has_position
+
+            total_candles_processed += 1
+            if current_has_position:
+                candles_with_position += 1
+            capital_deployed = _compute_capital_deployed(positions_by_symbol, last_prices)
+            if equity > 0:
+                capital_utilization_sum += float((capital_deployed / equity) * 100.0)
+                capital_utilization_points += 1
+
             if equity <= 0:
                 break
             equity_curve.append({"timestamp": ts, "equity": float(equity)})
@@ -966,6 +1038,11 @@ def run_backtest(
                 break
 
         open_positions_at_end = len([p for p in positions_by_symbol.values() if p is not None])
+        if previous_has_position and exposure_open_ts is not None:
+            end_ts_for_exposure = int(last_processed_ts if last_processed_ts is not None else (last_ts or 0))
+            exposure_time_ms += max(0.0, float(end_ts_for_exposure - exposure_open_ts))
+            exposure_open_ts = None
+
         final_equity, final_unrealized_pnl = _compute_portfolio_valuation(
             positions_by_symbol=positions_by_symbol,
             last_prices=last_prices,
@@ -984,23 +1061,71 @@ def run_backtest(
         total_losses = float(abs(sum([x for x in losses if x < 0]))) if losses else 0.0
         profit_factor = (total_wins / total_losses) if total_losses > 0 else 0.0
         open_positions = []
-        for sym, position in positions_by_symbol.items():
-            if position is None:
-                continue
-            qty = float(position.get("quantity", 0.0))
-            entry_price = float(position.get("average_entry_price", position.get("entry_price", 0.0)))
-            mark_price = float(last_prices.get(sym, entry_price))
-            cost_basis = float(position.get("entry_notional", entry_price * qty))
+        holdings_by_symbol = []
+        for sym in symbols:
+            position = positions_by_symbol.get(sym)
+            qty = float(position.get("quantity", 0.0)) if position is not None else 0.0
+            entry_price = float(
+                position.get("average_entry_price", position.get("entry_price", 0.0))
+            ) if position is not None else 0.0
+            mark_price = float(last_prices.get(sym, entry_price if entry_price > 0 else 0.0))
+            cost_basis = float(position.get("entry_notional", entry_price * qty)) if position is not None else 0.0
             unrealized_pnl = float((qty * mark_price) - cost_basis)
-            open_positions.append(
+            holdings_by_symbol.append(
                 {
                     "symbol": sym,
+                    "base_asset": _derive_base_asset(sym),
                     "quantity": qty,
-                    "entry_price": entry_price,
                     "last_price": mark_price,
-                    "unrealized_pnl": unrealized_pnl,
+                    "value_usdt": float(qty * mark_price),
                 }
             )
+            if position is not None:
+                open_positions.append(
+                    {
+                        "symbol": sym,
+                        "quantity": qty,
+                        "entry_price": entry_price,
+                        "last_price": mark_price,
+                        "unrealized_pnl": unrealized_pnl,
+                    }
+                )
+        primary_holding = holdings_by_symbol[0] if holdings_by_symbol else None
+
+        average_holding_time_seconds = _compute_average_holding_seconds(trades)
+        average_holding_time_minutes = average_holding_time_seconds / 60.0 if average_holding_time_seconds > 0 else 0.0
+        total_duration_seconds = (
+            max(0.0, float((last_processed_ts - first_processed_ts) / 1000.0))
+            if first_processed_ts is not None and last_processed_ts is not None and last_processed_ts >= first_processed_ts
+            else 0.0
+        )
+        exposure_time_seconds = float(exposure_time_ms / 1000.0)
+        exposure_time_percent = (
+            float((exposure_time_seconds / total_duration_seconds) * 100.0)
+            if total_duration_seconds > 0
+            else 0.0
+        )
+        time_in_market_percent = (
+            float((candles_with_position / total_candles_processed) * 100.0)
+            if total_candles_processed > 0
+            else 0.0
+        )
+        average_capital_utilization_percent = (
+            float(capital_utilization_sum / capital_utilization_points)
+            if capital_utilization_points > 0
+            else 0.0
+        )
+        portfolio_summary = {
+            "final_cash_balance": float(balance),
+            "final_asset_holdings": primary_holding,
+            "final_asset_holdings_by_symbol": holdings_by_symbol,
+            "average_holding_time_seconds": float(average_holding_time_seconds),
+            "average_holding_time_minutes": float(average_holding_time_minutes),
+            "exposure_time_seconds": float(exposure_time_seconds),
+            "exposure_time_percent": float(exposure_time_percent),
+            "time_in_market_percent": float(time_in_market_percent),
+            "average_capital_utilization_percent": float(average_capital_utilization_percent),
+        }
 
         analysis = calculate_metrics(
             equity_curve=equity_curve,
@@ -1039,6 +1164,7 @@ def run_backtest(
             "order_events": order_events,
             "analysis": analysis,
             "open_positions": open_positions,
+            "portfolio_summary": portfolio_summary,
             "open_positions_at_end": int(open_positions_at_end),
             "had_forced_close": False,
         }
@@ -1111,6 +1237,15 @@ def run_backtest(
 
     wins = []
     losses = []
+    exposure_time_ms = 0.0
+    exposure_open_ts: Optional[int] = None
+    previous_has_position = False
+    candles_with_position = 0
+    total_candles_processed = 0
+    capital_utilization_sum = 0.0
+    capital_utilization_points = 0
+    first_processed_ts: Optional[int] = None
+    last_processed_ts: Optional[int] = None
 
     history_window = max(
         int(getattr(config, "min_bars", 1)),
@@ -1137,6 +1272,9 @@ def run_backtest(
 
         candle = candles[i]
         ts = int(candle["timestamp"])
+        if first_processed_ts is None:
+            first_processed_ts = ts
+        last_processed_ts = ts
         low = float(candle["low"])
         high = float(candle["high"])
 
@@ -1579,6 +1717,24 @@ def run_backtest(
             last_prices={symbol: float(candle["close"])} if position is not None else {},
             cash_balance=balance,
         )
+        current_has_position = position is not None
+        if current_has_position and not previous_has_position:
+            exposure_open_ts = ts
+        elif (not current_has_position) and previous_has_position and exposure_open_ts is not None:
+            exposure_time_ms += max(0.0, float(ts - exposure_open_ts))
+            exposure_open_ts = None
+        previous_has_position = current_has_position
+
+        total_candles_processed += 1
+        if current_has_position:
+            candles_with_position += 1
+        capital_deployed = _compute_capital_deployed(
+            positions_by_symbol={symbol: position},
+            last_prices={symbol: float(candle["close"])} if position is not None else {},
+        )
+        if equity > 0:
+            capital_utilization_sum += float((capital_deployed / equity) * 100.0)
+            capital_utilization_points += 1
 
         # liquidation safeguard
         if equity <= 0:
@@ -1597,6 +1753,11 @@ def run_backtest(
                 break
     
     open_positions_at_end = 1 if position is not None else 0
+    if previous_has_position and exposure_open_ts is not None:
+        end_ts_for_exposure = int(last_processed_ts if last_processed_ts is not None else (candles[-1]["timestamp"] if candles else 0))
+        exposure_time_ms += max(0.0, float(end_ts_for_exposure - exposure_open_ts))
+        exposure_open_ts = None
+
     final_mark_price = float(candles[-1]["close"]) if candles else 0.0
     final_equity, final_unrealized_pnl = _compute_portfolio_valuation(
         positions_by_symbol={symbol: position},
@@ -1625,10 +1786,17 @@ def run_backtest(
     profit_factor = (total_wins / total_losses) if total_losses > 0 else 0.0
 
     open_positions = []
+    qty = float(position.get("quantity", 0.0)) if position is not None else 0.0
+    entry_price = float(position.get("average_entry_price", position.get("entry_price", 0.0))) if position is not None else 0.0
+    cost_basis = float(position.get("entry_notional", entry_price * qty)) if position is not None else 0.0
+    final_holding = {
+        "symbol": symbol,
+        "base_asset": _derive_base_asset(symbol),
+        "quantity": qty,
+        "last_price": float(final_mark_price),
+        "value_usdt": float(qty * float(final_mark_price)),
+    }
     if position is not None:
-        qty = float(position.get("quantity", 0.0))
-        entry_price = float(position.get("average_entry_price", position.get("entry_price", 0.0)))
-        cost_basis = float(position.get("entry_notional", entry_price * qty))
         open_positions.append(
             {
                 "symbol": symbol,
@@ -1638,6 +1806,41 @@ def run_backtest(
                 "unrealized_pnl": float((qty * float(final_mark_price)) - cost_basis),
             }
         )
+
+    average_holding_time_seconds = _compute_average_holding_seconds(trades)
+    average_holding_time_minutes = average_holding_time_seconds / 60.0 if average_holding_time_seconds > 0 else 0.0
+    total_duration_seconds = (
+        max(0.0, float((last_processed_ts - first_processed_ts) / 1000.0))
+        if first_processed_ts is not None and last_processed_ts is not None and last_processed_ts >= first_processed_ts
+        else 0.0
+    )
+    exposure_time_seconds = float(exposure_time_ms / 1000.0)
+    exposure_time_percent = (
+        float((exposure_time_seconds / total_duration_seconds) * 100.0)
+        if total_duration_seconds > 0
+        else 0.0
+    )
+    time_in_market_percent = (
+        float((candles_with_position / total_candles_processed) * 100.0)
+        if total_candles_processed > 0
+        else 0.0
+    )
+    average_capital_utilization_percent = (
+        float(capital_utilization_sum / capital_utilization_points)
+        if capital_utilization_points > 0
+        else 0.0
+    )
+    portfolio_summary = {
+        "final_cash_balance": float(balance),
+        "final_asset_holdings": final_holding,
+        "final_asset_holdings_by_symbol": [final_holding],
+        "average_holding_time_seconds": float(average_holding_time_seconds),
+        "average_holding_time_minutes": float(average_holding_time_minutes),
+        "exposure_time_seconds": float(exposure_time_seconds),
+        "exposure_time_percent": float(exposure_time_percent),
+        "time_in_market_percent": float(time_in_market_percent),
+        "average_capital_utilization_percent": float(average_capital_utilization_percent),
+    }
 
     analysis = calculate_metrics(
         equity_curve=equity_curve,
@@ -1695,6 +1898,7 @@ def run_backtest(
         ],
         "analysis": analysis,
         "open_positions": open_positions,
+        "portfolio_summary": portfolio_summary,
 
         "open_positions_at_end": int(open_positions_at_end),
         "had_forced_close": False,

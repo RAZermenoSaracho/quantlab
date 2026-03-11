@@ -179,11 +179,36 @@ export default function BacktestDetail() {
   );
 
   const candlesCount = data?.candles_count ?? candles.length ?? 0;
+  const portfolioSummary = data?.portfolio_summary ?? null;
 
   const openPositionsAtEnd = Number(data?.open_positions_at_end ?? 0);
   const hadForcedClose = Boolean(data?.had_forced_close ?? false);
 
   const forcedCloseCount = trades.filter((t) => t.forced_close).length;
+
+  const primaryHolding =
+    portfolioSummary?.final_asset_holdings ??
+    portfolioSummary?.final_asset_holdings_by_symbol?.[0] ??
+    null;
+  const finalCashBalance = Number(
+    portfolioSummary?.final_cash_balance ??
+      ((data as unknown as { cash_balance?: number })?.cash_balance ?? 0)
+  );
+  const finalAssetQuantity = Number(primaryHolding?.quantity ?? 0);
+  const finalAssetValueUsdt = Number(primaryHolding?.value_usdt ?? 0);
+  const finalAssetSymbol = String(primaryHolding?.base_asset ?? "ASSET");
+  const averageHoldingMinutes = Number(
+    portfolioSummary?.average_holding_time_minutes ?? 0
+  );
+  const exposureTimePercent = Number(
+    portfolioSummary?.exposure_time_percent ?? 0
+  );
+  const timeInMarketPercent = Number(
+    portfolioSummary?.time_in_market_percent ?? 0
+  );
+  const capitalUtilizationPercent = Number(
+    portfolioSummary?.average_capital_utilization_percent ?? 0
+  );
 
   /* ================= DERIVED ================= */
 
@@ -718,6 +743,65 @@ export default function BacktestDetail() {
           size="compact"
         />
 
+      </div>
+
+      {/* PORTFOLIO STATISTICS */}
+      <div className="w-full min-w-0 max-w-full space-y-3">
+        <h3 className="text-white font-semibold">Portfolio Statistics</h3>
+        <div className="w-full min-w-0 max-w-full grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-4">
+          <KpiCard
+            title="Final Cash (USDT)"
+            value={finalCashBalance}
+            format={(v) => `${fmtMoney(v)} USDT`}
+            size="compact"
+          />
+
+          <KpiCard
+            title="Final Asset Holdings"
+            value={finalAssetQuantity}
+            format={(v) =>
+              primaryHolding
+                ? `${v.toFixed(5)} ${finalAssetSymbol}`
+                : "-"
+            }
+            size="compact"
+          />
+
+          <KpiCard
+            title="Asset Value (USDT)"
+            value={finalAssetValueUsdt}
+            format={(v) => `${fmtMoney(v)} USDT`}
+            size="compact"
+          />
+
+          <KpiCard
+            title="Avg Holding Time"
+            value={averageHoldingMinutes}
+            format={(v) => `${v.toFixed(2)} min`}
+            size="compact"
+          />
+
+          <KpiCard
+            title="Exposure Time %"
+            value={exposureTimePercent}
+            format={(v) => fmtPct(v)}
+            size="compact"
+          />
+
+          <KpiCard
+            title="Time In Market %"
+            value={timeInMarketPercent}
+            format={(v) => fmtPct(v)}
+            size="compact"
+          />
+
+          <KpiCard
+            title="Capital Utilization %"
+            value={capitalUtilizationPercent}
+            format={(v) => fmtPct(v)}
+            size="compact"
+          />
+        </div>
       </div>
 
       {/* PRICE CHART */}

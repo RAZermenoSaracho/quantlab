@@ -273,6 +273,14 @@ async function runBacktestWorker(runId: string, payload: RunBacktestPayload) {
     }
 
     // FINAL UPDATE
+    const analysisWithPortfolioSummary =
+      engineResult.portfolio_summary != null
+        ? {
+            ...(engineResult.analysis ?? {}),
+            portfolio_summary: engineResult.portfolio_summary,
+          }
+        : (engineResult.analysis ?? null);
+
     await client.query(
       `UPDATE backtest_runs
       SET equity_curve = $1::jsonb,
@@ -288,7 +296,7 @@ async function runBacktestWorker(runId: string, payload: RunBacktestPayload) {
       WHERE id = $9`,
       [
         JSON.stringify(engineResult.equity_curve ?? []),
-        JSON.stringify(engineResult.analysis ?? null),
+        JSON.stringify(analysisWithPortfolioSummary),
         JSON.stringify(engineResult.candles ?? []),
         engineResult.candles_count ?? 0,
         engineResult.candles_start_ts ?? null,
@@ -409,6 +417,7 @@ export async function getBacktestById(
       run,
       metrics: metricsResult.rows[0] || null,
       analysis: run.analysis || null,
+      portfolio_summary: run.analysis?.portfolio_summary ?? null,
       trades: tradesResult.rows.map((trade) => ({
         ...trade,
         entry_price: Number(trade.entry_price),
