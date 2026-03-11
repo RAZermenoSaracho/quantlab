@@ -1,11 +1,18 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import AlgorithmWorkspace from "../../components/algorithms/AlgorithmWorkspace";
 import DocumentationPanel from "../../components/algorithms/DocumentationPanel";
+import StrategyBuilder from "../../components/algorithms/StrategyBuilder";
 import Button from "../../components/ui/Button";
-import { useCreateAlgorithmMutation } from "../../data/algorithms";
+import {
+  useAlgorithm,
+  useCreateAlgorithmMutation,
+  useUpdateAlgorithmMutation,
+} from "../../data/algorithms";
 
 export default function CreateAlgorithm() {
+  const { id } = useParams<{ id: string }>();
+  const isEditMode = Boolean(id);
   const navigate = useNavigate();
   const [mobileTab, setMobileTab] = useState<"details" | "code" | "docs">("details");
 
@@ -15,51 +22,119 @@ export default function CreateAlgorithm() {
   const [githubUrl, setGithubUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [fetchingGithubCode, setFetchingGithubCode] = useState(false);
+  const [attemptedSubmit, setAttemptedSubmit] = useState(false);
+
+  const { data: algorithm, loading: loadingAlgorithm, error: algorithmError } = useAlgorithm(
+    isEditMode ? id ?? "" : ""
+  );
   const createMutation = useCreateAlgorithmMutation();
+  const updateMutation = useUpdateAlgorithmMutation(id ?? "");
+
+  useEffect(() => {
+    if (!isEditMode || !algorithm) {
+      return;
+    }
+    setName(algorithm.name ?? "");
+    setNotesHtml(algorithm.notes_html ?? "");
+    setCode(algorithm.code ?? "");
+    setGithubUrl(algorithm.github_url ?? "");
+  }, [isEditMode, algorithm]);
 
   const isSubmitDisabled =
-    loading || (!code.trim() && !githubUrl.trim());
+    loading || fetchingGithubCode || !code.trim();
+
+  async function handleFetchCodeFromGithub() {
+    setError(null);
+
+    const url = githubUrl.trim();
+    if (!url) {
+      setError("Provide a GitHub raw file URL first.");
+      return;
+    }
+
+    if (!/^https?:\/\//i.test(url)) {
+      setError("GitHub URL must start with http:// or https://");
+      return;
+    }
+
+    setFetchingGithubCode(true);
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch code (${response.status})`);
+      }
+      const text = await response.text();
+      if (!text.trim()) {
+        throw new Error("Fetched file is empty.");
+      }
+      setCode(text);
+      setAttemptedSubmit(false);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to fetch code from GitHub.");
+    } finally {
+      setFetchingGithubCode(false);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setAttemptedSubmit(true);
 
-    if (!code.trim() && !githubUrl.trim()) {
-      setError("Provide strategy code or a GitHub URL.");
+    if (!code.trim()) {
+      setError("Algorithm code cannot be empty.");
       return;
     }
 
     setLoading(true);
 
     try {
-      const algo = await createMutation.mutate({
-        name,
-        notes_html: notesHtml || undefined,
-        code: code || undefined,
-        githubUrl: githubUrl || undefined,
-      });
-
-      navigate(`/algorithms/${algo.id}`);
+      if (isEditMode && id) {
+        const updated = await updateMutation.mutate({
+          name,
+          notes_html: notesHtml || undefined,
+          code: code || undefined,
+        });
+        navigate(`/algorithms/${updated.id}`);
+      } else {
+        const created = await createMutation.mutate({
+          name,
+          notes_html: notesHtml || undefined,
+          code: code || undefined,
+          githubUrl: githubUrl || undefined,
+        });
+        navigate(`/algorithms/${created.id}`);
+      }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to create algorithm.");
+      setError(err instanceof Error ? err.message : `Failed to ${isEditMode ? "update" : "create"} algorithm.`);
     } finally {
       setLoading(false);
     }
   }
 
+  if (isEditMode && loadingAlgorithm) {
+    return <div className="p-6 text-slate-400 animate-pulse">Loading algorithm...</div>;
+  }
+
+  if (isEditMode && algorithmError) {
+    return (
+      <div className="p-6 bg-red-900/30 border border-red-700 text-red-400 rounded-xl">
+        {algorithmError}
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-[1600px] mx-auto px-4 lg:px-8 py-6 lg:py-10 space-y-8 lg:space-y-10">
 
-      {/* HEADER */}
       <div>
         <h1 className="text-4xl font-bold text-white tracking-tight">
-          Create Algorithm
+          {isEditMode ? "Edit Algorithm" : "Create Algorithm"}
         </h1>
         <p className="text-slate-400 text-sm mt-3">
           Build a QuantLab strategy. Your code must define{" "}
-          <span className="text-white font-medium">
-            generate_signal(ctx)
-          </span>.
+          <span className="text-white font-medium">generate_signal(ctx)</span>.
         </p>
       </div>
 
@@ -69,10 +144,7 @@ export default function CreateAlgorithm() {
         </div>
       )}
 
-      <form
-        onSubmit={handleSubmit}
-        className="space-y-10"
-      >
+      <form onSubmit={handleSubmit} className="space-y-10">
         <div className="lg:hidden flex gap-2 overflow-x-auto whitespace-nowrap border-b border-slate-800 p-2">
           <Button
             size="sm"
@@ -100,11 +172,8 @@ export default function CreateAlgorithm() {
           </Button>
         </div>
 
-        {/* TOP SECTION – META + IMPORT */}
         <div className={`bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-lg space-y-6 ${mobileTab === "details" ? "" : "hidden lg:block"}`}>
-
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
             <input
               placeholder="Algorithm name"
               className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-sky-600 outline-none"
@@ -113,13 +182,24 @@ export default function CreateAlgorithm() {
               required
             />
 
-            <input
-              placeholder="GitHub raw file URL (optional)"
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-sky-600 outline-none"
-              value={githubUrl}
-              onChange={(e) => setGithubUrl(e.target.value)}
-            />
-
+            <div className="flex flex-col sm:flex-row gap-3">
+              <input
+                placeholder="GitHub raw file URL (optional)"
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-sky-600 outline-none"
+                value={githubUrl}
+                onChange={(e) => setGithubUrl(e.target.value)}
+                disabled={isEditMode}
+              />
+              <Button
+                variant="WARNING"
+                loading={fetchingGithubCode}
+                loadingText="Fetching..."
+                onClick={handleFetchCodeFromGithub}
+                disabled={isEditMode}
+              >
+                Fetch Code from GitHub
+              </Button>
+            </div>
           </div>
 
           <textarea
@@ -129,18 +209,18 @@ export default function CreateAlgorithm() {
             value={notesHtml}
             onChange={(e) => setNotesHtml(e.target.value)}
           />
-
         </div>
 
-        {/* WORKSPACE */}
-        <div className={mobileTab === "code" ? "" : "hidden lg:block"}>
+        <div className={mobileTab === "code" ? "space-y-6" : "hidden lg:block lg:space-y-6"}>
+          <StrategyBuilder onGenerate={setCode} />
           <AlgorithmWorkspace
-            key="workspace-code"
+            key={`workspace-code-${isEditMode ? "edit" : "create"}`}
             code={code}
             onChange={setCode}
             disabled={false}
             isGithub={false}
             initialDocsOpen={false}
+            showEmptyCodeError={attemptedSubmit}
           />
         </div>
 
@@ -150,20 +230,18 @@ export default function CreateAlgorithm() {
           </div>
         </div>
 
-        {/* SUBMIT BUTTON */}
         <div className="pt-6">
           <Button
             type="submit"
-            variant="CREATE"
+            variant={isEditMode ? "SUCCESS" : "CREATE"}
             size="lg"
             loading={loading}
-            loadingText="Creating Algorithm..."
+            loadingText={isEditMode ? "Saving Changes..." : "Creating Algorithm..."}
             disabled={isSubmitDisabled}
           >
-            Create Algorithm
+            {isEditMode ? "Save Changes" : "Create Algorithm"}
           </Button>
         </div>
-
       </form>
     </div>
   );

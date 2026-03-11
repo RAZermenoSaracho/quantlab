@@ -16,7 +16,6 @@ import {
   useAlgorithms,
   useDeleteAlgorithmMutation,
   useRefreshAlgorithmMutation,
-  useUpdateAlgorithmMutation,
 } from "../../data/algorithms";
 
 type Tab = "overview" | "backtests" | "paper";
@@ -32,13 +31,8 @@ export default function AlgorithmDetail() {
 
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [mobileTab, setMobileTab] = useState<MobileTab>("overview");
-
-  const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-
-  const [name, setName] = useState("");
-  const [notesHtml, setNotesHtml] = useState("");
   const [code, setCode] = useState("");
 
   const {
@@ -56,7 +50,6 @@ export default function AlgorithmDetail() {
     loading: runsLoading,
     error: runsError,
   } = useAlgorithmRuns(id ?? "");
-  const updateMutation = useUpdateAlgorithmMutation(id ?? "");
   const refreshMutation = useRefreshAlgorithmMutation(id ?? "");
   const deleteMutation = useDeleteAlgorithmMutation();
 
@@ -68,10 +61,7 @@ export default function AlgorithmDetail() {
     if (!algorithm) {
       return;
     }
-
-    setName(algorithm.name);
-    setNotesHtml(algorithm.notes_html || "");
-    setCode(algorithm.code);
+    setCode(algorithm.code ?? "");
   }, [algorithm]);
 
   const detailLoading = algorithmLoading || algorithmsLoading || runsLoading;
@@ -98,28 +88,6 @@ export default function AlgorithmDetail() {
   }
 
   const isGithub = Boolean(algorithm.github_url);
-
-  async function handleSave() {
-    if (!id) {
-      return;
-    }
-
-    setSaving(true);
-    setActionError(null);
-
-    try {
-      await updateMutation.mutate({
-        name,
-        notes_html: notesHtml,
-        code,
-      });
-      setEditing(false);
-    } catch (err: unknown) {
-      setActionError(getErrorMessage(err, "Failed to save algorithm"));
-    } finally {
-      setSaving(false);
-    }
-  }
 
   async function handleRefresh() {
     if (!id) {
@@ -261,16 +229,7 @@ export default function AlgorithmDetail() {
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 lg:p-8 shadow-lg">
         <div className="flex flex-col lg:flex-row justify-between gap-4 lg:gap-8">
           <div>
-            {!editing ? (
-              <h1 className="text-2xl lg:text-4xl font-bold text-white">{algorithm.name}</h1>
-            ) : (
-              <input
-                className="text-2xl lg:text-4xl font-bold bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white w-full"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            )}
-
+            <h1 className="text-2xl lg:text-4xl font-bold text-white">{algorithm.name}</h1>
             <p className="text-xs text-slate-500 mt-3">
               Last updated: {formatDateTime(algorithm.updated_at)}
             </p>
@@ -279,7 +238,7 @@ export default function AlgorithmDetail() {
           <div className="flex items-center gap-4 flex-wrap">
             <DetailNavigator ids={allIds} currentId={id!} basePath="/algorithms" />
 
-            {isGithub && !editing && (
+            {isGithub && (
               <Button
                 variant="WARNING"
                 size="md"
@@ -291,21 +250,9 @@ export default function AlgorithmDetail() {
               </Button>
             )}
 
-            {!editing ? (
-              <Button variant="PRIMARY" size="md" onClick={() => setEditing(true)}>
-                Edit
-              </Button>
-            ) : (
-              <Button
-                variant="SUCCESS"
-                size="md"
-                loading={saving}
-                loadingText="Saving..."
-                onClick={handleSave}
-              >
-                Save
-              </Button>
-            )}
+            <Button variant="PRIMARY" size="md" onClick={() => navigate(`/algorithms/${id}/edit`)}>
+              Edit
+            </Button>
 
             <Button variant="DELETE" size="md" onClick={handleDelete}>
               Delete
@@ -350,28 +297,18 @@ export default function AlgorithmDetail() {
         <div className="hidden lg:block space-y-10">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8">
             <h2 className="text-lg font-semibold text-white mb-4">Strategy Notes</h2>
-
-            {editing ? (
-              <textarea
-                rows={4}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white"
-                value={notesHtml}
-                onChange={(e) => setNotesHtml(e.target.value)}
-              />
-            ) : (
-              <div
-                className="prose prose-invert max-w-none text-slate-300"
-                dangerouslySetInnerHTML={{
-                  __html: algorithm.notes_html || "",
-                }}
-              />
-            )}
+            <div
+              className="prose prose-invert max-w-none text-slate-300"
+              dangerouslySetInnerHTML={{
+                __html: algorithm.notes_html || "",
+              }}
+            />
           </div>
 
           <AlgorithmWorkspace
             code={code}
             onChange={setCode}
-            disabled={!editing || isGithub}
+            disabled={true}
             isGithub={isGithub}
           />
         </div>
@@ -408,22 +345,12 @@ export default function AlgorithmDetail() {
         <div className="lg:hidden">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
             <h2 className="text-lg font-semibold text-white mb-4">Strategy Notes</h2>
-
-            {editing ? (
-              <textarea
-                rows={4}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white"
-                value={notesHtml}
-                onChange={(e) => setNotesHtml(e.target.value)}
-              />
-            ) : (
-              <div
-                className="prose prose-invert max-w-none text-slate-300"
-                dangerouslySetInnerHTML={{
-                  __html: algorithm.notes_html || "",
-                }}
-              />
-            )}
+            <div
+              className="prose prose-invert max-w-none text-slate-300"
+              dangerouslySetInnerHTML={{
+                __html: algorithm.notes_html || "",
+              }}
+            />
           </div>
         </div>
       )}
@@ -433,7 +360,7 @@ export default function AlgorithmDetail() {
           <AlgorithmWorkspace
             code={code}
             onChange={setCode}
-            disabled={!editing || isGithub}
+            disabled={true}
             isGithub={isGithub}
             initialDocsOpen={false}
           />

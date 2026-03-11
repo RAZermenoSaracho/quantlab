@@ -35,6 +35,7 @@ export const nav = [
   // ALGORITHMS
   { path: "/algorithms", element: <AlgorithmsList />, isPrivate: true },
   { path: "/algorithms/new", element: <CreateAlgorithm />, isPrivate: true },
+  { path: "/algorithms/:id/edit", element: <CreateAlgorithm />, isPrivate: true },
   { path: "/algorithms/:id", element: <AlgorithmDetail />, isPrivate: true },
 
   // BACKTESTS

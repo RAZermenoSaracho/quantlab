@@ -10,6 +10,7 @@ export type AlgorithmWorkspaceProps = {
   disabled?: boolean;
   isGithub?: boolean;
   initialDocsOpen?: boolean;
+  showEmptyCodeError?: boolean;
 };
 
 export default function AlgorithmWorkspace({
@@ -18,6 +19,7 @@ export default function AlgorithmWorkspace({
   disabled = false,
   isGithub = false,
   initialDocsOpen = true,
+  showEmptyCodeError = false,
 }: AlgorithmWorkspaceProps) {
   const [docOpen, setDocOpen] = useState(initialDocsOpen);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -28,12 +30,12 @@ export default function AlgorithmWorkspace({
       setValidationError(null);
       return;
     }
-    if (!code.trim()) {
+    if (showEmptyCodeError && !code.trim()) {
       setValidationError("Algorithm code cannot be empty.");
       return;
     }
     setValidationError(null);
-  }, [code, disabled]);
+  }, [code, disabled, showEmptyCodeError]);
 
   useEffect(() => {
     if (!validationError) {
