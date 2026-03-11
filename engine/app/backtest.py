@@ -476,6 +476,50 @@ def _compute_total_unrealized(
     return float(total)
 
 
+def _compute_portfolio_valuation(
+    positions_by_symbol: Dict[str, Optional[dict]],
+    last_prices: Dict[str, float],
+    cash_balance: float,
+) -> tuple[float, float]:
+    """
+    Mark-to-market valuation:
+      equity = cash + sum(long_qty * mark_price) + short_unrealized
+      unrealized = sum(position unrealized)
+    """
+    equity = float(cash_balance)
+    total_unrealized = 0.0
+
+    for symbol, position in positions_by_symbol.items():
+        if position is None:
+            continue
+
+        side = str(position.get("side", "LONG")).upper()
+        qty = float(position.get("quantity", 0.0))
+        if qty <= 0:
+            continue
+
+        entry = float(position.get("average_entry_price", position.get("entry_price", 0.0)))
+        mark = float(last_prices.get(symbol, entry))
+
+        if side == "LONG":
+            market_value = qty * mark
+            cost_basis = float(position.get("entry_notional", entry * qty))
+            unrealized = float(market_value - cost_basis)
+            equity += market_value
+            total_unrealized += unrealized
+        else:
+            unrealized = _unrealized_pnl(
+                price=mark,
+                entry=entry,
+                qty=qty,
+                side=side,
+            )
+            equity += unrealized
+            total_unrealized += unrealized
+
+    return float(equity), float(total_unrealized)
+
+
 # ============================================================
 # Backtest
 # ============================================================
@@ -595,6 +639,7 @@ def run_backtest(
         trades: list[dict[str, Any]] = []
         order_events: list[dict[str, Any]] = []
         equity_curve: list[dict[str, float]] = []
+        realized_pnl = 0.0
         wins: list[float] = []
         losses: list[float] = []
         peak_equity = float(initial_balance)
@@ -652,8 +697,11 @@ def run_backtest(
                 for k, v in positions_by_symbol.items()
             }
 
-            unreal_for_ctx = _compute_total_unrealized(positions_by_symbol, last_prices)
-            equity_for_ctx = balance + unreal_for_ctx
+            equity_for_ctx, unreal_for_ctx = _compute_portfolio_valuation(
+                positions_by_symbol=positions_by_symbol,
+                last_prices=last_prices,
+                cash_balance=balance,
+            )
             current_notional = float(current_position.get("entry_notional", 0.0)) if current_position is not None else 0.0
             current_exposure_pct = (
                 (current_notional / max(equity_for_ctx, 1e-12)) * 100.0
@@ -674,7 +722,7 @@ def run_backtest(
                 symbol=sym,
                 fee_rate=float(final_fee_rate),
                 slippage_bps=float(getattr(config, "slippage_bps", 0.0)),
-                realized_pnl=float(balance - float(initial_balance)),
+                realized_pnl=float(realized_pnl),
                 unrealized_pnl=float(unreal_for_ctx),
                 equity=float(equity_for_ctx),
                 cash_balance=float(balance),
@@ -817,6 +865,7 @@ def run_backtest(
                         trade["symbol"] = sym
                         trades.append(trade)
                         balance += pnl
+                        realized_pnl += float(pnl)
                         (wins if pnl > 0 else losses).append(pnl)
                         positions_by_symbol[sym] = None
                         last_exit_ts_by_symbol[sym] = ts
@@ -852,6 +901,7 @@ def run_backtest(
                     trade["symbol"] = sym
                     trades.append(trade)
                     balance += pnl
+                    realized_pnl += float(pnl)
                     (wins if pnl > 0 else losses).append(pnl)
                     positions_by_symbol[sym] = None
                     last_exit_ts_by_symbol[sym] = ts
@@ -865,6 +915,7 @@ def run_backtest(
                     trade["symbol"] = sym
                     trades.append(trade)
                     balance += pnl
+                    realized_pnl += float(pnl)
                     (wins if pnl > 0 else losses).append(pnl)
                     positions_by_symbol[sym] = None
                     last_exit_ts_by_symbol[sym] = ts
@@ -890,6 +941,7 @@ def run_backtest(
                         trade["symbol"] = sym
                         trades.append(trade)
                         balance += pnl
+                        realized_pnl += float(pnl)
                         (wins if pnl > 0 else losses).append(pnl)
                         positions_by_symbol[sym] = None
                         last_exit_ts_by_symbol[sym] = ts
@@ -898,7 +950,11 @@ def run_backtest(
                         if allow_reentry and _cooldown_ok():
                             positions_by_symbol[sym] = _open_position(intent, balance, dynamic_max_allowed_capital, float(exec_price), ts, float(final_fee_rate), config)
 
-            equity = balance + _compute_total_unrealized(positions_by_symbol, last_prices)
+            equity, _ = _compute_portfolio_valuation(
+                positions_by_symbol=positions_by_symbol,
+                last_prices=last_prices,
+                cash_balance=balance,
+            )
             if equity <= 0:
                 break
             equity_curve.append({"timestamp": ts, "equity": float(equity)})
@@ -910,31 +966,42 @@ def run_backtest(
                 break
 
         open_positions_at_end = len([p for p in positions_by_symbol.values() if p is not None])
-        if open_positions_at_end > 0:
-            for sym, position in list(positions_by_symbol.items()):
-                if position is None:
-                    continue
-                final_exit_price = float(last_prices.get(sym, position.get("entry_price", 0.0)))
-                final_ts = int(last_ts or 0)
-                trade, pnl = _close_position(position, final_exit_price, final_ts, float(final_fee_rate), config)
-                trade["forced_close"] = True
-                trade["symbol"] = sym
-                trades.append(trade)
-                balance += pnl
-                (wins if pnl > 0 else losses).append(pnl)
-                positions_by_symbol[sym] = None
-            if equity_curve:
-                equity_curve[-1]["equity"] = float(balance)
-            else:
-                equity_curve.append({"timestamp": int(last_ts or 0), "equity": float(balance)})
+        final_equity, final_unrealized_pnl = _compute_portfolio_valuation(
+            positions_by_symbol=positions_by_symbol,
+            last_prices=last_prices,
+            cash_balance=balance,
+        )
+        if equity_curve:
+            equity_curve[-1]["equity"] = float(final_equity)
+        else:
+            equity_curve.append({"timestamp": int(last_ts or 0), "equity": float(final_equity)})
 
-        total_return_usdt = balance - float(initial_balance)
+        total_return_usdt = final_equity - float(initial_balance)
         total_return_percent = (total_return_usdt / float(initial_balance)) * 100.0 if initial_balance else 0.0
         total_trades = len(trades)
         win_rate_percent = (len([x for x in wins if x > 0]) / total_trades * 100.0) if total_trades else 0.0
         total_wins = float(sum([x for x in wins if x > 0]))
         total_losses = float(abs(sum([x for x in losses if x < 0]))) if losses else 0.0
         profit_factor = (total_wins / total_losses) if total_losses > 0 else 0.0
+        open_positions = []
+        for sym, position in positions_by_symbol.items():
+            if position is None:
+                continue
+            qty = float(position.get("quantity", 0.0))
+            entry_price = float(position.get("average_entry_price", position.get("entry_price", 0.0)))
+            mark_price = float(last_prices.get(sym, entry_price))
+            cost_basis = float(position.get("entry_notional", entry_price * qty))
+            unrealized_pnl = float((qty * mark_price) - cost_basis)
+            open_positions.append(
+                {
+                    "symbol": sym,
+                    "quantity": qty,
+                    "entry_price": entry_price,
+                    "last_price": mark_price,
+                    "unrealized_pnl": unrealized_pnl,
+                }
+            )
+
         analysis = calculate_metrics(
             equity_curve=equity_curve,
             trades=trades,
@@ -950,7 +1017,12 @@ def run_backtest(
             "fee_rate": float(final_fee_rate),
             "config_used": config_used,
             "initial_balance": float(initial_balance),
-            "final_balance": float(balance),
+            "cash_balance": float(balance),
+            "final_balance": float(final_equity),
+            "final_equity": float(final_equity),
+            "realized_pnl": float(realized_pnl),
+            "unrealized_pnl": float(final_unrealized_pnl),
+            "total_pnl": float(realized_pnl + final_unrealized_pnl),
             "total_return_usdt": float(total_return_usdt),
             "total_return_percent": float(total_return_percent),
             "max_drawdown_percent": float(max_dd * 100.0),
@@ -966,8 +1038,9 @@ def run_backtest(
             "trades": trades,
             "order_events": order_events,
             "analysis": analysis,
+            "open_positions": open_positions,
             "open_positions_at_end": int(open_positions_at_end),
-            "had_forced_close": open_positions_at_end > 0,
+            "had_forced_close": False,
         }
 
     if progress_callback:
@@ -1028,6 +1101,7 @@ def run_backtest(
     equity_curve = []
     pending_orders: list[dict[str, Any]] = []
     order_events: list[dict[str, Any]] = []
+    realized_pnl = 0.0
 
     peak_equity = balance
     max_dd = 0.0
@@ -1089,16 +1163,14 @@ def run_backtest(
             mark_price=float(candle["close"]),
         )
 
+        current_prices_for_valuation = {}
         if position is not None:
-            unreal_for_ctx = _unrealized_pnl(
-                price=float(candle["close"]),
-                entry=float(position.get("average_entry_price", position["entry_price"])),
-                qty=float(position["quantity"]),
-                side=str(position["side"]),
-            )
-        else:
-            unreal_for_ctx = 0.0
-        equity_for_ctx = balance + unreal_for_ctx
+            current_prices_for_valuation[symbol] = float(candle["close"])
+        equity_for_ctx, unreal_for_ctx = _compute_portfolio_valuation(
+            positions_by_symbol={symbol: position},
+            last_prices=current_prices_for_valuation,
+            cash_balance=balance,
+        )
         current_exposure_pct = (
             (float(position.get("entry_notional", 0.0)) / max(equity_for_ctx, 1e-12)) * 100.0
             if position is not None and equity_for_ctx > 0
@@ -1118,7 +1190,7 @@ def run_backtest(
             symbol=symbol,
             fee_rate=float(final_fee_rate),
             slippage_bps=float(getattr(config, "slippage_bps", 0.0)),
-            realized_pnl=float(balance - float(initial_balance)),
+            realized_pnl=float(realized_pnl),
             unrealized_pnl=float(unreal_for_ctx),
             equity=float(equity_for_ctx),
             cash_balance=float(balance),
@@ -1336,6 +1408,7 @@ def run_backtest(
                     )
                     trades.append(trade)
                     balance += pnl
+                    realized_pnl += float(pnl)
                     (wins if pnl > 0 else losses).append(pnl)
                     position = None
                     last_exit_ts = ts
@@ -1388,6 +1461,7 @@ def run_backtest(
                 )
                 trades.append(trade)
                 balance += pnl
+                realized_pnl += float(pnl)
 
                 (wins if pnl > 0 else losses).append(pnl)
 
@@ -1410,6 +1484,7 @@ def run_backtest(
                 )
                 trades.append(trade)
                 balance += pnl
+                realized_pnl += float(pnl)
                 (wins if pnl > 0 else losses).append(pnl)
 
                 position = None
@@ -1472,6 +1547,7 @@ def run_backtest(
                             )
                             trades.append(trade)
                             balance += pnl
+                            realized_pnl += float(pnl)
                             (wins if pnl > 0 else losses).append(pnl)
 
                             position = None
@@ -1498,16 +1574,11 @@ def run_backtest(
         # =====================================================
         # 3) Equity curve
         # =====================================================
-        if position is not None:
-            unreal = _unrealized_pnl(
-                price=float(candle["close"]),
-                entry=float(position["entry_price"]),
-                qty=float(position["quantity"]),
-                side=str(position["side"]),
-            )
-            equity = balance + unreal
-        else:
-            equity = balance
+        equity, _ = _compute_portfolio_valuation(
+            positions_by_symbol={symbol: position},
+            last_prices={symbol: float(candle["close"])} if position is not None else {},
+            cash_balance=balance,
+        )
 
         # liquidation safeguard
         if equity <= 0:
@@ -1525,46 +1596,25 @@ def run_backtest(
             if (dd * 100.0) >= float(config.max_drawdown_pct):
                 break
     
-    # =====================================================
-    # FORCE CLOSE OPEN POSITION AT END
-    # =====================================================
-    if position is not None and candles:
-        open_positions_at_end = 1
-
-        final_candle = candles[-1]
-        final_ts = int(final_candle["timestamp"])
-        final_exit_price = float(final_candle["close"])
-
-        trade, pnl = _close_position(
-            position=position,
-            exit_price=final_exit_price,
-            timestamp=final_ts,
-            fee_rate=float(final_fee_rate),
-            config=config,
-        )
-
-        trade["forced_close"] = True
-        trades.append(trade)
-
-        balance += pnl
-        (wins if pnl > 0 else losses).append(pnl)
-
-        position = None
-        last_exit_ts = final_ts
-
-        # Update last equity point
-        if equity_curve:
-            equity_curve[-1]["equity"] = float(balance)
-        else:
-            equity_curve.append({
-                "timestamp": final_ts,
-                "equity": float(balance)
-            })
+    open_positions_at_end = 1 if position is not None else 0
+    final_mark_price = float(candles[-1]["close"]) if candles else 0.0
+    final_equity, final_unrealized_pnl = _compute_portfolio_valuation(
+        positions_by_symbol={symbol: position},
+        last_prices={symbol: final_mark_price} if position is not None else {},
+        cash_balance=balance,
+    )
+    if equity_curve and candles:
+        equity_curve[-1]["equity"] = float(final_equity)
+    elif candles:
+        equity_curve.append({
+            "timestamp": int(candles[-1]["timestamp"]),
+            "equity": float(final_equity),
+        })
 
     # ============================
     # FINAL METRICS
     # ============================
-    total_return_usdt = balance - float(initial_balance)
+    total_return_usdt = final_equity - float(initial_balance)
     total_return_percent = (total_return_usdt / float(initial_balance)) * 100.0 if initial_balance else 0.0
 
     total_trades = len(trades)
@@ -1573,6 +1623,21 @@ def run_backtest(
     total_wins = float(sum([x for x in wins if x > 0]))
     total_losses = float(abs(sum([x for x in losses if x < 0]))) if losses else 0.0
     profit_factor = (total_wins / total_losses) if total_losses > 0 else 0.0
+
+    open_positions = []
+    if position is not None:
+        qty = float(position.get("quantity", 0.0))
+        entry_price = float(position.get("average_entry_price", position.get("entry_price", 0.0)))
+        cost_basis = float(position.get("entry_notional", entry_price * qty))
+        open_positions.append(
+            {
+                "symbol": symbol,
+                "quantity": qty,
+                "entry_price": entry_price,
+                "last_price": float(final_mark_price),
+                "unrealized_pnl": float((qty * float(final_mark_price)) - cost_basis),
+            }
+        )
 
     analysis = calculate_metrics(
         equity_curve=equity_curve,
@@ -1589,7 +1654,12 @@ def run_backtest(
         "config_used": config_used,
 
         "initial_balance": float(initial_balance),
-        "final_balance": float(balance),
+        "cash_balance": float(balance),
+        "final_balance": float(final_equity),
+        "final_equity": float(final_equity),
+        "realized_pnl": float(realized_pnl),
+        "unrealized_pnl": float(final_unrealized_pnl),
+        "total_pnl": float(realized_pnl + final_unrealized_pnl),
 
         "total_return_usdt": float(total_return_usdt),
         "total_return_percent": float(total_return_percent),
@@ -1624,7 +1694,8 @@ def run_backtest(
             if str(order.get("status", "pending")) == "pending"
         ],
         "analysis": analysis,
+        "open_positions": open_positions,
 
         "open_positions_at_end": int(open_positions_at_end),
-        "had_forced_close": open_positions_at_end > 0,
+        "had_forced_close": False,
     }
