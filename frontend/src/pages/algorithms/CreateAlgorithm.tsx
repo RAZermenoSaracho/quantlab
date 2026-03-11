@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import AlgorithmWorkspace from "../../components/algorithms/AlgorithmWorkspace";
 import DocumentationPanel from "../../components/algorithms/DocumentationPanel";
 import StrategyBuilder from "../../components/algorithms/StrategyBuilder";
+import StrategyPromptGenerator from "../../components/algorithms/StrategyPromptGenerator";
 import Button from "../../components/ui/Button";
 import {
   useAlgorithm,
@@ -15,6 +16,7 @@ export default function CreateAlgorithm() {
   const isEditMode = Boolean(id);
   const navigate = useNavigate();
   const [mobileTab, setMobileTab] = useState<"details" | "code" | "docs">("details");
+  const [generatorMode, setGeneratorMode] = useState<"builder" | "prompt">("builder");
 
   const [name, setName] = useState("");
   const [notesHtml, setNotesHtml] = useState("");
@@ -212,7 +214,31 @@ export default function CreateAlgorithm() {
         </div>
 
         <div className={mobileTab === "code" ? "space-y-6" : "hidden lg:block lg:space-y-6"}>
-          <StrategyBuilder onGenerate={setCode} />
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant={generatorMode === "builder" ? "PRIMARY" : "GHOST"}
+              size="sm"
+              onClick={() => setGeneratorMode("builder")}
+            >
+              Strategy Builder
+            </Button>
+            <Button
+              type="button"
+              variant={generatorMode === "prompt" ? "PRIMARY" : "GHOST"}
+              size="sm"
+              onClick={() => setGeneratorMode("prompt")}
+            >
+              Prompt Generator
+            </Button>
+          </div>
+
+          {generatorMode === "builder" ? (
+            <StrategyBuilder onGenerate={setCode} />
+          ) : (
+            <StrategyPromptGenerator />
+          )}
+
           <AlgorithmWorkspace
             key={`workspace-code-${isEditMode ? "edit" : "create"}`}
             code={code}
