@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from ..execution import FixedBpsSlippage
+from ..execution import resolve_execution_price
 from .fee_model import (
     compute_fee,
     compute_gross_pnl,
@@ -131,6 +131,11 @@ class PortfolioEngine:
         fee_rate: float,
         timestamp: int,
         slippage_bps: float = 0.0,
+        spread_bps: float = 0.0,
+        impact_factor: float = 0.1,
+        candle_volume: Optional[float] = None,
+        liquidity_fraction: float = 0.05,
+        tick_size: Optional[float] = None,
         symbol: Optional[str] = None,
         quantity_step: Optional[float] = None,
     ) -> Optional[Dict[str, Any]]:
@@ -142,12 +147,18 @@ class PortfolioEngine:
         key = self._symbol_key(symbol)
         self.primary_symbol = key
 
-        effective_price = FixedBpsSlippage(slippage_bps).apply(
-            float(price),
+        preview_price = resolve_execution_price(
+            mid_price=float(price),
             side="LONG",
             is_entry=True,
+            slippage_bps=slippage_bps,
+            spread_bps=spread_bps,
+            impact_factor=impact_factor,
+            order_quantity=0.0,
+            candle_volume=candle_volume,
+            tick_size=tick_size,
         )
-        if effective_price <= 0:
+        if preview_price <= 0:
             return None
 
         capital_to_use = min(float(capital_to_use), float(self.state.cash_balance))
@@ -159,7 +170,26 @@ class PortfolioEngine:
             return None
 
         # Keep notional strictly tied to quantity*price.
+        estimated_qty = normalize_quantity((capital_to_use / preview_price), quantity_step)
+        effective_price = resolve_execution_price(
+            mid_price=float(price),
+            side="LONG",
+            is_entry=True,
+            slippage_bps=slippage_bps,
+            spread_bps=spread_bps,
+            impact_factor=impact_factor,
+            order_quantity=estimated_qty,
+            candle_volume=candle_volume,
+            tick_size=tick_size,
+        )
+        if effective_price <= 0:
+            return None
+
         gross_qty = normalize_quantity((capital_to_use / effective_price), quantity_step)
+        if candle_volume is not None and float(candle_volume) > 0 and float(liquidity_fraction) > 0:
+            max_fill_qty = max(0.0, float(candle_volume) * float(liquidity_fraction))
+            gross_qty = min(gross_qty, max_fill_qty)
+            gross_qty = normalize_quantity(gross_qty, quantity_step)
         if gross_qty <= 0:
             return None
         entry_notional = compute_notional(gross_qty, effective_price)
@@ -170,6 +200,10 @@ class PortfolioEngine:
             if max_notional <= 0:
                 return None
             gross_qty = normalize_quantity((max_notional / effective_price), quantity_step)
+            if candle_volume is not None and float(candle_volume) > 0 and float(liquidity_fraction) > 0:
+                max_fill_qty = max(0.0, float(candle_volume) * float(liquidity_fraction))
+                gross_qty = min(gross_qty, max_fill_qty)
+                gross_qty = normalize_quantity(gross_qty, quantity_step)
             if gross_qty <= 0:
                 return None
             entry_notional = compute_notional(gross_qty, effective_price)
@@ -252,6 +286,10 @@ class PortfolioEngine:
         fee_rate: float,
         timestamp: int,
         slippage_bps: float = 0.0,
+        spread_bps: float = 0.0,
+        impact_factor: float = 0.1,
+        candle_volume: Optional[float] = None,
+        tick_size: Optional[float] = None,
         symbol: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         key = self._symbol_key(symbol if symbol is not None else self.primary_symbol)
@@ -261,10 +299,16 @@ class PortfolioEngine:
 
         qty = float(position["quantity"])
         entry_price = float(position.get("average_entry_price", position["entry_price"]))
-        effective_exit = FixedBpsSlippage(slippage_bps).apply(
-            float(price),
+        effective_exit = resolve_execution_price(
+            mid_price=float(price),
             side="LONG",
             is_entry=False,
+            slippage_bps=slippage_bps,
+            spread_bps=spread_bps,
+            impact_factor=impact_factor,
+            order_quantity=qty,
+            candle_volume=candle_volume,
+            tick_size=tick_size,
         )
         entry_notional = float(position.get("entry_notional", entry_price * qty))
         entry_fee = float(position.get("fees_paid", position.get("entry_fee", 0.0)))

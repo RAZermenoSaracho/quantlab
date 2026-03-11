@@ -10,7 +10,7 @@ import httpx
 from .clients import ExchangeFactory
 from .context import build_context
 from .data.candle_aggregator import expand_minute_candles_to_subminute
-from .execution import FixedBpsSlippage
+from .execution import resolve_execution_price
 from .events import get_strategy_event_system
 from .indicators import compute_indicator_series
 from .market import CandleResampler, timeframe_to_ms
@@ -221,21 +221,27 @@ class PaperSession:
                 self.fee_rate = 0.001
 
         self.symbol_lot_sizes: Dict[str, Optional[float]] = {}
+        self.symbol_tick_sizes: Dict[str, Optional[float]] = {}
         for symbol_item in self.symbols:
             lot_size: Optional[float] = None
+            tick_size: Optional[float] = None
             if metadata_client is not None:
                 try:
                     raw_lot_size = metadata_client.get_lot_size(symbol_item)
                     if raw_lot_size is not None and float(raw_lot_size) > 0:
                         lot_size = float(raw_lot_size)
+                    raw_tick_size = metadata_client.get_tick_size(symbol_item)
+                    if raw_tick_size is not None and float(raw_tick_size) > 0:
+                        tick_size = float(raw_tick_size)
                 except Exception:
                     logger.warning(
-                        "[PaperTrading][%s] Failed to load lot size for %s",
+                        "[PaperTrading][%s] Failed to load lot/tick size for %s",
                         self.run_id,
                         symbol_item,
                         exc_info=True,
                     )
             self.symbol_lot_sizes[symbol_item] = lot_size
+            self.symbol_tick_sizes[symbol_item] = tick_size
 
         self.position: Optional[Dict[str, Any]] = None
         self.positions: Dict[str, Dict[str, Any]] = {}
@@ -807,6 +813,7 @@ class PaperSession:
                         fill_price,
                         timestamp,
                         symbol=symbol,
+                        candle_volume=float(candle.get("volume", 0.0)),
                         size_pct=size_pct,
                         size_qty=size_qty,
                     )
@@ -821,7 +828,12 @@ class PaperSession:
                     order["status"] = "cancelled"
                     await self._emit_order_event("order_cancelled", order, symbol, "no_position_to_close")
                 else:
-                    executed = await self._close_position(fill_price, timestamp, symbol=symbol)
+                    executed = await self._close_position(
+                        fill_price,
+                        timestamp,
+                        symbol=symbol,
+                        candle_volume=float(candle.get("volume", 0.0)),
+                    )
                     if not executed:
                         order["status"] = "cancelled"
                         await self._emit_order_event("order_cancelled", order, symbol, "close_rejected")
@@ -1059,6 +1071,7 @@ class PaperSession:
         timestamp: int,
         *,
         symbol: str,
+        candle_volume: Optional[float] = None,
         size_pct: Optional[float] = None,
         size_qty: Optional[float] = None,
     ) -> bool:
@@ -1066,10 +1079,19 @@ class PaperSession:
             return False
 
         slippage_bps = float(getattr(self.config, "slippage_bps", 0.0))
-        expected_execution_price = FixedBpsSlippage(slippage_bps).apply(
-            float(price),
+        spread_bps = float(getattr(self.config, "spread_bps", 0.0))
+        impact_factor = float(getattr(self.config, "impact_factor", 0.1))
+        liquidity_fraction = float(getattr(self.config, "liquidity_fraction", 0.05))
+        expected_execution_price = resolve_execution_price(
+            mid_price=float(price),
             side="LONG",
             is_entry=True,
+            slippage_bps=slippage_bps,
+            spread_bps=spread_bps,
+            impact_factor=impact_factor,
+            order_quantity=float(size_qty) if size_qty is not None else 0.0,
+            candle_volume=candle_volume,
+            tick_size=self.symbol_tick_sizes.get(symbol),
         )
 
         batch_size = float(getattr(self.config, "batch_size", 1.0))
@@ -1120,6 +1142,11 @@ class PaperSession:
             fee_rate=self.fee_rate,
             timestamp=timestamp,
             slippage_bps=slippage_bps,
+            spread_bps=spread_bps,
+            impact_factor=impact_factor,
+            candle_volume=candle_volume,
+            liquidity_fraction=liquidity_fraction,
+            tick_size=self.symbol_tick_sizes.get(symbol),
             symbol=symbol,
             quantity_step=self.symbol_lot_sizes.get(symbol),
         )
@@ -1179,7 +1206,14 @@ class PaperSession:
         await self._emit_portfolio_update()
         return True
 
-    async def _close_position(self, price: float, timestamp: int, *, symbol: str) -> bool:
+    async def _close_position(
+        self,
+        price: float,
+        timestamp: int,
+        *,
+        symbol: str,
+        candle_volume: Optional[float] = None,
+    ) -> bool:
         symbol_position = self.positions.get(symbol)
         if not symbol_position:
             return False
@@ -1189,11 +1223,17 @@ class PaperSession:
             return False
 
         slippage_bps = float(getattr(self.config, "slippage_bps", 0.0))
+        spread_bps = float(getattr(self.config, "spread_bps", 0.0))
+        impact_factor = float(getattr(self.config, "impact_factor", 0.1))
         trade = self.portfolio.apply_trade_close(
             price=price,
             fee_rate=self.fee_rate,
             timestamp=timestamp,
             slippage_bps=slippage_bps,
+            spread_bps=spread_bps,
+            impact_factor=impact_factor,
+            candle_volume=candle_volume,
+            tick_size=self.symbol_tick_sizes.get(symbol),
             symbol=symbol,
         )
         if trade is None:

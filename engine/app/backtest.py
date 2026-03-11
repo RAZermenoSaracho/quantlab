@@ -9,7 +9,7 @@ from .spec import load_config_from_env
 from .indicators import compute_indicator_series
 from .context import build_context
 from .data.candle_aggregator import expand_minute_candles_to_subminute
-from .execution import FixedBpsSlippage
+from .execution import resolve_execution_price
 from .portfolio.fee_model import (
     compute_fee,
     compute_gross_pnl,
@@ -65,8 +65,29 @@ def _normalize_signal(raw_signal: str, direction: str) -> str:
 # Execution helpers
 # ============================================================
 
-def _apply_slippage(price: float, slippage_bps: float, side: str, is_entry: bool) -> float:
-    return FixedBpsSlippage(slippage_bps).apply(price, side=side, is_entry=is_entry)
+def _resolve_execution_price(
+    *,
+    mid_price: float,
+    side: str,
+    is_entry: bool,
+    slippage_bps: float,
+    spread_bps: float,
+    impact_factor: float,
+    order_quantity: float,
+    candle_volume: Optional[float],
+    tick_size: Optional[float],
+) -> float:
+    return resolve_execution_price(
+        mid_price=mid_price,
+        side=side,
+        is_entry=is_entry,
+        slippage_bps=slippage_bps,
+        spread_bps=spread_bps,
+        impact_factor=impact_factor,
+        order_quantity=order_quantity,
+        candle_volume=candle_volume,
+        tick_size=tick_size,
+    )
 
 
 def _unrealized_pnl(price: float, entry: float, qty: float, side: str) -> float:
@@ -145,6 +166,8 @@ def _open_position(
     config,
     size_pct: Optional[float] = None,
     size_qty: Optional[float] = None,
+    candle_volume: Optional[float] = None,
+    tick_size: Optional[float] = None,
     quantity_step: Optional[float] = None,
 ) -> Optional[dict]:
     """
@@ -159,14 +182,23 @@ def _open_position(
         return None
 
     slippage_bps = float(getattr(config, "slippage_bps", 0.0))
+    spread_bps = float(getattr(config, "spread_bps", 0.0))
+    impact_factor = float(getattr(config, "impact_factor", 0.1))
+    liquidity_fraction = float(getattr(config, "liquidity_fraction", 0.05))
     leverage = float(getattr(config, "leverage", 1.0))
 
-    fill_price = _apply_slippage(
-        float(entry_price),
-        slippage_bps,
+    preview_fill_price = _resolve_execution_price(
+        mid_price=float(entry_price),
         side=desired_side,
         is_entry=True,
+        slippage_bps=slippage_bps,
+        spread_bps=spread_bps,
+        impact_factor=impact_factor,
+        order_quantity=float(size_qty) if size_qty is not None else 0.0,
+        candle_volume=candle_volume,
+        tick_size=tick_size,
     )
+    fill_price = float(preview_fill_price)
     if fill_price <= 0:
         return None
 
@@ -185,7 +217,29 @@ def _open_position(
         capital_to_use = effective_balance * pct
         qty = capital_to_use / fill_price if fill_price > 0 else 0.0
 
+    fill_price = _resolve_execution_price(
+        mid_price=float(entry_price),
+        side=desired_side,
+        is_entry=True,
+        slippage_bps=slippage_bps,
+        spread_bps=spread_bps,
+        impact_factor=impact_factor,
+        order_quantity=float(qty),
+        candle_volume=candle_volume,
+        tick_size=tick_size,
+    )
+    if size_qty is None and fill_price > 0:
+        if size_pct is not None:
+            qty = (effective_balance * (float(size_pct) / 100.0)) / fill_price
+        elif getattr(config, "batch_size_type", "fixed") == "fixed":
+            qty = float(getattr(config, "batch_size", 0.0))
+        else:
+            qty = (effective_balance * (float(getattr(config, "batch_size", 0.0)) / 100.0)) / fill_price
+
     qty = normalize_quantity(qty, quantity_step)
+    if candle_volume is not None and float(candle_volume) > 0 and liquidity_fraction > 0:
+        max_fill = max(0.0, float(candle_volume) * liquidity_fraction)
+        qty = normalize_quantity(min(qty, max_fill), quantity_step)
     if qty <= 0:
         return None
 
@@ -226,6 +280,8 @@ def _add_to_position(
     config,
     size_pct: Optional[float] = None,
     size_qty: Optional[float] = None,
+    candle_volume: Optional[float] = None,
+    tick_size: Optional[float] = None,
     quantity_step: Optional[float] = None,
 ) -> Optional[dict]:
     side = str(position.get("side", "LONG"))
@@ -233,13 +289,22 @@ def _add_to_position(
         return None
 
     slippage_bps = float(getattr(config, "slippage_bps", 0.0))
+    spread_bps = float(getattr(config, "spread_bps", 0.0))
+    impact_factor = float(getattr(config, "impact_factor", 0.1))
+    liquidity_fraction = float(getattr(config, "liquidity_fraction", 0.05))
     leverage = float(getattr(config, "leverage", 1.0))
-    fill_price = _apply_slippage(
-        float(price),
-        slippage_bps,
+    preview_fill_price = _resolve_execution_price(
+        mid_price=float(price),
         side=side,
         is_entry=True,
+        slippage_bps=slippage_bps,
+        spread_bps=spread_bps,
+        impact_factor=impact_factor,
+        order_quantity=float(size_qty) if size_qty is not None else 0.0,
+        candle_volume=candle_volume,
+        tick_size=tick_size,
     )
+    fill_price = float(preview_fill_price)
     if fill_price <= 0:
         return None
 
@@ -254,7 +319,29 @@ def _add_to_position(
     else:
         pct = float(getattr(config, "batch_size", 0.0)) / 100.0
         qty = (effective_balance * pct) / fill_price if fill_price > 0 else 0.0
+    fill_price = _resolve_execution_price(
+        mid_price=float(price),
+        side=side,
+        is_entry=True,
+        slippage_bps=slippage_bps,
+        spread_bps=spread_bps,
+        impact_factor=impact_factor,
+        order_quantity=float(qty),
+        candle_volume=candle_volume,
+        tick_size=tick_size,
+    )
+    if size_qty is None and fill_price > 0:
+        if size_pct is not None:
+            qty = (effective_balance * (float(size_pct) / 100.0)) / fill_price
+        elif getattr(config, "batch_size_type", "fixed") == "fixed":
+            qty = float(getattr(config, "batch_size", 0.0))
+        else:
+            qty = (effective_balance * (float(getattr(config, "batch_size", 0.0)) / 100.0)) / fill_price
+
     qty = normalize_quantity(qty, quantity_step)
+    if candle_volume is not None and float(candle_volume) > 0 and liquidity_fraction > 0:
+        max_fill = max(0.0, float(candle_volume) * liquidity_fraction)
+        qty = normalize_quantity(min(qty, max_fill), quantity_step)
     if qty <= 0:
         return None
 
@@ -291,6 +378,8 @@ def _close_position(
     timestamp: int,
     fee_rate: float,
     config,
+    candle_volume: Optional[float] = None,
+    tick_size: Optional[float] = None,
 ) -> Tuple[dict, float]:
     """
     Closes an existing position at exit_price:
@@ -303,12 +392,19 @@ def _close_position(
     qty = float(position["quantity"])
 
     slippage_bps = float(getattr(config, "slippage_bps", 0.0))
+    spread_bps = float(getattr(config, "spread_bps", 0.0))
+    impact_factor = float(getattr(config, "impact_factor", 0.1))
 
-    fill_exit = _apply_slippage(
-        float(exit_price),
-        slippage_bps,
+    fill_exit = _resolve_execution_price(
+        mid_price=float(exit_price),
         side=side,
         is_entry=False,
+        slippage_bps=slippage_bps,
+        spread_bps=spread_bps,
+        impact_factor=impact_factor,
+        order_quantity=qty,
+        candle_volume=candle_volume,
+        tick_size=tick_size,
     )
 
     gross = compute_gross_pnl(side, entry, fill_exit, qty)
@@ -639,15 +735,24 @@ def run_backtest(
             final_fee_rate = float(client.get_default_fee_rate())
 
     lot_size_by_symbol: Dict[str, Optional[float]] = {}
+    tick_size_by_symbol: Dict[str, Optional[float]] = {}
     for sym in symbols:
         lot_size: Optional[float] = None
+        tick_size: Optional[float] = None
         try:
             raw_lot_size = client.get_lot_size(sym)
             if raw_lot_size is not None and float(raw_lot_size) > 0:
                 lot_size = float(raw_lot_size)
         except Exception:
             lot_size = None
+        try:
+            raw_tick_size = client.get_tick_size(sym)
+            if raw_tick_size is not None and float(raw_tick_size) > 0:
+                tick_size = float(raw_tick_size)
+        except Exception:
+            tick_size = None
         lot_size_by_symbol[sym] = lot_size
+        tick_size_by_symbol[sym] = tick_size
 
     if len(symbols) > 1:
         source_timeframe = "1m" if timeframe in SUB_MINUTE_TIMEFRAMES else timeframe
@@ -943,6 +1048,8 @@ def run_backtest(
                             config,
                             size_pct=size_pct,
                             size_qty=size_qty,
+                            candle_volume=float(candle.get("volume", 0.0)),
+                            tick_size=tick_size_by_symbol.get(sym),
                             quantity_step=lot_size_by_symbol.get(sym),
                         )
                         if opened is not None:
@@ -959,6 +1066,8 @@ def run_backtest(
                             config,
                             size_pct=size_pct,
                             size_qty=size_qty,
+                            candle_volume=float(candle.get("volume", 0.0)),
+                            tick_size=tick_size_by_symbol.get(sym),
                             quantity_step=lot_size_by_symbol.get(sym),
                         )
                         if added is not None:
@@ -966,7 +1075,15 @@ def run_backtest(
                             executed = True
                 else:
                     if current_position is not None:
-                        trade, pnl = _close_position(current_position, float(fill_price), ts, float(final_fee_rate), config)
+                        trade, pnl = _close_position(
+                            current_position,
+                            float(fill_price),
+                            ts,
+                            float(final_fee_rate),
+                            config,
+                            candle_volume=float(candle.get("volume", 0.0)),
+                            tick_size=tick_size_by_symbol.get(sym),
+                        )
                         trade["symbol"] = sym
                         trades.append(trade)
                         balance += pnl
@@ -1002,7 +1119,15 @@ def run_backtest(
             if current_position is not None:
                 hit, fill_price = _check_intrabar_risk_exit(current_position, candle, config)
                 if hit and fill_price is not None:
-                    trade, pnl = _close_position(current_position, float(fill_price), ts, float(final_fee_rate), config)
+                    trade, pnl = _close_position(
+                        current_position,
+                        float(fill_price),
+                        ts,
+                        float(final_fee_rate),
+                        config,
+                        candle_volume=float(candle.get("volume", 0.0)),
+                        tick_size=tick_size_by_symbol.get(sym),
+                    )
                     trade["symbol"] = sym
                     trades.append(trade)
                     balance += pnl
@@ -1016,7 +1141,15 @@ def run_backtest(
             current_position = positions_by_symbol[sym]
             if intent == "CLOSE":
                 if current_position is not None:
-                    trade, pnl = _close_position(current_position, float(exec_price), ts, float(final_fee_rate), config)
+                    trade, pnl = _close_position(
+                        current_position,
+                        float(exec_price),
+                        ts,
+                        float(final_fee_rate),
+                        config,
+                        candle_volume=float(candle.get("volume", 0.0)),
+                        tick_size=tick_size_by_symbol.get(sym),
+                    )
                     trade["symbol"] = sym
                     trades.append(trade)
                     balance += pnl
@@ -1044,6 +1177,8 @@ def run_backtest(
                             ts,
                             float(final_fee_rate),
                             config,
+                            candle_volume=float(candle.get("volume", 0.0)),
+                            tick_size=tick_size_by_symbol.get(sym),
                             quantity_step=lot_size_by_symbol.get(sym),
                         )
                     elif current_position["side"] == intent:
@@ -1055,12 +1190,22 @@ def run_backtest(
                             ts,
                             float(final_fee_rate),
                             config,
+                            candle_volume=float(candle.get("volume", 0.0)),
+                            tick_size=tick_size_by_symbol.get(sym),
                             quantity_step=lot_size_by_symbol.get(sym),
                         )
                         if added is not None:
                             positions_by_symbol[sym] = added
                     else:
-                        trade, pnl = _close_position(current_position, float(exec_price), ts, float(final_fee_rate), config)
+                        trade, pnl = _close_position(
+                            current_position,
+                            float(exec_price),
+                            ts,
+                            float(final_fee_rate),
+                            config,
+                            candle_volume=float(candle.get("volume", 0.0)),
+                            tick_size=tick_size_by_symbol.get(sym),
+                        )
                         trade["symbol"] = sym
                         trades.append(trade)
                         balance += pnl
@@ -1079,6 +1224,8 @@ def run_backtest(
                                 ts,
                                 float(final_fee_rate),
                                 config,
+                                candle_volume=float(candle.get("volume", 0.0)),
+                                tick_size=tick_size_by_symbol.get(sym),
                                 quantity_step=lot_size_by_symbol.get(sym),
                             )
 
@@ -1250,6 +1397,7 @@ def run_backtest(
 
     single_symbol = symbols[0]
     single_quantity_step = lot_size_by_symbol.get(single_symbol)
+    single_tick_size = tick_size_by_symbol.get(single_symbol)
 
     source_timeframe = "1m" if timeframe in SUB_MINUTE_TIMEFRAMES else timeframe
 
@@ -1568,6 +1716,8 @@ def run_backtest(
                         config=config,
                         size_pct=size_pct,
                         size_qty=size_qty,
+                        candle_volume=float(candle.get("volume", 0.0)),
+                        tick_size=single_tick_size,
                         quantity_step=single_quantity_step,
                     )
                     if opened is None:
@@ -1593,6 +1743,8 @@ def run_backtest(
                         config=config,
                         size_pct=size_pct,
                         size_qty=size_qty,
+                        candle_volume=float(candle.get("volume", 0.0)),
+                        tick_size=single_tick_size,
                         quantity_step=single_quantity_step,
                     )
                     if added is None:
@@ -1624,6 +1776,8 @@ def run_backtest(
                         timestamp=ts,
                         fee_rate=float(final_fee_rate),
                         config=config,
+                        candle_volume=float(candle.get("volume", 0.0)),
+                        tick_size=single_tick_size,
                     )
                     trades.append(trade)
                     balance += pnl
@@ -1677,6 +1831,8 @@ def run_backtest(
                     timestamp=ts,
                     fee_rate=float(final_fee_rate),
                     config=config,
+                    candle_volume=float(candle.get("volume", 0.0)),
+                    tick_size=single_tick_size,
                 )
                 trades.append(trade)
                 balance += pnl
@@ -1700,6 +1856,8 @@ def run_backtest(
                     timestamp=ts,
                     fee_rate=float(final_fee_rate),
                     config=config,
+                    candle_volume=float(candle.get("volume", 0.0)),
+                    tick_size=single_tick_size,
                 )
                 trades.append(trade)
                 balance += pnl
@@ -1736,6 +1894,8 @@ def run_backtest(
                             timestamp=ts,
                             fee_rate=float(final_fee_rate),
                             config=config,
+                            candle_volume=float(candle.get("volume", 0.0)),
+                            tick_size=single_tick_size,
                             quantity_step=single_quantity_step,
                         )
                     else:
@@ -1753,6 +1913,8 @@ def run_backtest(
                                 timestamp=ts,
                                 fee_rate=float(final_fee_rate),
                                 config=config,
+                                candle_volume=float(candle.get("volume", 0.0)),
+                                tick_size=single_tick_size,
                                 quantity_step=single_quantity_step,
                             )
                             if added is not None:
@@ -1765,6 +1927,8 @@ def run_backtest(
                                 timestamp=ts,
                                 fee_rate=float(final_fee_rate),
                                 config=config,
+                                candle_volume=float(candle.get("volume", 0.0)),
+                                tick_size=single_tick_size,
                             )
                             trades.append(trade)
                             balance += pnl
@@ -1790,6 +1954,8 @@ def run_backtest(
                                     timestamp=ts,
                                     fee_rate=float(final_fee_rate),
                                     config=config,
+                                    candle_volume=float(candle.get("volume", 0.0)),
+                                    tick_size=single_tick_size,
                                     quantity_step=single_quantity_step,
                                 )
 
