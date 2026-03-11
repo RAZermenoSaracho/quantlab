@@ -1,4 +1,6 @@
 from __future__ import annotations
+import math
+from typing import Optional
 
 
 def compute_notional(quantity: float, price: float) -> float:
@@ -40,3 +42,16 @@ def compute_pnl_percent(net_pnl: float, entry_notional: float) -> float:
     if base <= 0:
         return 0.0
     return (float(net_pnl) / base) * 100.0
+
+
+def normalize_quantity(quantity: float, step: Optional[float] = None) -> float:
+    qty = float(quantity)
+    if qty <= 0:
+        return 0.0
+    if step is None:
+        return qty
+    step_size = float(step)
+    if step_size <= 0:
+        return qty
+    units = math.floor((qty / step_size) + 1e-12)
+    return max(0.0, units * step_size)

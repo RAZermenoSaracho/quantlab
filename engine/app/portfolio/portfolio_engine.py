@@ -8,6 +8,7 @@ from .fee_model import (
     compute_gross_pnl,
     compute_net_pnl,
     compute_notional,
+    normalize_quantity,
     compute_total_fee,
 )
 from .portfolio_state import PortfolioState
@@ -130,6 +131,7 @@ class PortfolioEngine:
         timestamp: int,
         slippage_bps: float = 0.0,
         symbol: Optional[str] = None,
+        quantity_step: Optional[float] = None,
     ) -> Optional[Dict[str, Any]]:
         if side != "LONG":
             return None
@@ -152,7 +154,7 @@ class PortfolioEngine:
             return None
 
         # Keep notional strictly tied to quantity*price.
-        gross_qty = capital_to_use / effective_price
+        gross_qty = normalize_quantity((capital_to_use / effective_price), quantity_step)
         if gross_qty <= 0:
             return None
         entry_notional = compute_notional(gross_qty, effective_price)
@@ -162,7 +164,9 @@ class PortfolioEngine:
             max_notional = float(self.state.cash_balance) / (1.0 + fee_rate_used)
             if max_notional <= 0:
                 return None
-            gross_qty = max_notional / effective_price
+            gross_qty = normalize_quantity((max_notional / effective_price), quantity_step)
+            if gross_qty <= 0:
+                return None
             entry_notional = compute_notional(gross_qty, effective_price)
             entry_fee_quote = compute_fee(entry_notional, fee_rate_used)
             total_cash_out = entry_notional + entry_fee_quote

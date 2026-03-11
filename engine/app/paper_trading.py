@@ -190,23 +190,51 @@ class PaperSession:
         self.base_balance = 0.0                              # e.g. BTC in BTCUSDT
         self.last_price: Optional[float] = None
 
+        metadata_client = None
+        try:
+            metadata_client = ExchangeFactory.create(
+                exchange=self.exchange,
+                api_key=request.api_key,
+                api_secret=request.api_secret,
+                testnet=request.testnet,
+            )
+        except Exception:
+            logger.exception(
+                "[PaperTrading][%s] Failed creating exchange client for metadata.",
+                self.run_id,
+            )
+
         if request.fee_rate is not None:
             self.fee_rate = float(request.fee_rate)
         else:
             try:
-                fee_client = ExchangeFactory.create(
-                    exchange=self.exchange,
-                    api_key=request.api_key,
-                    api_secret=request.api_secret,
-                    testnet=request.testnet,
-                )
-                self.fee_rate = float(fee_client.get_fee_model(self.symbol).taker_fee)
+                if metadata_client is not None:
+                    self.fee_rate = float(metadata_client.get_fee_model(self.symbol).taker_fee)
+                else:
+                    self.fee_rate = 0.001
             except Exception:
                 logger.exception(
                     "[PaperTrading][%s] Failed to load exchange fee model; using fallback taker fee.",
                     self.run_id,
                 )
                 self.fee_rate = 0.001
+
+        self.symbol_lot_sizes: Dict[str, Optional[float]] = {}
+        for symbol_item in self.symbols:
+            lot_size: Optional[float] = None
+            if metadata_client is not None:
+                try:
+                    raw_lot_size = metadata_client.get_lot_size(symbol_item)
+                    if raw_lot_size is not None and float(raw_lot_size) > 0:
+                        lot_size = float(raw_lot_size)
+                except Exception:
+                    logger.warning(
+                        "[PaperTrading][%s] Failed to load lot size for %s",
+                        self.run_id,
+                        symbol_item,
+                        exc_info=True,
+                    )
+            self.symbol_lot_sizes[symbol_item] = lot_size
 
         self.position: Optional[Dict[str, Any]] = None
         self.positions: Dict[str, Dict[str, Any]] = {}
@@ -1086,6 +1114,7 @@ class PaperSession:
             timestamp=timestamp,
             slippage_bps=slippage_bps,
             symbol=symbol,
+            quantity_step=self.symbol_lot_sizes.get(symbol),
         )
         if opened is None:
             return False

@@ -13,6 +13,7 @@ from app.portfolio.fee_model import (
     compute_notional,
     compute_pnl_percent,
     compute_total_fee,
+    normalize_quantity,
 )
 from app.portfolio.portfolio_engine import PortfolioEngine
 
@@ -76,6 +77,41 @@ class TradeAccountingTest(unittest.TestCase):
             float(closed["gross_pnl"]) - float(closed["total_fee"]),
             places=12,
         )
+
+    def test_entry_notional_recomputed_after_qty_rounding(self) -> None:
+        balance = 10_000.0
+        position_pct = 0.095
+        entry_price = 70_093.02
+        fee_rate = 0.001
+        quantity_step = 0.0001
+
+        capital_to_use = balance * position_pct
+        raw_qty = capital_to_use / entry_price
+        rounded_qty = normalize_quantity(raw_qty, quantity_step)
+        expected_entry_notional = rounded_qty * entry_price
+        expected_entry_fee = expected_entry_notional * fee_rate
+
+        engine = PortfolioEngine(initial_cash=balance)
+        opened = engine.apply_trade_open(
+            side="LONG",
+            price=entry_price,
+            capital_to_use=capital_to_use,
+            fee_rate=fee_rate,
+            timestamp=1_700_000_000_000,
+            symbol="BTCUSDT",
+            quantity_step=quantity_step,
+        )
+        self.assertIsNotNone(opened)
+
+        fill = opened["fill"]
+        qty = float(fill["quantity"])
+        entry_notional = float(fill["entry_notional"])
+        entry_fee = float(fill["entry_fee"])
+
+        self.assertAlmostEqual(qty, rounded_qty, places=12)
+        self.assertAlmostEqual(entry_notional, expected_entry_notional, places=12)
+        self.assertAlmostEqual(entry_fee, expected_entry_fee, places=12)
+        self.assertLess(abs(entry_notional - (qty * entry_price)), 1e-9)
 
 
 if __name__ == "__main__":

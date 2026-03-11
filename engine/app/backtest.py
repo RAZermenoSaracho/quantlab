@@ -16,6 +16,7 @@ from .portfolio.fee_model import (
     compute_notional,
     compute_pnl_percent,
     compute_total_fee,
+    normalize_quantity,
 )
 
 
@@ -156,6 +157,7 @@ def _open_position(
     config,
     size_pct: Optional[float] = None,
     size_qty: Optional[float] = None,
+    quantity_step: Optional[float] = None,
 ) -> Optional[dict]:
     """
     Opens a position with:
@@ -192,6 +194,7 @@ def _open_position(
         capital_to_use = effective_balance * pct
         qty = capital_to_use / fill_price if fill_price > 0 else 0.0
 
+    qty = normalize_quantity(qty, quantity_step)
     if qty <= 0:
         return None
 
@@ -232,6 +235,7 @@ def _add_to_position(
     config,
     size_pct: Optional[float] = None,
     size_qty: Optional[float] = None,
+    quantity_step: Optional[float] = None,
 ) -> Optional[dict]:
     side = str(position.get("side", "LONG"))
     if side not in ("LONG", "SHORT"):
@@ -255,6 +259,7 @@ def _add_to_position(
     else:
         pct = float(getattr(config, "batch_size", 0.0)) / 100.0
         qty = (effective_balance * pct) / fill_price if fill_price > 0 else 0.0
+    qty = normalize_quantity(qty, quantity_step)
     if qty <= 0:
         return None
 
@@ -630,9 +635,20 @@ def run_backtest(
         final_fee_rate = float(fee_rate)
     else:
         try:
-            final_fee_rate = float(client.get_fee_model(symbol).taker_fee)
+            final_fee_rate = float(client.get_fee_model(symbols[0]).taker_fee)
         except Exception:
             final_fee_rate = float(client.get_default_fee_rate())
+
+    lot_size_by_symbol: Dict[str, Optional[float]] = {}
+    for sym in symbols:
+        lot_size: Optional[float] = None
+        try:
+            raw_lot_size = client.get_lot_size(sym)
+            if raw_lot_size is not None and float(raw_lot_size) > 0:
+                lot_size = float(raw_lot_size)
+        except Exception:
+            lot_size = None
+        lot_size_by_symbol[sym] = lot_size
 
     if len(symbols) > 1:
         source_timeframe = "1m" if timeframe in SUB_MINUTE_TIMEFRAMES else timeframe
@@ -918,12 +934,34 @@ def run_backtest(
                 if side == "BUY":
                     dynamic_max_allowed_capital = max(0.0, float(balance) * (max_exposure_pct / 100.0))
                     if current_position is None:
-                        opened = _open_position("LONG", balance, dynamic_max_allowed_capital, float(fill_price), ts, float(final_fee_rate), config, size_pct=size_pct, size_qty=size_qty)
+                        opened = _open_position(
+                            "LONG",
+                            balance,
+                            dynamic_max_allowed_capital,
+                            float(fill_price),
+                            ts,
+                            float(final_fee_rate),
+                            config,
+                            size_pct=size_pct,
+                            size_qty=size_qty,
+                            quantity_step=lot_size_by_symbol.get(sym),
+                        )
                         if opened is not None:
                             positions_by_symbol[sym] = opened
                             executed = True
                     elif current_position["side"] == "LONG":
-                        added = _add_to_position(current_position, balance, dynamic_max_allowed_capital, float(fill_price), ts, float(final_fee_rate), config, size_pct=size_pct, size_qty=size_qty)
+                        added = _add_to_position(
+                            current_position,
+                            balance,
+                            dynamic_max_allowed_capital,
+                            float(fill_price),
+                            ts,
+                            float(final_fee_rate),
+                            config,
+                            size_pct=size_pct,
+                            size_qty=size_qty,
+                            quantity_step=lot_size_by_symbol.get(sym),
+                        )
                         if added is not None:
                             positions_by_symbol[sym] = added
                             executed = True
@@ -999,9 +1037,27 @@ def run_backtest(
                 else:
                     dynamic_max_allowed_capital = max(0.0, float(balance) * (max_exposure_pct / 100.0))
                     if current_position is None:
-                        positions_by_symbol[sym] = _open_position(intent, balance, dynamic_max_allowed_capital, float(exec_price), ts, float(final_fee_rate), config)
+                        positions_by_symbol[sym] = _open_position(
+                            intent,
+                            balance,
+                            dynamic_max_allowed_capital,
+                            float(exec_price),
+                            ts,
+                            float(final_fee_rate),
+                            config,
+                            quantity_step=lot_size_by_symbol.get(sym),
+                        )
                     elif current_position["side"] == intent:
-                        added = _add_to_position(current_position, balance, dynamic_max_allowed_capital, float(exec_price), ts, float(final_fee_rate), config)
+                        added = _add_to_position(
+                            current_position,
+                            balance,
+                            dynamic_max_allowed_capital,
+                            float(exec_price),
+                            ts,
+                            float(final_fee_rate),
+                            config,
+                            quantity_step=lot_size_by_symbol.get(sym),
+                        )
                         if added is not None:
                             positions_by_symbol[sym] = added
                     else:
@@ -1016,7 +1072,16 @@ def run_backtest(
                         if not allow_reentry:
                             reentry_blocked_by_symbol[sym] = True
                         if allow_reentry and _cooldown_ok():
-                            positions_by_symbol[sym] = _open_position(intent, balance, dynamic_max_allowed_capital, float(exec_price), ts, float(final_fee_rate), config)
+                            positions_by_symbol[sym] = _open_position(
+                                intent,
+                                balance,
+                                dynamic_max_allowed_capital,
+                                float(exec_price),
+                                ts,
+                                float(final_fee_rate),
+                                config,
+                                quantity_step=lot_size_by_symbol.get(sym),
+                            )
 
             equity, _ = _compute_portfolio_valuation(
                 positions_by_symbol=positions_by_symbol,
@@ -1184,10 +1249,13 @@ def run_backtest(
     if progress_callback:
         progress_callback(30)
 
+    single_symbol = symbols[0]
+    single_quantity_step = lot_size_by_symbol.get(single_symbol)
+
     source_timeframe = "1m" if timeframe in SUB_MINUTE_TIMEFRAMES else timeframe
 
     candles_raw = client.fetch_candles(
-        symbol=symbol,
+        symbol=single_symbol,
         timeframe=source_timeframe,
         start_date=start_date,
         end_date=end_date,
@@ -1501,6 +1569,7 @@ def run_backtest(
                         config=config,
                         size_pct=size_pct,
                         size_qty=size_qty,
+                        quantity_step=single_quantity_step,
                     )
                     if opened is None:
                         order["status"] = "cancelled"
@@ -1525,6 +1594,7 @@ def run_backtest(
                         config=config,
                         size_pct=size_pct,
                         size_qty=size_qty,
+                        quantity_step=single_quantity_step,
                     )
                     if added is None:
                         order["status"] = "cancelled"
@@ -1667,6 +1737,7 @@ def run_backtest(
                             timestamp=ts,
                             fee_rate=float(final_fee_rate),
                             config=config,
+                            quantity_step=single_quantity_step,
                         )
                     else:
                         # scale in if same side
@@ -1683,6 +1754,7 @@ def run_backtest(
                                 timestamp=ts,
                                 fee_rate=float(final_fee_rate),
                                 config=config,
+                                quantity_step=single_quantity_step,
                             )
                             if added is not None:
                                 position = added
@@ -1719,6 +1791,7 @@ def run_backtest(
                                     timestamp=ts,
                                     fee_rate=float(final_fee_rate),
                                     config=config,
+                                    quantity_step=single_quantity_step,
                                 )
 
         # =====================================================
