@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+from ..execution import FixedBpsSlippage
 from .fee_model import (
     compute_fee,
     compute_gross_pnl,
@@ -141,7 +142,11 @@ class PortfolioEngine:
         key = self._symbol_key(symbol)
         self.primary_symbol = key
 
-        effective_price = float(price) * (1 + float(slippage_bps) / 10_000.0)
+        effective_price = FixedBpsSlippage(slippage_bps).apply(
+            float(price),
+            side="LONG",
+            is_entry=True,
+        )
         if effective_price <= 0:
             return None
 
@@ -256,7 +261,11 @@ class PortfolioEngine:
 
         qty = float(position["quantity"])
         entry_price = float(position.get("average_entry_price", position["entry_price"]))
-        effective_exit = float(price) * (1 - float(slippage_bps) / 10_000.0)
+        effective_exit = FixedBpsSlippage(slippage_bps).apply(
+            float(price),
+            side="LONG",
+            is_entry=False,
+        )
         entry_notional = float(position.get("entry_notional", entry_price * qty))
         entry_fee = float(position.get("fees_paid", position.get("entry_fee", 0.0)))
         fee_rate_used = float(position.get("fee_rate_used", fee_rate))

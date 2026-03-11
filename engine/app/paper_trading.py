@@ -10,6 +10,7 @@ import httpx
 from .clients import ExchangeFactory
 from .context import build_context
 from .data.candle_aggregator import expand_minute_candles_to_subminute
+from .execution import FixedBpsSlippage
 from .events import get_strategy_event_system
 from .indicators import compute_indicator_series
 from .market import CandleResampler, timeframe_to_ms
@@ -1064,13 +1065,20 @@ class PaperSession:
         if self.quote_balance <= 0:
             return False
 
+        slippage_bps = float(getattr(self.config, "slippage_bps", 0.0))
+        expected_execution_price = FixedBpsSlippage(slippage_bps).apply(
+            float(price),
+            side="LONG",
+            is_entry=True,
+        )
+
         batch_size = float(getattr(self.config, "batch_size", 1.0))
         batch_type = getattr(self.config, "batch_size_type", "fixed")
         max_open_positions = int(getattr(self.config, "max_open_positions", 1))
         max_account_exposure_pct = float(getattr(self.config, "max_account_exposure_pct", 100.0))
 
         if size_qty is not None:
-            capital_to_use = float(size_qty) * float(price)
+            capital_to_use = float(size_qty) * float(expected_execution_price)
         elif size_pct is not None:
             capital_to_use = self.quote_balance * (float(size_pct) / 100.0)
         elif batch_type == "fixed":
@@ -1096,7 +1104,7 @@ class PaperSession:
         current_position = self.positions.get(symbol)
         current_notional = max(
             0.0,
-            float(current_position["quantity"]) * price if current_position else 0.0,
+            float(current_position["quantity"]) * expected_execution_price if current_position else 0.0,
         )
         requested_notional = float(capital_to_use)
         projected_exposure_pct = (
@@ -1105,7 +1113,6 @@ class PaperSession:
         if projected_exposure_pct > max_account_exposure_pct:
             return False
 
-        slippage_bps = float(getattr(self.config, "slippage_bps", 0.0))
         opened = self.portfolio.apply_trade_open(
             side=side,
             price=price,

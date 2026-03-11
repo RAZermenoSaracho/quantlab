@@ -9,6 +9,7 @@ from .spec import load_config_from_env
 from .indicators import compute_indicator_series
 from .context import build_context
 from .data.candle_aggregator import expand_minute_candles_to_subminute
+from .execution import FixedBpsSlippage
 from .portfolio.fee_model import (
     compute_fee,
     compute_gross_pnl,
@@ -64,21 +65,8 @@ def _normalize_signal(raw_signal: str, direction: str) -> str:
 # Execution helpers
 # ============================================================
 
-def _apply_slippage(price: float, slippage_bps: float, side: str) -> float:
-    """
-    Simple market slippage model:
-    - BUY pays a bit more
-    - SELL receives a bit less
-    """
-    if slippage_bps <= 0:
-        return price
-
-    slip = slippage_bps / 10_000.0
-    if side == "BUY":
-        return price * (1.0 + slip)
-    if side == "SELL":
-        return price * (1.0 - slip)
-    return price
+def _apply_slippage(price: float, slippage_bps: float, side: str, is_entry: bool) -> float:
+    return FixedBpsSlippage(slippage_bps).apply(price, side=side, is_entry=is_entry)
 
 
 def _unrealized_pnl(price: float, entry: float, qty: float, side: str) -> float:
@@ -173,9 +161,12 @@ def _open_position(
     slippage_bps = float(getattr(config, "slippage_bps", 0.0))
     leverage = float(getattr(config, "leverage", 1.0))
 
-    # Entry order direction for slippage:
-    entry_order_side = "BUY" if desired_side == "LONG" else "SELL"
-    fill_price = _apply_slippage(float(entry_price), slippage_bps, side=entry_order_side)
+    fill_price = _apply_slippage(
+        float(entry_price),
+        slippage_bps,
+        side=desired_side,
+        is_entry=True,
+    )
     if fill_price <= 0:
         return None
 
@@ -243,8 +234,12 @@ def _add_to_position(
 
     slippage_bps = float(getattr(config, "slippage_bps", 0.0))
     leverage = float(getattr(config, "leverage", 1.0))
-    entry_order_side = "BUY" if side == "LONG" else "SELL"
-    fill_price = _apply_slippage(float(price), slippage_bps, side=entry_order_side)
+    fill_price = _apply_slippage(
+        float(price),
+        slippage_bps,
+        side=side,
+        is_entry=True,
+    )
     if fill_price <= 0:
         return None
 
@@ -309,8 +304,12 @@ def _close_position(
 
     slippage_bps = float(getattr(config, "slippage_bps", 0.0))
 
-    exit_order_side = "SELL" if side == "LONG" else "BUY"
-    fill_exit = _apply_slippage(float(exit_price), slippage_bps, side=exit_order_side)
+    fill_exit = _apply_slippage(
+        float(exit_price),
+        slippage_bps,
+        side=side,
+        is_entry=False,
+    )
 
     gross = compute_gross_pnl(side, entry, fill_exit, qty)
 
