@@ -9,6 +9,7 @@ import {
   normalizeTradeSide,
 } from "../utils/tradeUtils";
 import { toDateFromEngineTs, toIsoOrNull } from "../utils/dateUtils";
+import { recomputeAlgorithmPerformance } from "./performance.service";
 
 import {
   PaperEngineEvent,
@@ -530,14 +531,15 @@ async function handlePortfolioUpdateEvent(
   try {
     await client.query("BEGIN");
 
-    await client.query(
+    const runUpdateResult = await client.query<{ algorithm_id: string }>(
       `UPDATE paper_runs
        SET current_balance = $1,
            quote_balance = $2,
            base_balance = $3,
            equity = $4,
            updated_at = NOW()
-       WHERE id = $5`,
+       WHERE id = $5
+       RETURNING algorithm_id`,
       [state.usdt_balance, state.usdt_balance, state.btc_balance, state.equity, runId]
     );
 
@@ -580,6 +582,10 @@ async function handlePortfolioUpdateEvent(
     latestPortfolioStates.set(runId, state);
 
     await emitPaperEvent(runId, "portfolio_update", state);
+    const algorithmId = runUpdateResult.rows[0]?.algorithm_id;
+    if (algorithmId) {
+      void recomputeAlgorithmPerformance(String(algorithmId));
+    }
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;

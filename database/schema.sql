@@ -29,6 +29,13 @@ CREATE TABLE algorithms (
     notes_html TEXT,
     code TEXT NOT NULL,
     github_url TEXT,
+    performance_score FLOAT DEFAULT 0,
+    avg_return_percent FLOAT DEFAULT 0,
+    avg_sharpe FLOAT DEFAULT 0,
+    avg_pnl FLOAT DEFAULT 0,
+    win_rate FLOAT DEFAULT 0,
+    max_drawdown FLOAT DEFAULT 0,
+    runs_count INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );

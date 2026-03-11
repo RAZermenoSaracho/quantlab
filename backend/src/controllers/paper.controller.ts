@@ -13,6 +13,7 @@ import {
   markRecoveredPaperRun,
   unmarkRecoveredPaperRun,
 } from "../services/paperRecovery.service";
+import { recomputeAlgorithmPerformance } from "../services/performance.service";
 import { getConcurrentRunsCount } from "../services/runConcurrency.service";
 import {
   type ApiResponse,
@@ -147,6 +148,7 @@ export async function startPaperRun(
     );
 
     const runId: string = runInsert.rows[0].id;
+    const runAlgorithmId: string = algorithmId;
 
     await client.query("COMMIT");
 
@@ -170,6 +172,7 @@ export async function startPaperRun(
       );
     });
     markRecoveredPaperRun(runId);
+    void recomputeAlgorithmPerformance(runAlgorithmId);
 
   } catch (err) {
     await client.query("ROLLBACK");
@@ -197,8 +200,8 @@ export async function stopPaperRun(
     const runId = rawId;
     const userId = req.user!.id;
 
-    const runResult = await pool.query(
-      `SELECT id FROM paper_runs WHERE id = $1 AND user_id = $2`,
+    const runResult = await pool.query<{ id: string; algorithm_id: string }>(
+      `SELECT id, algorithm_id FROM paper_runs WHERE id = $1 AND user_id = $2`,
       [runId, userId]
     );
 
@@ -223,6 +226,7 @@ export async function stopPaperRun(
        WHERE id = $1`,
       [runId]
     );
+    void recomputeAlgorithmPerformance(String(runResult.rows[0].algorithm_id));
 
     return sendSuccess(res, { message: "Paper run stopped" });
 
@@ -343,6 +347,7 @@ export async function restartPaperRun(
     });
 
     markRecoveredPaperRun(runId);
+    void recomputeAlgorithmPerformance(String(run.algorithm_id));
   } catch (err) {
     await client.query("ROLLBACK");
     next(err);
@@ -1015,16 +1020,18 @@ export async function deletePaperRun(
     const runId = req.params.id;
     const userId = req.user!.id;
 
-    const result = await pool.query(
+    const result = await pool.query<{ algorithm_id: string }>(
       `DELETE FROM paper_runs
        WHERE id = $1 AND user_id = $2
-       RETURNING id`,
+       RETURNING algorithm_id`,
       [runId, userId]
     );
 
     if (!result.rowCount) {
       return sendError(res, "Paper run not found", 404);
     }
+
+    void recomputeAlgorithmPerformance(String(result.rows[0].algorithm_id));
 
     return sendSuccess(res, { message: "Paper run deleted" });
 

@@ -29,6 +29,20 @@ function toIsoString(value: Date | string): string {
 function serializeAlgorithm(row: AlgorithmRow): Algorithm {
   return {
     ...row,
+    performance_score:
+      row.performance_score != null ? Number(row.performance_score) : 0,
+    avg_return_percent:
+      row.avg_return_percent != null ? Number(row.avg_return_percent) : 0,
+    avg_sharpe:
+      row.avg_sharpe != null ? Number(row.avg_sharpe) : 0,
+    avg_pnl:
+      row.avg_pnl != null ? Number(row.avg_pnl) : 0,
+    win_rate:
+      row.win_rate != null ? Number(row.win_rate) : 0,
+    max_drawdown:
+      row.max_drawdown != null ? Number(row.max_drawdown) : 0,
+    runs_count:
+      row.runs_count != null ? Number(row.runs_count) : 0,
     created_at: toIsoString(row.created_at),
     updated_at: toIsoString(row.updated_at),
   };
@@ -234,7 +248,10 @@ export async function getAlgorithms(
     }
 
     const result = await pool.query<AlgorithmRow>(
-      `SELECT id, name, notes_html, github_url, created_at, updated_at
+      `SELECT id, name, notes_html, github_url, code,
+              performance_score, avg_return_percent, avg_sharpe, avg_pnl,
+              win_rate, max_drawdown, runs_count,
+              created_at, updated_at
        FROM algorithms
        WHERE user_id = $1
        ORDER BY created_at DESC`,
@@ -305,7 +322,8 @@ export async function getAlgorithmRuns(
       SELECT r.id, r.exchange, r.symbol, r.timeframe, r.status,
              r.created_at,
              m.total_return_percent,
-             m.total_return_usdt
+             m.total_return_usdt,
+             m.sharpe_ratio
       FROM backtest_runs r
       LEFT JOIN metrics m
         ON m.run_id = r.id AND m.run_type = 'BACKTEST'
@@ -320,8 +338,28 @@ export async function getAlgorithmRuns(
       `
       SELECT id, exchange, symbol, timeframe, status,
              initial_balance, current_balance, quote_balance, base_balance, equity, last_price,
-             started_at
+             started_at,
+             CASE
+               WHEN equity IS NOT NULL THEN (equity - initial_balance)
+               ELSE 0
+             END AS pnl,
+             COALESCE(pwr.win_rate_percent, 0) AS win_rate_percent
       FROM paper_runs
+      LEFT JOIN (
+        SELECT
+          t.run_id,
+          CASE
+            WHEN COUNT(*) FILTER (WHERE t.net_pnl IS NOT NULL) > 0
+              THEN (
+                COUNT(*) FILTER (WHERE t.net_pnl > 0)::float
+                / COUNT(*) FILTER (WHERE t.net_pnl IS NOT NULL)::float
+              ) * 100
+            ELSE 0
+          END AS win_rate_percent
+        FROM trades t
+        WHERE t.run_type = 'PAPER'
+        GROUP BY t.run_id
+      ) pwr ON pwr.run_id = paper_runs.id
       WHERE algorithm_id = $1
         AND user_id = $2
       ORDER BY started_at DESC
@@ -345,6 +383,10 @@ export async function getAlgorithmRuns(
           row.total_return_usdt != null
             ? Number(row.total_return_usdt)
             : null,
+        sharpe_ratio:
+          row.sharpe_ratio != null
+            ? Number(row.sharpe_ratio)
+            : null,
       })),
       paperRuns: paperRuns.rows.map((row) => ({
         id: row.id,
@@ -364,6 +406,10 @@ export async function getAlgorithmRuns(
           row.last_price != null ? Number(row.last_price) : null,
         started_at:
           row.started_at instanceof Date ? row.started_at.toISOString() : null,
+        pnl:
+          row.pnl != null ? Number(row.pnl) : null,
+        win_rate_percent:
+          row.win_rate_percent != null ? Number(row.win_rate_percent) : null,
       })),
     });
   } catch (err) {

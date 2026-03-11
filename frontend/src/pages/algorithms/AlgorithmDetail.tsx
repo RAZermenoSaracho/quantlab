@@ -8,7 +8,9 @@ import DetailNavigator from "../../components/navigation/DetailNavigator";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
 import AlgorithmWorkspace from "../../components/algorithms/AlgorithmWorkspace";
+import PerformanceScore from "../../components/algorithms/PerformanceScore";
 import Button from "../../components/ui/Button";
+import KpiCard from "../../components/ui/KpiCard";
 import { formatDateTime } from "../../utils/date";
 import {
   useAlgorithm,
@@ -56,6 +58,49 @@ export default function AlgorithmDetail() {
   const allIds = useMemo(() => algorithms ?? [], [algorithms]).map((item) => item.id);
   const backtests = useMemo(() => runs?.backtests ?? [], [runs]);
   const paperRuns = useMemo(() => runs?.paperRuns ?? [], [runs]);
+  const averageBacktestMetrics = useMemo(() => {
+    const count = backtests.length;
+    if (count === 0) {
+      return { avgReturn: 0, avgSharpe: 0, avgPnl: 0, count: 0 };
+    }
+    const sumReturn = backtests.reduce(
+      (total, item) => total + Number(item.total_return_percent ?? 0),
+      0
+    );
+    const sumSharpe = backtests.reduce(
+      (total, item) => total + Number(item.sharpe_ratio ?? 0),
+      0
+    );
+    const sumPnl = backtests.reduce(
+      (total, item) => total + Number(item.total_return_usdt ?? 0),
+      0
+    );
+    return {
+      avgReturn: sumReturn / count,
+      avgSharpe: sumSharpe / count,
+      avgPnl: sumPnl / count,
+      count,
+    };
+  }, [backtests]);
+  const averagePaperMetrics = useMemo(() => {
+    const count = paperRuns.length;
+    if (count === 0) {
+      return { avgPnl: 0, avgWinRate: 0, count: 0 };
+    }
+    const sumPnl = paperRuns.reduce(
+      (total, item) => total + Number(item.pnl ?? 0),
+      0
+    );
+    const sumWinRate = paperRuns.reduce(
+      (total, item) => total + Number(item.win_rate_percent ?? 0),
+      0
+    );
+    return {
+      avgPnl: sumPnl / count,
+      avgWinRate: sumWinRate / count,
+      count,
+    };
+  }, [paperRuns]);
 
   useEffect(() => {
     if (!algorithm) {
@@ -261,6 +306,21 @@ export default function AlgorithmDetail() {
         </div>
       </div>
 
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <PerformanceScore score={Number(algorithm.performance_score ?? 0)} />
+        <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-6">
+          <h3 className="text-white font-semibold mb-4">Strategy Performance</h3>
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+            <KpiCard title="Avg Yearly Return" value={Number(algorithm.avg_return_percent ?? 0)} size="compact" format={(value) => `${value.toFixed(2)}%`} />
+            <KpiCard title="Avg Sharpe" value={Number(algorithm.avg_sharpe ?? 0)} size="compact" format={(value) => value.toFixed(2)} />
+            <KpiCard title="Avg PnL" value={Number(algorithm.avg_pnl ?? 0)} size="compact" format={(value) => `$${value.toFixed(2)}`} />
+            <KpiCard title="Win Rate" value={Number(algorithm.win_rate ?? 0)} size="compact" format={(value) => `${value.toFixed(2)}%`} />
+            <KpiCard title="Max Drawdown" value={Number(algorithm.max_drawdown ?? 0)} size="compact" format={(value) => `${value.toFixed(2)}%`} />
+            <KpiCard title="Runs Analyzed" value={Number(algorithm.runs_count ?? 0)} size="compact" />
+          </div>
+        </div>
+      </div>
+
       <div className="lg:hidden flex gap-2 overflow-x-auto whitespace-nowrap border-b border-slate-800 p-2 text-sm">
         {(["overview", "code", "backtests", "paper"] as MobileTab[]).map((tab) => (
           <Button
@@ -316,6 +376,15 @@ export default function AlgorithmDetail() {
 
       {activeTab === "backtests" && (
         <div className="hidden lg:block">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 mb-4">
+            <h3 className="text-white font-semibold mb-4">Average Backtest Metrics</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <KpiCard title="Avg Return" value={averageBacktestMetrics.avgReturn} size="compact" format={(value) => `${value.toFixed(2)}%`} />
+              <KpiCard title="Avg Sharpe" value={averageBacktestMetrics.avgSharpe} size="compact" format={(value) => value.toFixed(2)} />
+              <KpiCard title="Avg PnL" value={averageBacktestMetrics.avgPnl} size="compact" format={(value) => `$${value.toFixed(2)}`} />
+              <KpiCard title="Backtests Analyzed" value={averageBacktestMetrics.count} size="compact" />
+            </div>
+          </div>
           <ListView
             title="Backtests"
             description="Historical runs for this strategy."
@@ -330,6 +399,14 @@ export default function AlgorithmDetail() {
 
       {activeTab === "paper" && (
         <div className="hidden lg:block">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 mb-4">
+            <h3 className="text-white font-semibold mb-4">Average Live Metrics</h3>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              <KpiCard title="Avg PnL" value={averagePaperMetrics.avgPnl} size="compact" format={(value) => `$${value.toFixed(2)}`} />
+              <KpiCard title="Win Rate" value={averagePaperMetrics.avgWinRate} size="compact" format={(value) => `${value.toFixed(2)}%`} />
+              <KpiCard title="Runs Analyzed" value={averagePaperMetrics.count} size="compact" />
+            </div>
+          </div>
           <ListView
             title="Paper Runs"
             description="Live and past simulated trading sessions."
@@ -369,6 +446,15 @@ export default function AlgorithmDetail() {
 
       {mobileTab === "backtests" && (
         <div className="lg:hidden">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 mb-4">
+            <h3 className="text-white font-semibold mb-3">Average Backtest Metrics</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <KpiCard title="Avg Return" value={averageBacktestMetrics.avgReturn} size="compact" format={(value) => `${value.toFixed(2)}%`} />
+              <KpiCard title="Avg Sharpe" value={averageBacktestMetrics.avgSharpe} size="compact" format={(value) => value.toFixed(2)} />
+              <KpiCard title="Avg PnL" value={averageBacktestMetrics.avgPnl} size="compact" format={(value) => `$${value.toFixed(2)}`} />
+              <KpiCard title="Backtests Analyzed" value={averageBacktestMetrics.count} size="compact" />
+            </div>
+          </div>
           <ListView
             title="Backtests"
             description="Historical runs for this strategy."
@@ -383,6 +469,14 @@ export default function AlgorithmDetail() {
 
       {mobileTab === "paper" && (
         <div className="lg:hidden">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 mb-4">
+            <h3 className="text-white font-semibold mb-3">Average Live Metrics</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <KpiCard title="Avg PnL" value={averagePaperMetrics.avgPnl} size="compact" format={(value) => `$${value.toFixed(2)}`} />
+              <KpiCard title="Win Rate" value={averagePaperMetrics.avgWinRate} size="compact" format={(value) => `${value.toFixed(2)}%`} />
+              <KpiCard title="Runs Analyzed" value={averagePaperMetrics.count} size="compact" />
+            </div>
+          </div>
           <ListView
             title="Paper Runs"
             description="Live and past simulated trading sessions."

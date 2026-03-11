@@ -124,6 +124,8 @@ export const PaperRunSchema = z.object({
   equity: z.number().nullable().optional(),
   last_price: z.number().nullable().optional(),
   fee_rate: z.number().nullable().optional(),
+  pnl: z.number().nullable().optional(),
+  win_rate_percent: z.number().nullable().optional(),
 
   position: PaperPositionSchema.nullable().optional(),
 

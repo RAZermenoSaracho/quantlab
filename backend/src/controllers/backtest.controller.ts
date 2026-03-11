@@ -3,6 +3,7 @@ import type { PoolClient } from "pg";
 import { pool } from "../config/db";
 import { runBacktestOnEngine, getEngineProgress } from "../services/backtestEngine.service";
 import { getExchangeById } from "../services/exchangeCatalog.service";
+import { recomputeAlgorithmPerformance } from "../services/performance.service";
 import { toDateFromEngineTs, toIsoOrNull } from "../utils/dateUtils";
 import { normalizeTradeSide } from "../utils/tradeUtils";
 import {
@@ -111,8 +112,11 @@ export async function createBacktest(
     });
 
     sendSuccess(res, { run_id: runId }, 201);
+    void recomputeAlgorithmPerformance(algorithmId);
 
-    runBacktestWorker(runId, {
+    runBacktestWorker(
+      runId,
+      {
       code,
       exchange: payload.exchange,
       symbol: payload.symbol,
@@ -121,7 +125,9 @@ export async function createBacktest(
       start_date: payload.start_date,
       end_date: payload.end_date,
       fee_rate: finalFeeRate
-    });
+      },
+      algorithmId
+    );
 
   } catch (err) {
     await client.query("ROLLBACK");
@@ -170,7 +176,11 @@ async function createBacktestRunRecord(
   return String(runInsert.rows[0].id);
 }
 
-async function runBacktestWorker(runId: string, payload: RunBacktestPayload) {
+async function runBacktestWorker(
+  runId: string,
+  payload: RunBacktestPayload,
+  algorithmId: string
+) {
   const client = await pool.connect();
 
   try {
@@ -182,8 +192,8 @@ async function runBacktestWorker(runId: string, payload: RunBacktestPayload) {
     await client.query(
       `INSERT INTO metrics
        (run_id, run_type, total_return_percent, total_return_usdt,
-        max_drawdown_percent, win_rate_percent, profit_factor, total_trades)
-       VALUES ($1,'BACKTEST',$2,$3,$4,$5,$6,$7)`,
+        max_drawdown_percent, win_rate_percent, profit_factor, total_trades, sharpe_ratio)
+       VALUES ($1,'BACKTEST',$2,$3,$4,$5,$6,$7,$8)`,
       [
         runId,
         engineResult.total_return_percent ?? 0,
@@ -191,7 +201,8 @@ async function runBacktestWorker(runId: string, payload: RunBacktestPayload) {
         engineResult.max_drawdown_percent ?? 0,
         engineResult.win_rate_percent ?? 0,
         engineResult.profit_factor ?? 0,
-        engineResult.total_trades ?? 0
+        engineResult.total_trades ?? 0,
+        engineResult.analysis?.risk?.sharpe ?? 0,
       ]
     );
 
@@ -308,6 +319,7 @@ async function runBacktestWorker(runId: string, payload: RunBacktestPayload) {
     );
 
     await client.query("COMMIT");
+    await recomputeAlgorithmPerformance(algorithmId);
 
   } catch (err) {
     await client.query("ROLLBACK");
@@ -538,16 +550,18 @@ export async function deleteBacktest(
     const { id } = req.params;
     const userId = req.user!.id;
 
-    const result = await pool.query(
+    const result = await pool.query<{ algorithm_id: string }>(
       `DELETE FROM backtest_runs
        WHERE id = $1 AND user_id = $2
-       RETURNING id`,
+       RETURNING algorithm_id`,
       [id, userId]
     );
 
     if (!result.rowCount) {
       return sendError(res, "Backtest not found", 404);
     }
+
+    void recomputeAlgorithmPerformance(String(result.rows[0].algorithm_id));
 
     return sendSuccess(res, { message: "Backtest deleted" });
 
@@ -653,23 +667,28 @@ export async function rerunBacktest(
           ? run.end_date.toISOString()
           : String(run.end_date),
     });
+    void recomputeAlgorithmPerformance(String(run.algorithm_id));
 
-    void runBacktestWorker(newRunId, {
-      code: String(run.code),
-      exchange: String(run.exchange),
-      symbol: String(run.symbol),
-      timeframe: run.timeframe as CreateBacktestRequest["timeframe"],
-      initial_balance: Number(run.initial_balance ?? 0),
-      start_date:
-        run.start_date instanceof Date
-          ? run.start_date.toISOString()
-          : String(run.start_date),
-      end_date:
-        run.end_date instanceof Date
-          ? run.end_date.toISOString()
-          : String(run.end_date),
-      fee_rate: Number(run.fee_rate ?? 0),
-    });
+    void runBacktestWorker(
+      newRunId,
+      {
+        code: String(run.code),
+        exchange: String(run.exchange),
+        symbol: String(run.symbol),
+        timeframe: run.timeframe as CreateBacktestRequest["timeframe"],
+        initial_balance: Number(run.initial_balance ?? 0),
+        start_date:
+          run.start_date instanceof Date
+            ? run.start_date.toISOString()
+            : String(run.start_date),
+        end_date:
+          run.end_date instanceof Date
+            ? run.end_date.toISOString()
+            : String(run.end_date),
+        fee_rate: Number(run.fee_rate ?? 0),
+      },
+      String(run.algorithm_id)
+    );
 
     return sendSuccess(res, { id: newRunId, status: "started" });
   } catch (error) {

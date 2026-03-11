@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import type { Algorithm } from "@quantlab/contracts";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
 import Button from "../../components/ui/Button";
+import PerformanceScore from "../../components/algorithms/PerformanceScore";
 import {
   useAlgorithms,
   useDeleteAlgorithmMutation,
@@ -37,6 +38,13 @@ export default function AlgorithmsList() {
         />
       ),
       className: "max-w-md",
+    },
+    {
+      key: "performance_score",
+      header: "Performance Score",
+      render: (algo) => (
+        <PerformanceScore score={Number(algo.performance_score ?? 0)} compact />
+      ),
     },
     {
       key: "created",

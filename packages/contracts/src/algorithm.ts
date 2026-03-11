@@ -13,6 +13,13 @@ export const AlgorithmSchema = z.object({
   notes_html: z.string().nullable().optional(),
   code: z.string(),
   github_url: z.string().nullable().optional(),
+  performance_score: z.number().optional(),
+  avg_return_percent: z.number().optional(),
+  avg_sharpe: z.number().optional(),
+  avg_pnl: z.number().optional(),
+  win_rate: z.number().optional(),
+  max_drawdown: z.number().optional(),
+  runs_count: z.number().optional(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -61,8 +68,10 @@ export const AlgorithmBacktestRunSchema = BacktestRunSchema.pick({
   created_at: true,
   total_return_percent: true,
   total_return_usdt: true,
+  sharpe_ratio: true,
 }).extend({
   exchange: z.string().optional(),
+  sharpe_ratio: z.number().nullable().optional(),
 });
 
 export type AlgorithmBacktestRun = z.infer<typeof AlgorithmBacktestRunSchema>;
@@ -80,6 +89,8 @@ export const AlgorithmPaperRunSchema = PaperRunSchema.pick({
   equity: true,
   last_price: true,
   started_at: true,
+  pnl: true,
+  win_rate_percent: true,
 });
 
 export type AlgorithmPaperRun = z.infer<typeof AlgorithmPaperRunSchema>;

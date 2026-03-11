@@ -61,6 +61,7 @@ export const BacktestRunSchema = z.object({
   total_trades: z.number().nullable().optional(),
   win_rate_percent: z.number().nullable().optional(),
   profit_factor: z.number().nullable().optional(),
+  sharpe_ratio: z.number().nullable().optional(),
 
   analysis: BacktestAnalysisSchema.nullable().optional(),
 
