@@ -27,6 +27,49 @@ function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
+function classifyMetric(
+  name: string,
+  value: number
+): "good" | "neutral" | "bad" {
+  const n = Number.isFinite(value) ? value : 0;
+  switch (name) {
+    case "sharpe":
+      if (n >= 1) return "good";
+      if (n >= 0.5) return "neutral";
+      return "bad";
+    case "sortino":
+      if (n >= 1.5) return "good";
+      if (n >= 1) return "neutral";
+      return "bad";
+    case "calmar":
+      if (n >= 1) return "good";
+      if (n >= 0.5) return "neutral";
+      return "bad";
+    case "avg_yearly_return":
+      if (n >= 20) return "good";
+      if (n >= 5) return "neutral";
+      return "bad";
+    case "win_rate":
+      if (n >= 55) return "good";
+      if (n >= 45) return "neutral";
+      return "bad";
+    case "max_drawdown":
+      if (n <= 20) return "good";
+      if (n <= 40) return "neutral";
+      return "bad";
+    case "return_stability":
+      if (n >= 0.2) return "good";
+      if (n >= 0.1) return "neutral";
+      return "bad";
+    case "confidence_score":
+      if (n >= 0.7) return "good";
+      if (n >= 0.4) return "neutral";
+      return "bad";
+    default:
+      return "neutral";
+  }
+}
+
 export default function AlgorithmDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -59,12 +102,26 @@ export default function AlgorithmDetail() {
   const backtests = useMemo(() => runs?.backtests ?? [], [runs]);
   const paperRuns = useMemo(() => runs?.paperRuns ?? [], [runs]);
   const averageBacktestMetrics = useMemo(() => {
+    const annualizedFromBacktest = (item: AlgorithmBacktestRun): number => {
+      const totalReturnPercent = Number(item.total_return_percent ?? 0);
+      const startMs = item.start_date ? Date.parse(item.start_date) : NaN;
+      const endMs = item.end_date ? Date.parse(item.end_date) : NaN;
+      const durationMs = endMs - startMs;
+      const days = durationMs > 0 ? durationMs / (1000 * 60 * 60 * 24) : NaN;
+      const gross = 1 + (totalReturnPercent / 100);
+      if (!Number.isFinite(days) || days <= 0 || gross <= 0) {
+        return totalReturnPercent;
+      }
+      const annualized = (Math.pow(gross, 365 / days) - 1) * 100;
+      return Number.isFinite(annualized) ? annualized : totalReturnPercent;
+    };
+
     const count = backtests.length;
     if (count === 0) {
       return { avgReturn: 0, avgSharpe: 0, avgPnl: 0, count: 0 };
     }
     const sumReturn = backtests.reduce(
-      (total, item) => total + Number(item.total_return_percent ?? 0),
+      (total, item) => total + annualizedFromBacktest(item),
       0
     );
     const sumSharpe = backtests.reduce(
@@ -133,6 +190,15 @@ export default function AlgorithmDetail() {
   }
 
   const isGithub = Boolean(algorithm.github_url);
+  const perfAvgYearlyReturn = Number(algorithm.avg_return_percent ?? 0);
+  const perfAvgSharpe = Number(algorithm.avg_sharpe ?? 0);
+  const perfAvgPnl = Number(algorithm.avg_pnl ?? 0);
+  const perfWinRate = Number(algorithm.win_rate ?? 0);
+  const perfMaxDrawdown = Number(algorithm.max_drawdown ?? 0);
+  const perfCalmar = Number(algorithm.calmar_ratio ?? 0);
+  const perfSortino = Number(algorithm.sortino_ratio ?? 0);
+  const perfReturnStability = Number(algorithm.return_stability ?? 0);
+  const perfConfidenceRaw = Number(algorithm.confidence_score ?? 0);
 
   async function handleRefresh() {
     if (!id) {
@@ -311,11 +377,15 @@ export default function AlgorithmDetail() {
         <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-6">
           <h3 className="text-white font-semibold mb-4">Strategy Performance</h3>
           <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
-            <KpiCard title="Avg Yearly Return" value={Number(algorithm.avg_return_percent ?? 0)} size="compact" format={(value) => `${value.toFixed(2)}%`} />
-            <KpiCard title="Avg Sharpe" value={Number(algorithm.avg_sharpe ?? 0)} size="compact" format={(value) => value.toFixed(2)} />
-            <KpiCard title="Avg PnL" value={Number(algorithm.avg_pnl ?? 0)} size="compact" format={(value) => `$${value.toFixed(2)}`} />
-            <KpiCard title="Win Rate" value={Number(algorithm.win_rate ?? 0)} size="compact" format={(value) => `${value.toFixed(2)}%`} />
-            <KpiCard title="Max Drawdown" value={Number(algorithm.max_drawdown ?? 0)} size="compact" format={(value) => `${value.toFixed(2)}%`} />
+            <KpiCard title="Avg Yearly Return" value={perfAvgYearlyReturn} size="compact" format={(value) => `${value.toFixed(2)}%`} variant={classifyMetric("avg_yearly_return", perfAvgYearlyReturn)} tooltip="20%+ good, 5-20% neutral, below 5% weak." />
+            <KpiCard title="Avg Sharpe" value={perfAvgSharpe} size="compact" format={(value) => value.toFixed(2)} variant={classifyMetric("sharpe", perfAvgSharpe)} tooltip="Sharpe >= 1 is typically considered strong risk-adjusted performance." />
+            <KpiCard title="Avg PnL" value={perfAvgPnl} size="compact" format={(value) => `$${value.toFixed(2)}`} />
+            <KpiCard title="Win Rate" value={perfWinRate} size="compact" format={(value) => `${value.toFixed(2)}%`} variant={classifyMetric("win_rate", perfWinRate)} />
+            <KpiCard title="Max Drawdown" value={perfMaxDrawdown} size="compact" format={(value) => `${value.toFixed(2)}%`} variant={classifyMetric("max_drawdown", perfMaxDrawdown)} />
+            <KpiCard title="Calmar Ratio" value={perfCalmar} size="compact" format={(value) => value.toFixed(2)} variant={classifyMetric("calmar", perfCalmar)} />
+            <KpiCard title="Sortino Ratio" value={perfSortino} size="compact" format={(value) => value.toFixed(2)} variant={classifyMetric("sortino", perfSortino)} />
+            <KpiCard title="Return Stability" value={perfReturnStability} size="compact" format={(value) => value.toFixed(3)} variant={classifyMetric("return_stability", perfReturnStability)} />
+            <KpiCard title="Confidence Score" value={perfConfidenceRaw * 100} size="compact" format={(value) => `${value.toFixed(1)}%`} variant={classifyMetric("confidence_score", perfConfidenceRaw)} />
             <KpiCard title="Runs Analyzed" value={Number(algorithm.runs_count ?? 0)} size="compact" />
           </div>
         </div>
@@ -379,7 +449,7 @@ export default function AlgorithmDetail() {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 mb-4">
             <h3 className="text-white font-semibold mb-4">Average Backtest Metrics</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <KpiCard title="Avg Return" value={averageBacktestMetrics.avgReturn} size="compact" format={(value) => `${value.toFixed(2)}%`} />
+              <KpiCard title="Avg Annualized Return" value={averageBacktestMetrics.avgReturn} size="compact" format={(value) => `${value.toFixed(2)}%`} />
               <KpiCard title="Avg Sharpe" value={averageBacktestMetrics.avgSharpe} size="compact" format={(value) => value.toFixed(2)} />
               <KpiCard title="Avg PnL" value={averageBacktestMetrics.avgPnl} size="compact" format={(value) => `$${value.toFixed(2)}`} />
               <KpiCard title="Backtests Analyzed" value={averageBacktestMetrics.count} size="compact" />
@@ -449,7 +519,7 @@ export default function AlgorithmDetail() {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 mb-4">
             <h3 className="text-white font-semibold mb-3">Average Backtest Metrics</h3>
             <div className="grid grid-cols-2 gap-3">
-              <KpiCard title="Avg Return" value={averageBacktestMetrics.avgReturn} size="compact" format={(value) => `${value.toFixed(2)}%`} />
+              <KpiCard title="Avg Annualized Return" value={averageBacktestMetrics.avgReturn} size="compact" format={(value) => `${value.toFixed(2)}%`} />
               <KpiCard title="Avg Sharpe" value={averageBacktestMetrics.avgSharpe} size="compact" format={(value) => value.toFixed(2)} />
               <KpiCard title="Avg PnL" value={averageBacktestMetrics.avgPnl} size="compact" format={(value) => `$${value.toFixed(2)}`} />
               <KpiCard title="Backtests Analyzed" value={averageBacktestMetrics.count} size="compact" />

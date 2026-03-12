@@ -43,6 +43,14 @@ function serializeAlgorithm(row: AlgorithmRow): Algorithm {
       row.max_drawdown != null ? Number(row.max_drawdown) : 0,
     runs_count:
       row.runs_count != null ? Number(row.runs_count) : 0,
+    calmar_ratio:
+      row.calmar_ratio != null ? Number(row.calmar_ratio) : 0,
+    sortino_ratio:
+      row.sortino_ratio != null ? Number(row.sortino_ratio) : 0,
+    return_stability:
+      row.return_stability != null ? Number(row.return_stability) : 0,
+    confidence_score:
+      row.confidence_score != null ? Number(row.confidence_score) : 0,
     created_at: toIsoString(row.created_at),
     updated_at: toIsoString(row.updated_at),
   };
@@ -251,6 +259,7 @@ export async function getAlgorithms(
       `SELECT id, name, notes_html, github_url, code,
               performance_score, avg_return_percent, avg_sharpe, avg_pnl,
               win_rate, max_drawdown, runs_count,
+              calmar_ratio, sortino_ratio, return_stability, confidence_score,
               created_at, updated_at
        FROM algorithms
        WHERE user_id = $1
@@ -320,7 +329,7 @@ export async function getAlgorithmRuns(
     const backtests = await pool.query(
       `
       SELECT r.id, r.exchange, r.symbol, r.timeframe, r.status,
-             r.created_at,
+             r.created_at, r.start_date, r.end_date,
              m.total_return_percent,
              m.total_return_usdt,
              m.sharpe_ratio
@@ -375,6 +384,8 @@ export async function getAlgorithmRuns(
         timeframe: row.timeframe,
         status: row.status,
         created_at: toIsoString(row.created_at),
+        start_date: row.start_date ? toIsoString(row.start_date) : null,
+        end_date: row.end_date ? toIsoString(row.end_date) : null,
         total_return_percent:
           row.total_return_percent != null
             ? Number(row.total_return_percent)

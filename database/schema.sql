@@ -36,6 +36,10 @@ CREATE TABLE algorithms (
     win_rate FLOAT DEFAULT 0,
     max_drawdown FLOAT DEFAULT 0,
     runs_count INTEGER DEFAULT 0,
+    calmar_ratio FLOAT DEFAULT 0,
+    sortino_ratio FLOAT DEFAULT 0,
+    return_stability FLOAT DEFAULT 0,
+    confidence_score FLOAT DEFAULT 0,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );

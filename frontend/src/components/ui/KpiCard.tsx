@@ -8,6 +8,7 @@ type KpiCardProps = {
   value: number;
   format?: (v: number) => string;
   positive?: boolean;
+  variant?: "good" | "neutral" | "bad";
   size?: KpiSize;
   sparkline?: number[];
   tooltip?: string;
@@ -18,6 +19,7 @@ export default function KpiCard({
   value,
   format,
   positive,
+  variant,
   size = "default",
   sparkline,
   tooltip,
@@ -79,6 +81,14 @@ export default function KpiCard({
   };
 
   const formatted = format ? format(displayValue) : displayValue.toFixed(2);
+  const variantClass =
+    variant === "good"
+      ? "text-emerald-400"
+      : variant === "neutral"
+        ? "text-yellow-400"
+        : variant === "bad"
+          ? "text-red-400"
+          : null;
 
   return (
     <div
@@ -105,11 +115,12 @@ export default function KpiCard({
         className={clsx(
           "mt-1 font-semibold transition-colors duration-200",
           sizeStyles[size].value,
-          positive === undefined
-            ? "text-white"
-            : positive
-            ? "text-emerald-400"
-            : "text-red-400"
+          variantClass ??
+            (positive === undefined
+              ? "text-white"
+              : positive
+                ? "text-emerald-400"
+                : "text-red-400")
         )}
       >
         {formatted}
