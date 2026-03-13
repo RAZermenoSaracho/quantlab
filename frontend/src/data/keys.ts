@@ -1,4 +1,5 @@
 export const ALGORITHMS = "algorithms";
+export const ALGORITHM_RANKING = "algorithmRanking";
 export const BACKTESTS = "backtests";
 export const PAPER_RUNS = "paperRuns";
 export const SYMBOLS = "symbols";
@@ -6,6 +7,7 @@ export const EXCHANGES = "exchanges";
 
 export const algorithmKey = (id: string) => `${ALGORITHMS}:${id}`;
 export const algorithmRunsKey = (id: string) => `${algorithmKey(id)}:runs`;
+export const publicProfileKey = (username: string) => `publicProfile:${username}`;
 
 export const backtestKey = (id: string) => `${BACKTESTS}:${id}`;
 export const backtestStatusKey = (id: string) => `${backtestKey(id)}:status`;

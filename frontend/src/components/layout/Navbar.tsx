@@ -64,8 +64,20 @@ export default function Navbar({ onOpenSidebar }: NavbarProps) {
               className="text-sm truncate max-w-[180px] sm:max-w-none"
               style={{ color: "var(--color-text-secondary)" }}
             >
-              {user?.email}
+              {user?.username ? `@${user.username}` : user?.email}
             </span>
+
+            {/* <Link
+              to="/ranking"
+              className="px-3 py-1 rounded-md text-sm"
+              style={{
+                color: "var(--color-text-primary)",
+                backgroundColor: "var(--color-bg-elevated)",
+                border: "1px solid var(--color-border)",
+              }}
+            >
+              Ranking
+            </Link> */}
 
             <Link
               to="/profile"

@@ -1,5 +1,10 @@
 import { useEffect } from "react";
-import type { Algorithm, CreateAlgorithmDto, UpdateAlgorithmDto } from "@quantlab/contracts";
+import type {
+  Algorithm,
+  AlgorithmSummary,
+  CreateAlgorithmDto,
+  UpdateAlgorithmDto,
+} from "@quantlab/contracts";
 import type {
   AlgorithmPaperRun,
   AlgorithmRunsResponse,
@@ -13,6 +18,7 @@ import {
   createAlgorithm,
   deleteAlgorithm,
   getAlgorithmById,
+  getAlgorithmRanking,
   getAlgorithmRuns,
   getAlgorithms,
   refreshAlgorithmFromGithub,
@@ -21,6 +27,7 @@ import {
 import { connectSocket } from "../services/socket.service";
 import {
   ALGORITHMS,
+  ALGORITHM_RANKING,
   algorithmKey,
   algorithmRunsKey,
 } from "./keys";
@@ -40,6 +47,13 @@ export function useAlgorithm(id: string) {
     key: algorithmKey(id),
     fetcher: () => getAlgorithmById(id),
     enabled: Boolean(id),
+  });
+}
+
+export function useAlgorithmRanking() {
+  return useQuery({
+    key: ALGORITHM_RANKING,
+    fetcher: async () => (await getAlgorithmRanking()).algorithms as AlgorithmSummary[],
   });
 }
 
@@ -163,21 +177,21 @@ export function useAlgorithmRuns(id: string) {
 export function useCreateAlgorithmMutation() {
   return useMutation<CreateAlgorithmDto, Algorithm>({
     mutationFn: createAlgorithm,
-    invalidate: [ALGORITHMS],
+    invalidate: [ALGORITHMS, ALGORITHM_RANKING],
   });
 }
 
 export function useUpdateAlgorithmMutation(id: string) {
   return useMutation<UpdateAlgorithmDto, Algorithm>({
     mutationFn: (payload) => updateAlgorithm(id, payload),
-    invalidate: [ALGORITHMS, algorithmKey(id)],
+    invalidate: [ALGORITHMS, ALGORITHM_RANKING, algorithmKey(id)],
   });
 }
 
 export function useRefreshAlgorithmMutation(id: string) {
   return useMutation<void, Algorithm>({
     mutationFn: async () => refreshAlgorithmFromGithub(id),
-    invalidate: [ALGORITHMS, algorithmKey(id)],
+    invalidate: [ALGORITHMS, ALGORITHM_RANKING, algorithmKey(id)],
   });
 }
 
@@ -185,8 +199,8 @@ export function useDeleteAlgorithmMutation() {
   return useMutation<string, { message: string }>({
     mutationFn: deleteAlgorithm,
     invalidate: (output, id) => {
-      void output;
-      return [ALGORITHMS, algorithmKey(id), algorithmRunsKey(id)];
+        void output;
+      return [ALGORITHMS, ALGORITHM_RANKING, algorithmKey(id), algorithmRunsKey(id)];
     },
   });
 }

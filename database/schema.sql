@@ -11,12 +11,14 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     email VARCHAR(255) UNIQUE NOT NULL,
+    username TEXT UNIQUE,
     password_hash TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
 CREATE INDEX idx_users_email ON users(email);
+CREATE UNIQUE INDEX idx_users_username ON users(username);
 
 -- ==============================
 -- ALGORITHMS
@@ -29,6 +31,7 @@ CREATE TABLE algorithms (
     notes_html TEXT,
     code TEXT NOT NULL,
     github_url TEXT,
+    is_public BOOLEAN DEFAULT FALSE,
     performance_score FLOAT DEFAULT 0,
     avg_return_percent FLOAT DEFAULT 0,
     avg_sharpe FLOAT DEFAULT 0,
@@ -45,6 +48,8 @@ CREATE TABLE algorithms (
 );
 
 CREATE INDEX idx_algorithms_user_id ON algorithms(user_id);
+CREATE INDEX idx_algorithms_public_score
+ON algorithms (is_public, performance_score DESC);
 
 -- ==============================
 -- ENUMS

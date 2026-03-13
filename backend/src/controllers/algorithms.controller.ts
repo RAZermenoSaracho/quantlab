@@ -5,6 +5,7 @@ import { fetchGithubFile } from "../services/github.service";
 
 import {
   type Algorithm,
+  type AlgorithmRankingResponse,
   type AlgorithmRunsResponse,
   type AlgorithmsListResponse,
   type ApiResponse,
@@ -18,8 +19,15 @@ import {
 import { sendError, sendSuccess } from "../utils/apiResponse";
 
 type AlgorithmRow = Omit<Algorithm, "created_at" | "updated_at"> & {
+  username?: string | null;
+  is_public?: boolean | null;
   created_at: Date | string;
   updated_at: Date | string;
+};
+
+type AlgorithmOwnerRow = {
+  user_id: string;
+  is_public: boolean | null;
 };
 
 function toIsoString(value: Date | string): string {
@@ -29,22 +37,18 @@ function toIsoString(value: Date | string): string {
 function serializeAlgorithm(row: AlgorithmRow): Algorithm {
   return {
     ...row,
+    username: row.username ?? null,
+    is_public: Boolean(row.is_public),
     performance_score:
       row.performance_score != null ? Number(row.performance_score) : 0,
     avg_return_percent:
       row.avg_return_percent != null ? Number(row.avg_return_percent) : 0,
-    avg_sharpe:
-      row.avg_sharpe != null ? Number(row.avg_sharpe) : 0,
-    avg_pnl:
-      row.avg_pnl != null ? Number(row.avg_pnl) : 0,
-    win_rate:
-      row.win_rate != null ? Number(row.win_rate) : 0,
-    max_drawdown:
-      row.max_drawdown != null ? Number(row.max_drawdown) : 0,
-    runs_count:
-      row.runs_count != null ? Number(row.runs_count) : 0,
-    calmar_ratio:
-      row.calmar_ratio != null ? Number(row.calmar_ratio) : 0,
+    avg_sharpe: row.avg_sharpe != null ? Number(row.avg_sharpe) : 0,
+    avg_pnl: row.avg_pnl != null ? Number(row.avg_pnl) : 0,
+    win_rate: row.win_rate != null ? Number(row.win_rate) : 0,
+    max_drawdown: row.max_drawdown != null ? Number(row.max_drawdown) : 0,
+    runs_count: row.runs_count != null ? Number(row.runs_count) : 0,
+    calmar_ratio: row.calmar_ratio != null ? Number(row.calmar_ratio) : 0,
     sortino_ratio:
       row.sortino_ratio != null ? Number(row.sortino_ratio) : 0,
     return_stability:
@@ -54,6 +58,37 @@ function serializeAlgorithm(row: AlgorithmRow): Algorithm {
     created_at: toIsoString(row.created_at),
     updated_at: toIsoString(row.updated_at),
   };
+}
+
+function serializeSummary(row: Record<string, unknown>) {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    performance_score: Number(row.performance_score ?? 0),
+    avg_return_percent: Number(row.avg_return_percent ?? 0),
+    avg_sharpe: Number(row.avg_sharpe ?? 0),
+    max_drawdown: Number(row.max_drawdown ?? 0),
+    runs_count: Number(row.runs_count ?? 0),
+    user_id: String(row.user_id),
+    username:
+      typeof row.username === "string" || row.username === null
+        ? row.username
+        : null,
+    is_public: Boolean(row.is_public),
+  };
+}
+
+async function getAlgorithmOwner(id: string) {
+  const result = await pool.query<AlgorithmOwnerRow>(
+    `
+    SELECT user_id, is_public
+    FROM algorithms
+    WHERE id = $1
+    `,
+    [id]
+  );
+
+  return result.rows[0] ?? null;
 }
 
 /* ==============================
@@ -67,7 +102,7 @@ export async function createAlgorithm(
   try {
     const parsed = CreateAlgorithmSchema.parse(req.body);
 
-    const { name, notes_html, code, githubUrl } = parsed;
+    const { name, notes_html, code, githubUrl, is_public } = parsed;
 
     let finalCode = code?.trim() || "";
 
@@ -88,10 +123,10 @@ export async function createAlgorithm(
     }
 
     const result = await pool.query<AlgorithmRow>(
-      `INSERT INTO algorithms (user_id, name, notes_html, code, github_url)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO algorithms (user_id, name, notes_html, code, github_url, is_public)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [userId, name, notes_html || null, finalCode, githubUrl || null]
+      [userId, name, notes_html || null, finalCode, githubUrl || null, Boolean(is_public)]
     );
 
     return sendSuccess(res, serializeAlgorithm(result.rows[0]), 201);
@@ -110,21 +145,42 @@ export async function updateAlgorithm(
 ) {
   try {
     const { id } = req.params;
-
-    const parsed = UpdateAlgorithmSchema.parse(req.body);
-
-    const { name, notes_html, code } = parsed;
-
-    if (!name || !code) {
-      return sendError(res, "Name and code required", 400);
-    }
-
-    await validateAlgorithm(code);
-
     const userId = req.user?.id;
 
     if (!userId) {
       return sendError(res, "Unauthorized", 401);
+    }
+
+    const existing = await pool.query<AlgorithmRow>(
+      `
+      SELECT *
+      FROM algorithms
+      WHERE id = $1
+        AND user_id = $2
+      `,
+      [id, userId]
+    );
+
+    if (!existing.rowCount) {
+      return sendError(res, "Algorithm not found", 404);
+    }
+
+    const parsed = UpdateAlgorithmSchema.parse(req.body);
+    const current = existing.rows[0];
+
+    const nextName = parsed.name ?? current.name;
+    const nextNotes =
+      parsed.notes_html !== undefined ? parsed.notes_html : current.notes_html;
+    const nextCode = parsed.code ?? current.code;
+    const nextIsPublic =
+      parsed.is_public !== undefined ? parsed.is_public : Boolean(current.is_public);
+
+    if (!nextName || !nextCode) {
+      return sendError(res, "Name and code required", 400);
+    }
+
+    if (parsed.code !== undefined) {
+      await validateAlgorithm(nextCode);
     }
 
     const result = await pool.query<AlgorithmRow>(
@@ -132,16 +188,21 @@ export async function updateAlgorithm(
        SET name = $1,
            notes_html = $2,
            code = $3,
-           github_url = NULL,
+           is_public = $4,
+           github_url = $5,
            updated_at = NOW()
-       WHERE id = $4 AND user_id = $5
+       WHERE id = $6 AND user_id = $7
        RETURNING *`,
-      [name, notes_html || null, code, id, userId]
+      [
+        nextName,
+        nextNotes || null,
+        nextCode,
+        nextIsPublic,
+        parsed.code !== undefined ? null : current.github_url ?? null,
+        id,
+        userId,
+      ]
     );
-
-    if (!result.rowCount) {
-      return sendError(res, "Algorithm not found", 404);
-    }
 
     return sendSuccess(res, serializeAlgorithm(result.rows[0]));
   } catch (err) {
@@ -216,25 +277,30 @@ export async function getAlgorithmById(
 ) {
   try {
     const { id } = req.params;
-
-    const userId = req.user?.id;
-
-    if (!userId) {
-      return sendError(res, "Unauthorized", 401);
-    }
+    const viewerId = req.user?.id ?? null;
 
     const result = await pool.query<AlgorithmRow>(
-      `SELECT *
-       FROM algorithms
-       WHERE id = $1 AND user_id = $2`,
-      [id, userId]
+      `SELECT a.*, u.username
+       FROM algorithms a
+       INNER JOIN users u
+         ON u.id = a.user_id
+       WHERE a.id = $1`,
+      [id]
     );
 
     if (!result.rowCount) {
       return sendError(res, "Algorithm not found", 404);
     }
 
-    return sendSuccess(res, serializeAlgorithm(result.rows[0]));
+    const row = result.rows[0];
+    const isOwner = viewerId === row.user_id;
+
+    if (!Boolean(row.is_public) && !isOwner) {
+      row.code = "[Private Algorithm]";
+      row.github_url = null;
+    }
+
+    return sendSuccess(res, serializeAlgorithm(row));
   } catch (err) {
     next(err);
   }
@@ -256,19 +322,58 @@ export async function getAlgorithms(
     }
 
     const result = await pool.query<AlgorithmRow>(
-      `SELECT id, name, notes_html, github_url, code,
-              performance_score, avg_return_percent, avg_sharpe, avg_pnl,
-              win_rate, max_drawdown, runs_count,
-              calmar_ratio, sortino_ratio, return_stability, confidence_score,
-              created_at, updated_at
-       FROM algorithms
-       WHERE user_id = $1
-       ORDER BY created_at DESC`,
+      `SELECT a.id, a.user_id, u.username, a.name, a.notes_html, a.github_url, a.code,
+              a.is_public, a.performance_score, a.avg_return_percent, a.avg_sharpe, a.avg_pnl,
+              a.win_rate, a.max_drawdown, a.runs_count,
+              a.calmar_ratio, a.sortino_ratio, a.return_stability, a.confidence_score,
+              a.created_at, a.updated_at
+       FROM algorithms a
+       INNER JOIN users u
+         ON u.id = a.user_id
+       WHERE a.user_id = $1
+       ORDER BY a.performance_score DESC NULLS LAST, a.created_at DESC`,
       [userId]
     );
 
     return sendSuccess(res, {
       algorithms: result.rows.map(serializeAlgorithm),
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/* ==============================
+   RANKING
+============================== */
+export async function getAlgorithmRanking(
+  _req: Request,
+  res: Response<ApiResponse<AlgorithmRankingResponse>>,
+  next: NextFunction
+) {
+  try {
+    const result = await pool.query(
+      `
+      SELECT a.id,
+             a.name,
+             COALESCE(a.performance_score, 0) AS performance_score,
+             COALESCE(a.avg_return_percent, 0) AS avg_return_percent,
+             COALESCE(a.avg_sharpe, 0) AS avg_sharpe,
+             COALESCE(a.max_drawdown, 0) AS max_drawdown,
+             COALESCE(a.runs_count, 0) AS runs_count,
+             a.user_id,
+             u.username,
+             COALESCE(a.is_public, false) AS is_public
+      FROM algorithms a
+      INNER JOIN users u
+        ON u.id = a.user_id
+      ORDER BY a.performance_score DESC NULLS LAST, a.created_at DESC
+      LIMIT 50
+      `
+    );
+
+    return sendSuccess(res, {
+      algorithms: result.rows.map(serializeSummary),
     });
   } catch (err) {
     next(err);
@@ -318,15 +423,34 @@ export async function getAlgorithmRuns(
   next: NextFunction
 ) {
   try {
-    const { id } = req.params;
+    const id = String(req.params.id);
+    const viewerId = req.user?.id ?? null;
 
-    const userId = req.user?.id;
+    const algorithm = await getAlgorithmOwner(id);
 
-    if (!userId) {
-      return sendError(res, "Unauthorized", 401);
+    if (!algorithm) {
+      return sendError(res, "Algorithm not found", 404);
     }
 
-    const backtests = await pool.query(
+    const isOwner = viewerId === algorithm.user_id;
+    void isOwner;
+
+    const backtests = await pool.query<
+      Pick<
+        BacktestRun,
+        | "id"
+        | "exchange"
+        | "symbol"
+        | "timeframe"
+        | "status"
+        | "created_at"
+        | "start_date"
+        | "end_date"
+        | "total_return_percent"
+        | "total_return_usdt"
+        | "sharpe_ratio"
+      >
+    >(
       `
       SELECT r.id, r.exchange, r.symbol, r.timeframe, r.status,
              r.created_at, r.start_date, r.end_date,
@@ -337,13 +461,30 @@ export async function getAlgorithmRuns(
       LEFT JOIN metrics m
         ON m.run_id = r.id AND m.run_type = 'BACKTEST'
       WHERE r.algorithm_id = $1
-        AND r.user_id = $2
       ORDER BY r.created_at DESC
+      LIMIT 50
       `,
-      [id, userId]
+      [id]
     );
 
-    const paperRuns = await pool.query(
+    const paperRuns = await pool.query<
+      Pick<
+        PaperRun,
+        | "id"
+        | "exchange"
+        | "symbol"
+        | "timeframe"
+        | "status"
+        | "initial_balance"
+        | "current_balance"
+        | "quote_balance"
+        | "base_balance"
+        | "equity"
+        | "last_price"
+        | "pnl"
+        | "win_rate_percent"
+      > & { started_at: Date | string | null }
+    >(
       `
       SELECT id, exchange, symbol, timeframe, status,
              initial_balance, current_balance, quote_balance, base_balance, equity, last_price,
@@ -370,10 +511,10 @@ export async function getAlgorithmRuns(
         GROUP BY t.run_id
       ) pwr ON pwr.run_id = paper_runs.id
       WHERE algorithm_id = $1
-        AND user_id = $2
       ORDER BY started_at DESC
+      LIMIT 50
       `,
-      [id, userId]
+      [id]
     );
 
     return sendSuccess(res, {
@@ -411,14 +552,10 @@ export async function getAlgorithmRuns(
           row.quote_balance != null ? Number(row.quote_balance) : null,
         base_balance:
           row.base_balance != null ? Number(row.base_balance) : null,
-        equity:
-          row.equity != null ? Number(row.equity) : null,
-        last_price:
-          row.last_price != null ? Number(row.last_price) : null,
-        started_at:
-          row.started_at instanceof Date ? row.started_at.toISOString() : null,
-        pnl:
-          row.pnl != null ? Number(row.pnl) : null,
+        equity: row.equity != null ? Number(row.equity) : null,
+        last_price: row.last_price != null ? Number(row.last_price) : null,
+        started_at: row.started_at ? toIsoString(row.started_at) : null,
+        pnl: row.pnl != null ? Number(row.pnl) : null,
         win_rate_percent:
           row.win_rate_percent != null ? Number(row.win_rate_percent) : null,
       })),

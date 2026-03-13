@@ -2,6 +2,7 @@ import api from "./api.service";
 
 import type {
   Algorithm,
+  AlgorithmRankingResponse,
   AlgorithmRunsResponse,
   AlgorithmsListResponse,
   CreateAlgorithmDto,
@@ -23,6 +24,10 @@ export function getAlgorithms(): Promise<AlgorithmsListResponse> {
 
 export function getAlgorithmById(id: string): Promise<Algorithm> {
   return api.get<Algorithm>(`/algorithms/${id}`);
+}
+
+export function getAlgorithmRanking(): Promise<AlgorithmRankingResponse> {
+  return api.get<AlgorithmRankingResponse>("/algorithms/ranking");
 }
 
 /* ==============================

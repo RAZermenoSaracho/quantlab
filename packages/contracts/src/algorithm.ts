@@ -9,10 +9,12 @@ import { PaperRunSchema } from "./paper";
 export const AlgorithmSchema = z.object({
   id: z.string().uuid(),
   user_id: z.string().uuid().optional(),
+  username: z.string().nullable().optional(),
   name: z.string(),
   notes_html: z.string().nullable().optional(),
   code: z.string(),
   github_url: z.string().nullable().optional(),
+  is_public: z.boolean().optional(),
   performance_score: z.number().optional(),
   avg_return_percent: z.number().optional(),
   avg_sharpe: z.number().optional(),
@@ -39,6 +41,7 @@ export const CreateAlgorithmSchema = z.object({
   notes_html: z.string().optional(),
   code: z.string().optional(),
   githubUrl: z.string().optional(),
+  is_public: z.boolean().optional(),
 });
 
 export type CreateAlgorithmDto = z.infer<typeof CreateAlgorithmSchema>;
@@ -47,6 +50,7 @@ export const UpdateAlgorithmSchema = z.object({
   name: z.string().optional(),
   notes_html: z.string().optional(),
   code: z.string().optional(),
+  is_public: z.boolean().optional(),
 });
 
 export type UpdateAlgorithmDto = z.infer<typeof UpdateAlgorithmSchema>;
@@ -62,6 +66,36 @@ export const AlgorithmsListResponseSchema = z.object({
 export type AlgorithmsListResponse = z.infer<
   typeof AlgorithmsListResponseSchema
 >;
+
+export const AlgorithmSummarySchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  performance_score: z.number(),
+  avg_return_percent: z.number(),
+  avg_sharpe: z.number(),
+  max_drawdown: z.number(),
+  runs_count: z.number(),
+  user_id: z.string().uuid(),
+  username: z.string().nullable(),
+  is_public: z.boolean(),
+});
+
+export type AlgorithmSummary = z.infer<typeof AlgorithmSummarySchema>;
+
+export const AlgorithmRankingResponseSchema = z.object({
+  algorithms: z.array(AlgorithmSummarySchema),
+});
+
+export type AlgorithmRankingResponse = z.infer<
+  typeof AlgorithmRankingResponseSchema
+>;
+
+export const PublicProfileResponseSchema = z.object({
+  username: z.string(),
+  algorithms: z.array(AlgorithmSummarySchema),
+});
+
+export type PublicProfileResponse = z.infer<typeof PublicProfileResponseSchema>;
 
 export const AlgorithmBacktestRunSchema = BacktestRunSchema.pick({
   id: true,

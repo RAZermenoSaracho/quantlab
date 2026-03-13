@@ -1,6 +1,9 @@
 import { Navigate, Link } from "react-router-dom";
 import { Card } from "../components/ui/Card";
 import { useAuth } from "../context/AuthProvider";
+import { useAlgorithmRanking } from "../data/algorithms";
+import KpiCard from "../components/ui/KpiCard";
+import PerformanceScore from "../components/algorithms/PerformanceScore";
 
 const features = [
   {
@@ -22,6 +25,8 @@ const features = [
 
 export default function Landing() {
   const { isAuthenticated } = useAuth();
+  const { data } = useAlgorithmRanking();
+  const topAlgorithms = (data ?? []).slice(0, 5);
 
   if (isAuthenticated) {
     return <Navigate to="/dashboard" replace />;
@@ -90,6 +95,60 @@ export default function Landing() {
               </div>
             </Card>
           ))}
+        </section>
+
+        <section className="space-y-6">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h2 className="text-2xl font-semibold text-white">Top Algorithms</h2>
+              <p className="text-slate-400">
+                Highest-ranked strategies across QuantLab.
+              </p>
+            </div>
+            <Link to="/ranking" className="text-sky-400 hover:text-sky-300 text-sm">
+              View Ranking
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+            {topAlgorithms.map((algorithm, index) => (
+              <Card key={algorithm.id} className="h-full">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs uppercase tracking-wide text-slate-500">
+                      #{index + 1}
+                    </span>
+                    <PerformanceScore score={algorithm.performance_score} compact />
+                  </div>
+                  <div className="space-y-1">
+                    <Link
+                      to={`/algorithms/${algorithm.id}`}
+                      className="text-lg font-semibold text-white hover:text-sky-300"
+                    >
+                      {algorithm.name}
+                    </Link>
+                    <p className="text-sm text-slate-400">
+                      {algorithm.username ? `@${algorithm.username}` : "Unknown creator"}
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <KpiCard
+                      title="Return"
+                      value={algorithm.avg_return_percent}
+                      size="compact"
+                      format={(value) => `${value.toFixed(1)}%`}
+                    />
+                    <KpiCard
+                      title="Sharpe"
+                      value={algorithm.avg_sharpe}
+                      size="compact"
+                      format={(value) => value.toFixed(2)}
+                    />
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
         </section>
 
         <footer

@@ -9,7 +9,7 @@ import {
   Profile as GitHubProfile,
 } from "passport-github2";
 import { env } from "./env";
-import { pool } from "./db";
+import { ensureOauthUsername } from "../controllers/auth.controller";
 
 /* ========================================
    GOOGLE STRATEGY
@@ -36,20 +36,12 @@ if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
             return done(new Error("No email from Google"), false);
           }
 
-          let user = await pool.query(
-            "SELECT id, email FROM users WHERE email = $1",
-            [email]
+          const user = await ensureOauthUsername(
+            email,
+            "oauth_google",
+            profile.displayName || email.split("@")[0]
           );
-
-          if (!user.rowCount) {
-            const created = await pool.query(
-              "INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email",
-              [email, "oauth_google"]
-            );
-            user = created;
-          }
-
-          return done(null, user.rows[0]);
+          return done(null, user);
         } catch (err) {
           return done(err as Error, false);
         }
@@ -81,20 +73,12 @@ if (env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET) {
             profile.emails?.[0]?.value ||
             `${profile.username}@github-oauth.local`;
 
-          let user = await pool.query(
-            "SELECT id, email FROM users WHERE email = $1",
-            [email]
+          const user = await ensureOauthUsername(
+            email,
+            "oauth_github",
+            profile.username || profile.displayName || email.split("@")[0]
           );
-
-          if (!user.rowCount) {
-            const created = await pool.query(
-              "INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email",
-              [email, "oauth_github"]
-            );
-            user = created;
-          }
-
-          return done(null, user.rows[0]);
+          return done(null, user);
         } catch (err) {
           return done(err as Error, false);
         }

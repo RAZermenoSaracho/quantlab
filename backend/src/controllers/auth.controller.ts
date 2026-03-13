@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import bcrypt from "bcrypt";
 import jwt, { type SignOptions } from "jsonwebtoken";
+import { z } from "zod";
 import { pool } from "../config/db";
 import { env } from "../config/env";
 
@@ -9,6 +10,7 @@ import {
   type AuthResponse,
   type MeResponse,
   type MessageResponse,
+  type PublicProfileResponse,
   RegisterRequestSchema,
   LoginRequestSchema,
   AuthUserSchema,
@@ -16,9 +18,21 @@ import {
   MeResponseSchema,
 } from "@quantlab/contracts";
 import { sendError, sendSuccess } from "../utils/apiResponse";
-import { z } from "zod";
+import {
+  ensureUniqueUsername,
+  isValidUsername,
+  normalizeUsername,
+} from "../utils/username";
 
 type JwtPayload = { id: string; email: string };
+
+type UserRow = {
+  id: string;
+  email: string;
+  username: string | null;
+  password_hash?: string | null;
+  created_at?: Date | string | null;
+};
 
 function signToken(payload: JwtPayload) {
   const options: SignOptions = {
@@ -28,9 +42,35 @@ function signToken(payload: JwtPayload) {
   return jwt.sign(payload, env.JWT_SECRET, options);
 }
 
+function toSafeUser(row: UserRow) {
+  return AuthUserSchema.parse({
+    id: row.id,
+    email: row.email,
+    username: row.username ?? null,
+  });
+}
+
+function passwordProvider(passwordHash: string | null | undefined) {
+  if (passwordHash === "oauth_google") {
+    return "google" as const;
+  }
+  if (passwordHash === "oauth_github") {
+    return "github" as const;
+  }
+  return "password" as const;
+}
+
 const ChangePasswordRequestSchema = z.object({
   current_password: z.string().min(1),
   new_password: z.string().min(8),
+});
+
+const UpdateProfileSchema = z.object({
+  username: z.string().trim().min(3).max(20),
+});
+
+const UsernameQuerySchema = z.object({
+  username: z.string().trim().default(""),
 });
 
 /* =========================
@@ -55,12 +95,12 @@ export async function register(
 
     const passwordHash = await bcrypt.hash(password, 12);
 
-    const created = await pool.query(
-      "INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email",
+    const created = await pool.query<UserRow>(
+      "INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email, username",
       [email, passwordHash]
     );
 
-    const safeUser = AuthUserSchema.parse(created.rows[0]);
+    const safeUser = toSafeUser(created.rows[0]);
     const token = signToken({ id: safeUser.id, email: safeUser.email });
 
     const response = AuthResponseSchema.parse({
@@ -86,8 +126,8 @@ export async function login(
   try {
     const { email, password } = LoginRequestSchema.parse(req.body);
 
-    const found = await pool.query(
-      "SELECT id, email, password_hash FROM users WHERE email = $1",
+    const found = await pool.query<UserRow>(
+      "SELECT id, email, username, password_hash FROM users WHERE email = $1",
       [email]
     );
 
@@ -95,18 +135,14 @@ export async function login(
       return sendError(res, "Invalid credentials", 401);
     }
 
-    const row = found.rows[0] as {
-      id: string;
-      email: string;
-      password_hash: string;
-    };
+    const row = found.rows[0];
 
-    const ok = await bcrypt.compare(password, row.password_hash);
+    const ok = await bcrypt.compare(password, String(row.password_hash ?? ""));
     if (!ok) {
       return sendError(res, "Invalid credentials", 401);
     }
 
-    const safeUser = AuthUserSchema.parse({ id: row.id, email: row.email });
+    const safeUser = toSafeUser(row);
     const token = signToken({ id: safeUser.id, email: safeUser.email });
 
     const response = AuthResponseSchema.parse({
@@ -125,14 +161,26 @@ export async function login(
 ========================= */
 
 export async function me(req: Request, res: Response<ApiResponse<MeResponse>>) {
-  const user = req.user;
+  const authUser = req.user;
 
-  if (!user) {
+  if (!authUser) {
     return sendError(res, "Unauthorized", 401);
   }
 
-  const safeUser = AuthUserSchema.parse(user);
+  const result = await pool.query<UserRow>(
+    `
+    SELECT id, email, username
+    FROM users
+    WHERE id = $1
+    `,
+    [authUser.id]
+  );
 
+  if (!result.rowCount) {
+    return sendError(res, "User not found", 404);
+  }
+
+  const safeUser = toSafeUser(result.rows[0]);
   const response = MeResponseSchema.parse({
     user: safeUser,
   });
@@ -146,6 +194,7 @@ export async function profile(
     ApiResponse<{
       id: string;
       email: string;
+      username: string | null;
       provider: "google" | "github" | "password";
       created_at: string | null;
     }>
@@ -156,9 +205,9 @@ export async function profile(
     return sendError(res, "Unauthorized", 401);
   }
 
-  const result = await pool.query(
+  const result = await pool.query<UserRow>(
     `
-    SELECT id, email, password_hash, created_at
+    SELECT id, email, username, password_hash, created_at
     FROM users
     WHERE id = $1
     `,
@@ -169,29 +218,177 @@ export async function profile(
     return sendError(res, "User not found", 404);
   }
 
-  const row = result.rows[0] as {
-    id: string;
-    email: string;
-    password_hash: string | null;
-    created_at: Date | string | null;
-  };
-
-  const passwordHash = String(row.password_hash ?? "");
-  const provider: "google" | "github" | "password" =
-    passwordHash === "oauth_google"
-      ? "google"
-      : passwordHash === "oauth_github"
-        ? "github"
-        : "password";
+  const row = result.rows[0];
 
   return sendSuccess(res, {
     id: row.id,
     email: row.email,
-    provider,
+    username: row.username ?? null,
+    provider: passwordProvider(row.password_hash),
     created_at:
       row.created_at instanceof Date
         ? row.created_at.toISOString()
         : row.created_at ?? null,
+  });
+}
+
+export async function updateProfile(
+  req: Request,
+  res: Response<ApiResponse<{ id: string; email: string; username: string }>>,
+  next: NextFunction
+) {
+  try {
+    const authUser = req.user;
+    if (!authUser) {
+      return sendError(res, "Unauthorized", 401);
+    }
+
+    const parsed = UpdateProfileSchema.parse(req.body);
+    const username = normalizeUsername(parsed.username);
+
+    if (!isValidUsername(username)) {
+      return sendError(
+        res,
+        "Username must be 3-20 characters and use only letters, numbers, or underscores",
+        400
+      );
+    }
+
+    const existing = await pool.query(
+      `
+      SELECT id
+      FROM users
+      WHERE username = $1
+        AND id <> $2
+      `,
+      [username, authUser.id]
+    );
+
+    if (existing.rowCount) {
+      return sendError(res, "Username is already in use", 409);
+    }
+
+    const updated = await pool.query<UserRow>(
+      `
+      UPDATE users
+      SET username = $1,
+          updated_at = NOW()
+      WHERE id = $2
+      RETURNING id, email, username
+      `,
+      [username, authUser.id]
+    );
+
+    return sendSuccess(res, {
+      id: updated.rows[0].id,
+      email: updated.rows[0].email,
+      username: updated.rows[0].username ?? username,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function checkUsernameAvailability(
+  req: Request,
+  res: Response<
+    ApiResponse<{
+      username: string;
+      valid: boolean;
+      available: boolean;
+    }>
+  >
+) {
+  const authUser = req.user;
+  const parsed = UsernameQuerySchema.parse(req.query);
+  const username = normalizeUsername(parsed.username);
+  const valid = isValidUsername(username);
+
+  if (!valid) {
+    return sendSuccess(res, {
+      username,
+      valid: false,
+      available: false,
+    });
+  }
+
+  const existing = await pool.query(
+    `
+    SELECT id
+    FROM users
+    WHERE username = $1
+      AND ($2::uuid IS NULL OR id <> $2::uuid)
+    `,
+    [username, authUser?.id ?? null]
+  );
+
+  return sendSuccess(res, {
+    username,
+    valid: true,
+    available: !existing.rowCount,
+  });
+}
+
+export async function publicProfile(
+  req: Request,
+  res: Response<ApiResponse<PublicProfileResponse>>
+) {
+  const username = String(req.params.username);
+  const normalized = normalizeUsername(username);
+
+  if (!isValidUsername(normalized)) {
+    return sendError(res, "User not found", 404);
+  }
+
+  const user = await pool.query<{ id: string; username: string }>(
+    `
+    SELECT id, username
+    FROM users
+    WHERE username = $1
+    `,
+    [normalized]
+  );
+
+  if (!user.rowCount) {
+    return sendError(res, "User not found", 404);
+  }
+
+  const algorithms = await pool.query(
+    `
+    SELECT a.id,
+           a.name,
+           COALESCE(a.performance_score, 0) AS performance_score,
+           COALESCE(a.avg_return_percent, 0) AS avg_return_percent,
+           COALESCE(a.avg_sharpe, 0) AS avg_sharpe,
+           COALESCE(a.max_drawdown, 0) AS max_drawdown,
+           COALESCE(a.runs_count, 0) AS runs_count,
+           a.user_id,
+           u.username,
+           COALESCE(a.is_public, false) AS is_public
+    FROM algorithms a
+    INNER JOIN users u
+      ON u.id = a.user_id
+    WHERE a.user_id = $1
+    ORDER BY a.performance_score DESC NULLS LAST, a.created_at DESC
+    LIMIT 100
+    `,
+    [user.rows[0].id]
+  );
+
+  return sendSuccess(res, {
+    username: user.rows[0].username,
+    algorithms: algorithms.rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      performance_score: Number(row.performance_score ?? 0),
+      avg_return_percent: Number(row.avg_return_percent ?? 0),
+      avg_sharpe: Number(row.avg_sharpe ?? 0),
+      max_drawdown: Number(row.max_drawdown ?? 0),
+      runs_count: Number(row.runs_count ?? 0),
+      user_id: row.user_id,
+      username: row.username ?? null,
+      is_public: Boolean(row.is_public),
+    })),
   });
 }
 
@@ -209,7 +406,7 @@ export async function changePassword(
     const { current_password, new_password } =
       ChangePasswordRequestSchema.parse(req.body);
 
-    const result = await pool.query(
+    const result = await pool.query<UserRow>(
       `
       SELECT id, password_hash
       FROM users
@@ -222,8 +419,7 @@ export async function changePassword(
       return sendError(res, "User not found", 404);
     }
 
-    const row = result.rows[0] as { password_hash: string | null };
-    const passwordHash = String(row.password_hash ?? "");
+    const passwordHash = String(result.rows[0].password_hash ?? "");
 
     if (passwordHash === "oauth_google" || passwordHash === "oauth_github") {
       return sendError(
@@ -252,4 +448,51 @@ export async function changePassword(
   } catch (error) {
     next(error);
   }
+}
+
+export async function ensureOauthUsername(
+  email: string,
+  passwordHash: "oauth_google" | "oauth_github",
+  suggestedUsername: string
+) {
+  const user = await pool.query<UserRow>(
+    `
+    SELECT id, email, username
+    FROM users
+    WHERE email = $1
+    `,
+    [email]
+  );
+
+  if (!user.rowCount) {
+    const username = await ensureUniqueUsername(suggestedUsername);
+    const created = await pool.query<UserRow>(
+      `
+      INSERT INTO users (email, password_hash, username)
+      VALUES ($1, $2, $3)
+      RETURNING id, email, username
+      `,
+      [email, passwordHash, username]
+    );
+
+    return created.rows[0];
+  }
+
+  if (!user.rows[0].username) {
+    const username = await ensureUniqueUsername(suggestedUsername);
+    const updated = await pool.query<UserRow>(
+      `
+      UPDATE users
+      SET username = $1,
+          updated_at = NOW()
+      WHERE id = $2
+      RETURNING id, email, username
+      `,
+      [username, user.rows[0].id]
+    );
+
+    return updated.rows[0];
+  }
+
+  return user.rows[0];
 }

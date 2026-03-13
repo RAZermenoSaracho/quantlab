@@ -2,10 +2,13 @@ import { useEffect, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import Navbar from "./Navbar";
+import { useAuth } from "../../context/AuthProvider";
+import UsernameManager from "../profile/UsernameManager";
 
 export default function Layout() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const location = useLocation();
+  const { user } = useAuth();
 
   useEffect(() => {
     setIsSidebarOpen(false);
@@ -32,6 +35,15 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
+
+      {!user?.username && (
+        <UsernameManager
+          mode="modal"
+          initialUsername={user?.username ?? ""}
+          title="Choose your username"
+          description="This will be used for your public profile and algorithm attribution."
+        />
+      )}
     </div>
   );
 }

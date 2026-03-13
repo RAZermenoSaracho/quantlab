@@ -1,12 +1,15 @@
 import { Router, Request, Response } from "express";
 import {
+  checkUsernameAvailability,
   changePassword,
   login,
   me,
   profile,
+  publicProfile,
   register,
+  updateProfile,
 } from "../controllers/auth.controller";
-import { requireAuth } from "../middleware/auth.middleware";
+import { optionalAuth, requireAuth } from "../middleware/auth.middleware";
 import passport from "passport";
 import { env } from "../config/env";
 import jwt, { SignOptions } from "jsonwebtoken";
@@ -20,6 +23,9 @@ router.post("/register", register);
 router.post("/login", login);
 router.get("/me", requireAuth, me);
 router.get("/profile", requireAuth, profile);
+router.put("/profile", requireAuth, updateProfile);
+router.get("/profile/:username", publicProfile);
+router.get("/username-availability", optionalAuth, checkUsernameAvailability);
 router.post("/change-password", requireAuth, changePassword);
 
 /* ================= GOOGLE ================= */
@@ -37,9 +43,10 @@ router.get(
       return res.status(401).json({ error: "OAuth failed" });
     }
 
-    const { id, email } = req.user as {
+    const { id, email, username } = req.user as {
       id: string;
       email: string;
+      username?: string | null;
     };
 
     const signOptions: SignOptions = {
@@ -53,7 +60,7 @@ router.get(
     );
 
     const response = AuthResponseSchema.parse({
-      user: { id, email },
+      user: { id, email, username: username ?? null },
       token,
     });
 
@@ -80,9 +87,10 @@ router.get(
       return res.status(401).json({ error: "OAuth failed" });
     }
 
-    const { id, email } = req.user as {
+    const { id, email, username } = req.user as {
       id: string;
       email: string;
+      username?: string | null;
     };
 
     const signOptions: SignOptions = {
@@ -96,7 +104,7 @@ router.get(
     );
 
     const response = AuthResponseSchema.parse({
-      user: { id, email },
+      user: { id, email, username: username ?? null },
       token,
     });
 

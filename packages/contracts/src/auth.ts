@@ -25,6 +25,7 @@ export type LoginRequest = z.infer<typeof LoginRequestSchema>;
 export const AuthUserSchema = z.object({
   id: z.string().uuid(),
   email: z.string().email(),
+  username: z.string().nullable().optional(),
 });
 
 export type AuthUser = z.infer<typeof AuthUserSchema>;
@@ -45,3 +46,19 @@ export const MeResponseSchema = z.object({
 });
 
 export type MeResponse = z.infer<typeof MeResponseSchema>;
+
+export const UsernameSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(/^[a-z0-9_]{3,20}$/);
+
+export const UsernameAvailabilityResponseSchema = z.object({
+  username: z.string(),
+  valid: z.boolean(),
+  available: z.boolean(),
+});
+
+export type UsernameAvailabilityResponse = z.infer<
+  typeof UsernameAvailabilityResponseSchema
+>;

@@ -4,6 +4,8 @@ import Register from "../pages/Register";
 import OAuthSuccess from "../pages/OAuthSuccess";
 import Dashboard from "../pages/Dashboard";
 import Profile from "../pages/Profile";
+import PublicProfile from "../pages/PublicProfile";
+import Ranking from "../pages/Ranking";
 import NotFound from "../pages/NotFound";
 
 // Algorithms
@@ -27,6 +29,9 @@ export const nav = [
   { path: "/login", element: <Login />, isPrivate: false },
   { path: "/register", element: <Register />, isPrivate: false },
   { path: "/oauth-success", element: <OAuthSuccess />, isPrivate: false },
+  { path: "/ranking", element: <Ranking />, isPrivate: false },
+  { path: "/profile/:username", element: <PublicProfile />, isPrivate: false },
+  { path: "/algorithms/:id", element: <AlgorithmDetail />, isPrivate: false },
 
   // DASHBOARD
   { path: "/dashboard", element: <Dashboard />, isPrivate: true },
@@ -36,7 +41,6 @@ export const nav = [
   { path: "/algorithms", element: <AlgorithmsList />, isPrivate: true },
   { path: "/algorithms/new", element: <CreateAlgorithm />, isPrivate: true },
   { path: "/algorithms/:id/edit", element: <CreateAlgorithm />, isPrivate: true },
-  { path: "/algorithms/:id", element: <AlgorithmDetail />, isPrivate: true },
 
   // BACKTESTS
   { path: "/backtests", element: <BacktestsList />, isPrivate: true },

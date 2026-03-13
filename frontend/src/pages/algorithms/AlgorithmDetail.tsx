@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import type {
-  AlgorithmPaperRun,
   AlgorithmBacktestRun,
+  AlgorithmPaperRun,
 } from "@quantlab/contracts";
-import DetailNavigator from "../../components/navigation/DetailNavigator";
+import { useAuth } from "../../context/AuthProvider";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
 import AlgorithmWorkspace from "../../components/algorithms/AlgorithmWorkspace";
@@ -15,7 +15,6 @@ import { formatDateTime } from "../../utils/date";
 import {
   useAlgorithm,
   useAlgorithmRuns,
-  useAlgorithms,
   useDeleteAlgorithmMutation,
   useRefreshAlgorithmMutation,
 } from "../../data/algorithms";
@@ -73,6 +72,7 @@ function classifyMetric(
 export default function AlgorithmDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user, isAuthenticated } = useAuth();
 
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [mobileTab, setMobileTab] = useState<MobileTab>("overview");
@@ -86,11 +86,6 @@ export default function AlgorithmDetail() {
     error: algorithmError,
   } = useAlgorithm(id ?? "");
   const {
-    data: algorithms,
-    loading: algorithmsLoading,
-    error: algorithmsError,
-  } = useAlgorithms();
-  const {
     data: runs,
     loading: runsLoading,
     error: runsError,
@@ -98,9 +93,11 @@ export default function AlgorithmDetail() {
   const refreshMutation = useRefreshAlgorithmMutation(id ?? "");
   const deleteMutation = useDeleteAlgorithmMutation();
 
-  const allIds = useMemo(() => algorithms ?? [], [algorithms]).map((item) => item.id);
   const backtests = useMemo(() => runs?.backtests ?? [], [runs]);
   const paperRuns = useMemo(() => runs?.paperRuns ?? [], [runs]);
+  const isOwner = Boolean(algorithm && user && algorithm.user_id === user.id);
+  const canOpenRunDetails = isAuthenticated && isOwner;
+
   const averageBacktestMetrics = useMemo(() => {
     const annualizedFromBacktest = (item: AlgorithmBacktestRun): number => {
       const totalReturnPercent = Number(item.total_return_percent ?? 0);
@@ -108,7 +105,7 @@ export default function AlgorithmDetail() {
       const endMs = item.end_date ? Date.parse(item.end_date) : NaN;
       const durationMs = endMs - startMs;
       const days = durationMs > 0 ? durationMs / (1000 * 60 * 60 * 24) : NaN;
-      const gross = 1 + (totalReturnPercent / 100);
+      const gross = 1 + totalReturnPercent / 100;
       if (!Number.isFinite(days) || days <= 0 || gross <= 0) {
         return totalReturnPercent;
       }
@@ -139,6 +136,7 @@ export default function AlgorithmDetail() {
       count,
     };
   }, [backtests]);
+
   const averagePaperMetrics = useMemo(() => {
     const count = paperRuns.length;
     if (count === 0) {
@@ -166,8 +164,8 @@ export default function AlgorithmDetail() {
     setCode(algorithm.code ?? "");
   }, [algorithm]);
 
-  const detailLoading = algorithmLoading || algorithmsLoading || runsLoading;
-  const error = actionError || algorithmError || algorithmsError || runsError;
+  const detailLoading = algorithmLoading || runsLoading;
+  const error = actionError || algorithmError || runsError;
 
   if (detailLoading) {
     return (
@@ -201,7 +199,7 @@ export default function AlgorithmDetail() {
   const perfConfidenceRaw = Number(algorithm.confidence_score ?? 0);
 
   async function handleRefresh() {
-    if (!id) {
+    if (!id || !isOwner) {
       return;
     }
 
@@ -219,22 +217,11 @@ export default function AlgorithmDetail() {
   }
 
   async function handleDelete() {
-    if (!id) {
+    if (!id || !isOwner) {
       return;
     }
 
     await deleteMutation.mutate(id);
-
-    const index = allIds.indexOf(id);
-    const nextId =
-      allIds[(index + 1) % allIds.length] ||
-      allIds[(index - 1 + allIds.length) % allIds.length];
-
-    if (nextId && allIds.length > 1) {
-      navigate(`/algorithms/${nextId}`);
-      return;
-    }
-
     navigate("/algorithms");
   }
 
@@ -305,7 +292,7 @@ export default function AlgorithmDetail() {
         const quote = Number(run.quote_balance ?? run.current_balance ?? 0);
         const base = Number(run.base_balance ?? 0);
         const last = Number(run.last_price ?? 0);
-        const equity = Number(run.equity ?? quote + (base * last));
+        const equity = Number(run.equity ?? quote + base * last);
         return <span className="text-slate-300">${equity.toFixed(2)}</span>;
       },
     },
@@ -316,7 +303,7 @@ export default function AlgorithmDetail() {
         const quote = Number(run.quote_balance ?? run.current_balance ?? 0);
         const base = Number(run.base_balance ?? 0);
         const last = Number(run.last_price ?? 0);
-        const equity = Number(run.equity ?? quote + (base * last));
+        const equity = Number(run.equity ?? quote + base * last);
         const pnl = equity - Number(run.initial_balance ?? 0);
         const cls =
           pnl >= 0 ? "text-emerald-400 font-medium" : "text-red-400 font-medium";
@@ -335,40 +322,63 @@ export default function AlgorithmDetail() {
     },
   ];
 
+  const codeLabel =
+    algorithm.code === "[Private Algorithm]" ? "Private Source" : "Strategy Code";
+
   return (
     <div className="max-w-[1600px] mx-auto px-4 lg:px-8 py-6 lg:py-10 space-y-8 lg:space-y-10">
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 lg:p-8 shadow-lg">
         <div className="flex flex-col lg:flex-row justify-between gap-4 lg:gap-8">
-          <div>
+          <div className="space-y-3">
             <h1 className="text-2xl lg:text-4xl font-bold text-white">{algorithm.name}</h1>
-            <p className="text-xs text-slate-500 mt-3">
+            <div className="flex flex-wrap items-center gap-3 text-sm text-slate-400">
+              <span>
+                Creator:{" "}
+                {algorithm.username ? (
+                  <Link
+                    to={`/profile/${algorithm.username}`}
+                    className="text-sky-400 hover:text-sky-300"
+                  >
+                    @{algorithm.username}
+                  </Link>
+                ) : (
+                  "Unknown"
+                )}
+              </span>
+              <span>{algorithm.is_public ? "Open Source" : "Private Source"}</span>
+            </div>
+            <p className="text-xs text-slate-500">
               Last updated: {formatDateTime(algorithm.updated_at)}
             </p>
           </div>
 
-          <div className="flex items-center gap-4 flex-wrap">
-            <DetailNavigator ids={allIds} currentId={id!} basePath="/algorithms" />
+          {isOwner && (
+            <div className="flex items-center gap-4 flex-wrap">
+              {isGithub && (
+                <Button
+                  variant="WARNING"
+                  size="md"
+                  loading={saving}
+                  loadingText="Refreshing..."
+                  onClick={handleRefresh}
+                >
+                  Refresh
+                </Button>
+              )}
 
-            {isGithub && (
               <Button
-                variant="WARNING"
+                variant="PRIMARY"
                 size="md"
-                loading={saving}
-                loadingText="Refreshing..."
-                onClick={handleRefresh}
+                onClick={() => navigate(`/algorithms/${id}/edit`)}
               >
-                Refresh
+                Edit
               </Button>
-            )}
 
-            <Button variant="PRIMARY" size="md" onClick={() => navigate(`/algorithms/${id}/edit`)}>
-              Edit
-            </Button>
-
-            <Button variant="DELETE" size="md" onClick={handleDelete}>
-              Delete
-            </Button>
-          </div>
+              <Button variant="DELETE" size="md" onClick={handleDelete}>
+                Delete
+              </Button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -377,8 +387,8 @@ export default function AlgorithmDetail() {
         <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-6">
           <h3 className="text-white font-semibold mb-4">Strategy Performance</h3>
           <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
-            <KpiCard title="Avg Yearly Return" value={perfAvgYearlyReturn} size="compact" format={(value) => `${value.toFixed(2)}%`} variant={classifyMetric("avg_yearly_return", perfAvgYearlyReturn)} tooltip="20%+ good, 5-20% neutral, below 5% weak." />
-            <KpiCard title="Avg Sharpe" value={perfAvgSharpe} size="compact" format={(value) => value.toFixed(2)} variant={classifyMetric("sharpe", perfAvgSharpe)} tooltip="Sharpe >= 1 is typically considered strong risk-adjusted performance." />
+            <KpiCard title="Avg Yearly Return" value={perfAvgYearlyReturn} size="compact" format={(value) => `${value.toFixed(2)}%`} variant={classifyMetric("avg_yearly_return", perfAvgYearlyReturn)} />
+            <KpiCard title="Avg Sharpe" value={perfAvgSharpe} size="compact" format={(value) => value.toFixed(2)} variant={classifyMetric("sharpe", perfAvgSharpe)} />
             <KpiCard title="Avg PnL" value={perfAvgPnl} size="compact" format={(value) => `$${value.toFixed(2)}`} />
             <KpiCard title="Win Rate" value={perfWinRate} size="compact" format={(value) => `${value.toFixed(2)}%`} variant={classifyMetric("win_rate", perfWinRate)} />
             <KpiCard title="Max Drawdown" value={perfMaxDrawdown} size="compact" format={(value) => `${value.toFixed(2)}%`} variant={classifyMetric("max_drawdown", perfMaxDrawdown)} />
@@ -401,7 +411,7 @@ export default function AlgorithmDetail() {
             onClick={() => setMobileTab(tab)}
           >
             {tab === "overview" && "Overview"}
-            {tab === "code" && "Code"}
+            {tab === "code" && codeLabel}
             {tab === "backtests" && `Backtests (${backtests.length})`}
             {tab === "paper" && `Paper Runs (${paperRuns.length})`}
           </Button>
@@ -430,7 +440,7 @@ export default function AlgorithmDetail() {
             <div
               className="prose prose-invert max-w-none text-slate-300"
               dangerouslySetInnerHTML={{
-                __html: algorithm.notes_html || "",
+                __html: algorithm.notes_html || "<p>No notes provided.</p>",
               }}
             />
           </div>
@@ -457,12 +467,14 @@ export default function AlgorithmDetail() {
           </div>
           <ListView
             title="Backtests"
-            description="Historical runs for this strategy."
+            description={canOpenRunDetails ? "Historical runs for this strategy." : "Historical runs for this strategy. Run detail pages are owner-only."}
             columns={backtestColumns}
             data={backtests}
             loading={false}
             emptyMessage="No backtests yet."
-            onRowClick={(bt) => navigate(`/backtests/${bt.id}`)}
+            onRowClick={
+              canOpenRunDetails ? (bt) => navigate(`/backtests/${bt.id}`) : undefined
+            }
           />
         </div>
       )}
@@ -479,11 +491,13 @@ export default function AlgorithmDetail() {
           </div>
           <ListView
             title="Paper Runs"
-            description="Live and past simulated trading sessions."
+            description={canOpenRunDetails ? "Live and past simulated trading sessions." : "Live and past simulated trading sessions. Run detail pages are owner-only."}
             columns={paperColumns}
             data={paperRuns}
             emptyMessage="No paper runs yet."
-            onRowClick={(run) => navigate(`/paper/${run.id}`)}
+            onRowClick={
+              canOpenRunDetails ? (run) => navigate(`/paper/${run.id}`) : undefined
+            }
           />
         </div>
       )}
@@ -495,7 +509,7 @@ export default function AlgorithmDetail() {
             <div
               className="prose prose-invert max-w-none text-slate-300"
               dangerouslySetInnerHTML={{
-                __html: algorithm.notes_html || "",
+                __html: algorithm.notes_html || "<p>No notes provided.</p>",
               }}
             />
           </div>
@@ -527,12 +541,14 @@ export default function AlgorithmDetail() {
           </div>
           <ListView
             title="Backtests"
-            description="Historical runs for this strategy."
+            description={canOpenRunDetails ? "Historical runs for this strategy." : "Historical runs for this strategy. Run detail pages are owner-only."}
             columns={backtestColumns}
             data={backtests}
             loading={false}
             emptyMessage="No backtests yet."
-            onRowClick={(bt) => navigate(`/backtests/${bt.id}`)}
+            onRowClick={
+              canOpenRunDetails ? (bt) => navigate(`/backtests/${bt.id}`) : undefined
+            }
           />
         </div>
       )}
@@ -549,11 +565,13 @@ export default function AlgorithmDetail() {
           </div>
           <ListView
             title="Paper Runs"
-            description="Live and past simulated trading sessions."
+            description={canOpenRunDetails ? "Live and past simulated trading sessions." : "Live and past simulated trading sessions. Run detail pages are owner-only."}
             columns={paperColumns}
             data={paperRuns}
             emptyMessage="No paper runs yet."
-            onRowClick={(run) => navigate(`/paper/${run.id}`)}
+            onRowClick={
+              canOpenRunDetails ? (run) => navigate(`/paper/${run.id}`) : undefined
+            }
           />
         </div>
       )}

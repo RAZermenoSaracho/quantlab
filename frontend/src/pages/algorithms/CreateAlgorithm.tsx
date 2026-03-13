@@ -22,6 +22,7 @@ export default function CreateAlgorithm() {
   const [notesHtml, setNotesHtml] = useState("");
   const [code, setCode] = useState("");
   const [githubUrl, setGithubUrl] = useState("");
+  const [isPublic, setIsPublic] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [fetchingGithubCode, setFetchingGithubCode] = useState(false);
@@ -41,6 +42,7 @@ export default function CreateAlgorithm() {
     setNotesHtml(algorithm.notes_html ?? "");
     setCode(algorithm.code ?? "");
     setGithubUrl(algorithm.github_url ?? "");
+    setIsPublic(Boolean(algorithm.is_public));
   }, [isEditMode, algorithm]);
 
   const isSubmitDisabled =
@@ -97,6 +99,7 @@ export default function CreateAlgorithm() {
           name,
           notes_html: notesHtml || undefined,
           code: code || undefined,
+          is_public: isPublic,
         });
         navigate(`/algorithms/${updated.id}`);
       } else {
@@ -105,6 +108,7 @@ export default function CreateAlgorithm() {
           notes_html: notesHtml || undefined,
           code: code || undefined,
           githubUrl: githubUrl || undefined,
+          is_public: isPublic,
         });
         navigate(`/algorithms/${created.id}`);
       }
@@ -211,6 +215,18 @@ export default function CreateAlgorithm() {
             value={notesHtml}
             onChange={(e) => setNotesHtml(e.target.value)}
           />
+
+          <label className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={isPublic}
+              onChange={(event) => setIsPublic(event.target.checked)}
+              className="h-4 w-4 rounded border-slate-700 bg-slate-900"
+            />
+            <span>
+              Public algorithm. Private algorithms still appear in ranking and profiles, but their code and GitHub link stay hidden.
+            </span>
+          </label>
         </div>
 
         <div className={mobileTab === "code" ? "space-y-6" : "hidden lg:block lg:space-y-6"}>

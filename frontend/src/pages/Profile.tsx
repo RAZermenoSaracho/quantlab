@@ -9,6 +9,7 @@ import {
   type AuthProfile,
 } from "../services/auth.service";
 import ErrorAlert from "../components/ui/ErrorAlert";
+import UsernameManager from "../components/profile/UsernameManager";
 
 function fmtMaybeDate(value: unknown): string {
   if (typeof value !== "string" || !value) {
@@ -108,6 +109,20 @@ export default function Profile() {
                 className="text-xs uppercase tracking-wide"
                 style={{ color: "var(--color-text-secondary)" }}
               >
+                Username
+              </p>
+              <p
+                className="font-medium"
+                style={{ color: "var(--color-text-primary)" }}
+              >
+                {profile?.username ? `@${profile.username}` : "Not set"}
+              </p>
+            </div>
+            <div className="space-y-1">
+              <p
+                className="text-xs uppercase tracking-wide"
+                style={{ color: "var(--color-text-secondary)" }}
+              >
                 Email
               </p>
               <p
@@ -149,6 +164,19 @@ export default function Profile() {
             )}
           </div>
           )}
+
+          <div className="rounded-xl border border-slate-800 bg-slate-950 p-4">
+            <UsernameManager
+              initialUsername={profile?.username ?? ""}
+              title="Public Username"
+              description="Edit the username used on your public profile and ranking attribution."
+              onSaved={(username) =>
+                setProfile((current) =>
+                  current ? { ...current, username } : current
+                )
+              }
+            />
+          </div>
 
           <div className="pt-2 flex flex-wrap gap-3">
             {provider === "password" && (
