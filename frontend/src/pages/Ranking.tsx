@@ -87,7 +87,7 @@ export default function Ranking() {
 
   return (
     <div className="max-w-7xl mx-auto w-full min-w-0 space-y-6">
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-3 mt-4">
         <KpiCard title="Algorithms Ranked" value={algorithms.length} />
         <KpiCard
           title="Top AI Score"

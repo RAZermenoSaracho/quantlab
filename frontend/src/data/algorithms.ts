@@ -3,6 +3,8 @@ import type {
   Algorithm,
   AlgorithmSummary,
   CreateAlgorithmDto,
+  OptimizerRanking,
+  OptimizerRequest,
   UpdateAlgorithmDto,
 } from "@quantlab/contracts";
 import type {
@@ -24,6 +26,7 @@ import {
   refreshAlgorithmFromGithub,
   updateAlgorithm,
 } from "../services/algorithm.service";
+import { runOptimizer } from "../services/optimizer.service";
 import { connectSocket } from "../services/socket.service";
 import {
   ALGORITHMS,
@@ -202,5 +205,11 @@ export function useDeleteAlgorithmMutation() {
         void output;
       return [ALGORITHMS, ALGORITHM_RANKING, algorithmKey(id), algorithmRunsKey(id)];
     },
+  });
+}
+
+export function useRunOptimizerMutation() {
+  return useMutation<OptimizerRequest, OptimizerRanking>({
+    mutationFn: runOptimizer,
   });
 }

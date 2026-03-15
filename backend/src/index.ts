@@ -12,6 +12,7 @@ import algorithmsRoutes from "./routes/algorithms.routes";
 import backtestRoutes from "./routes/backtest.routes";
 import exchangeRoutes from "./routes/exchange.routes";
 import marketRoutes from "./routes/market.routes";
+import optimizerRoutes from "./routes/optimizer.routes";
 import paperRoutes from "./routes/paper.routes";
 
 import { initializeWebsocket } from "./services/websocketManager.service";
@@ -61,6 +62,7 @@ app.use("/api/algorithms", algorithmsRoutes);
 app.use("/api/backtests", backtestRoutes);
 app.use("/api/exchanges", exchangeRoutes);
 app.use("/api/market", marketRoutes);
+app.use("/api/optimizer", optimizerRoutes);
 app.use("/api/paper", paperRoutes);
 
 /* =====================================================

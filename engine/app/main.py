@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 from .backtest import run_backtest
 from .clients import ExchangeFactory
 from .data.candle_aggregator import expand_minute_candles_to_subminute
+from .optimizer import run_optimizer
 from .validator import AlgorithmValidationError, validate_algorithm
 
 # ======================================================
@@ -68,6 +69,31 @@ class BacktestRequest(BaseModel):
     @field_validator("start_date", "end_date")
     @classmethod
     def validate_iso_date(cls, v: str) -> str:
+        try:
+            datetime.fromisoformat(v)
+        except ValueError:
+            raise ValueError("Dates must be ISO format (YYYY-MM-DDTHH:MM:SS)")
+        return v
+
+
+class OptimizerRequest(BaseModel):
+    code: str
+    exchange: str = Field(default="binance")
+    symbol: str = Field(..., example="BTCUSDT")
+    timeframe: str = Field(..., example="1h")
+    initial_balance: float = Field(..., gt=0)
+    start_date: str
+    end_date: str
+    param_space: Dict[str, list[Any]]
+    fee_rate: Optional[float] = Field(default=None, ge=0)
+
+    api_key: Optional[str] = None
+    api_secret: Optional[str] = None
+    testnet: bool = False
+
+    @field_validator("start_date", "end_date")
+    @classmethod
+    def validate_optimizer_iso_date(cls, v: str) -> str:
         try:
             datetime.fromisoformat(v)
         except ValueError:
@@ -338,6 +364,34 @@ async def backtest(request: BacktestRequest):
 @app.get("/backtest-progress/{run_id}")
 async def get_progress(run_id: str):
     return {"progress": BACKTEST_PROGRESS.get(run_id, 0)}
+
+
+@app.post("/optimizer/run")
+async def optimizer_run(request: OptimizerRequest):
+    logger.info("Received optimizer request")
+
+    try:
+        result = await asyncio.to_thread(
+            run_optimizer,
+            request.code,
+            exchange=request.exchange,
+            symbol=request.symbol,
+            timeframe=request.timeframe,
+            initial_balance=request.initial_balance,
+            start_date=request.start_date,
+            end_date=request.end_date,
+            param_space=request.param_space,
+            fee_rate=request.fee_rate,
+            api_key=request.api_key,
+            api_secret=request.api_secret,
+            testnet=request.testnet,
+        )
+        logger.info("Optimizer completed successfully")
+    except Exception:
+        logger.exception("Optimizer execution failed")
+        raise
+
+    return {"success": True, "data": result}
 
 
 # ======================================================

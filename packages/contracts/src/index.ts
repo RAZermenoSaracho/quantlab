@@ -7,3 +7,4 @@ export * from "./market";
 export * from "./portfolio";
 export * from "./events";
 export * from "./engine";
+export * from "./optimizer";

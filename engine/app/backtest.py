@@ -1,3 +1,4 @@
+import logging
 from typing import Optional, Tuple, Dict, Any, Callable
 from uuid import uuid4
 
@@ -22,6 +23,7 @@ from .portfolio.fee_model import (
 
 
 SUB_MINUTE_TIMEFRAMES = {"1s", "5s", "15s", "30s"}
+logger = logging.getLogger("quantlab.backtest")
 
 
 # ============================================================
@@ -670,6 +672,84 @@ def _compute_average_holding_seconds(trades: list[dict[str, Any]]) -> float:
     return float(sum(durations) / len(durations))
 
 
+def _normalize_fetched_candles(rows: list[list[Any]]) -> list[dict[str, float]]:
+    candles: list[dict[str, float]] = []
+    for row in rows:
+        candles.append(
+            {
+                "open": float(row[1]),
+                "high": float(row[2]),
+                "low": float(row[3]),
+                "close": float(row[4]),
+                "volume": float(row[5]),
+                "timestamp": int(row[0]),
+            }
+        )
+    return candles
+
+
+def prepare_backtest_market_data(
+    *,
+    client: Any,
+    symbol: str,
+    timeframe: str,
+    start_date: str,
+    end_date: str,
+    config: Any,
+) -> tuple[list[str], Dict[str, list[dict[str, float]]], Dict[str, Dict[str, list[Any]]], Optional[int], Optional[int]]:
+    symbols = [item.strip().upper() for item in str(symbol).split(",") if item.strip()]
+    if not symbols:
+        symbols = [str(symbol).upper()]
+
+    source_timeframe = "1m" if timeframe in SUB_MINUTE_TIMEFRAMES else timeframe
+    logger.info("Candle request range: %s -> %s", start_date, end_date)
+    logger.info("Timeframe: %s", timeframe)
+    symbol_candles: Dict[str, list[dict[str, float]]] = {}
+    symbol_indicator_series: Dict[str, Dict[str, list[Any]]] = {}
+    first_ts: Optional[int] = None
+    last_ts: Optional[int] = None
+
+    for sym in symbols:
+        candles_raw = client.fetch_candles(
+            symbol=sym,
+            timeframe=source_timeframe,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        if not candles_raw:
+            continue
+
+        candles_for_symbol = _normalize_fetched_candles(candles_raw)
+        if timeframe in SUB_MINUTE_TIMEFRAMES:
+            candles_for_symbol = expand_minute_candles_to_subminute(candles_for_symbol, timeframe)
+
+        if not candles_for_symbol:
+            continue
+
+        symbol_candles[sym] = candles_for_symbol
+        symbol_indicator_series[sym] = compute_indicator_series(candles_for_symbol, config)
+        first_ts = (
+            int(candles_for_symbol[0]["timestamp"])
+            if first_ts is None
+            else min(first_ts, int(candles_for_symbol[0]["timestamp"]))
+        )
+        last_ts = (
+            int(candles_for_symbol[-1]["timestamp"])
+            if last_ts is None
+            else max(last_ts, int(candles_for_symbol[-1]["timestamp"]))
+        )
+
+    total_candles = sum(len(candles) for candles in symbol_candles.values())
+    logger.info("Candles fetched: %s", total_candles)
+    logger.info("First candle timestamp: %s", first_ts)
+    logger.info("Last candle timestamp: %s", last_ts)
+
+    if not symbol_candles:
+        raise Exception("No candles returned for the selected period.")
+
+    return symbols, symbol_candles, symbol_indicator_series, first_ts, last_ts
+
+
 # ============================================================
 # Backtest
 # ============================================================
@@ -687,6 +767,9 @@ def run_backtest(
     api_secret: Optional[str] = None,
     testnet: bool = False,
     progress_callback: Optional[Callable[[int], None]] = None,
+    override_params: Optional[Dict[str, Any]] = None,
+    candles_override: Optional[Dict[str, list[dict[str, float]]] | list[dict[str, float]]] = None,
+    indicator_series_override: Optional[Dict[str, Dict[str, list[Any]]] | Dict[str, list[Any]]] = None,
 ) -> dict:
 
     open_positions_at_end = 0
@@ -706,6 +789,14 @@ def run_backtest(
     # LOAD CONFIG
     # ============================
     config, config_used = load_config_from_env(execution_env)
+    if override_params:
+        merged_params = dict(getattr(config, "params", {}) or {})
+        merged_params.update(override_params)
+        config.params = merged_params
+        config_used = {
+            **dict(config_used or {}),
+            "params": dict(merged_params),
+        }
 
     direction = str(getattr(config, "direction", "long_only"))
     execution_model = str(getattr(config, "execution_model", "next_open"))  # "same_close" | "next_open"
@@ -754,42 +845,23 @@ def run_backtest(
         lot_size_by_symbol[sym] = lot_size
         tick_size_by_symbol[sym] = tick_size
 
-    if len(symbols) > 1:
-        source_timeframe = "1m" if timeframe in SUB_MINUTE_TIMEFRAMES else timeframe
-        symbol_candles: Dict[str, list[dict[str, float]]] = {}
-        symbol_indicator_series: Dict[str, Dict[str, list[Any]]] = {}
+    if isinstance(candles_override, dict):
+        symbol_candles = {
+            str(sym).upper(): list(candles_for_symbol)
+            for sym, candles_for_symbol in candles_override.items()
+        }
+        if isinstance(indicator_series_override, dict):
+            symbol_indicator_series = {
+                str(sym).upper(): dict(series)
+                for sym, series in indicator_series_override.items()
+            }
+        else:
+            symbol_indicator_series = {}
         first_ts = None
         last_ts = None
-
-        for sym in symbols:
-            candles_raw = client.fetch_candles(
-                symbol=sym,
-                timeframe=source_timeframe,
-                start_date=start_date,
-                end_date=end_date,
-            )
-            if not candles_raw:
-                continue
-
-            candles_for_symbol: list[dict[str, float]] = []
-            for c in candles_raw:
-                candles_for_symbol.append({
-                    "open": float(c[1]),
-                    "high": float(c[2]),
-                    "low": float(c[3]),
-                    "close": float(c[4]),
-                    "volume": float(c[5]),
-                    "timestamp": int(c[0]),
-                })
-
-            if timeframe in SUB_MINUTE_TIMEFRAMES:
-                candles_for_symbol = expand_minute_candles_to_subminute(candles_for_symbol, timeframe)
-
+        for candles_for_symbol in symbol_candles.values():
             if not candles_for_symbol:
                 continue
-
-            symbol_candles[sym] = candles_for_symbol
-            symbol_indicator_series[sym] = compute_indicator_series(candles_for_symbol, config)
             first_ts = (
                 int(candles_for_symbol[0]["timestamp"])
                 if first_ts is None
@@ -800,9 +872,20 @@ def run_backtest(
                 if last_ts is None
                 else max(last_ts, int(candles_for_symbol[-1]["timestamp"]))
             )
+        for sym, candles_for_symbol in symbol_candles.items():
+            if sym not in symbol_indicator_series:
+                symbol_indicator_series[sym] = compute_indicator_series(candles_for_symbol, config)
+    else:
+        symbols, symbol_candles, symbol_indicator_series, first_ts, last_ts = prepare_backtest_market_data(
+            client=client,
+            symbol=symbol,
+            timeframe=timeframe,
+            start_date=start_date,
+            end_date=end_date,
+            config=config,
+        )
 
-        if not symbol_candles:
-            raise Exception("No candles returned for the selected period.")
+    if len(symbols) > 1:
 
         balance = float(initial_balance)
         max_exposure_pct = float(getattr(config, "max_account_exposure_pct", 100.0))
@@ -1399,49 +1482,23 @@ def run_backtest(
     single_quantity_step = lot_size_by_symbol.get(single_symbol)
     single_tick_size = tick_size_by_symbol.get(single_symbol)
 
-    source_timeframe = "1m" if timeframe in SUB_MINUTE_TIMEFRAMES else timeframe
-
-    candles_raw = client.fetch_candles(
-        symbol=single_symbol,
-        timeframe=source_timeframe,
-        start_date=start_date,
-        end_date=end_date,
+    candles = (
+        list(candles_override)
+        if isinstance(candles_override, list)
+        else list(symbol_candles.get(single_symbol, []))
     )
-
-    if not candles_raw:
+    if not candles:
         raise Exception("No candles returned for the selected period.")
 
-    # ============================
-    # NORMALIZE CANDLES (for UI + engine)
-    # ============================
-    candles = []
-    first_ts = None
-    last_ts = None
-
-    for c in candles_raw:
-        candle = {
-            "open": float(c[1]),
-            "high": float(c[2]),
-            "low": float(c[3]),
-            "close": float(c[4]),
-            "volume": float(c[5]),
-            "timestamp": int(c[0]),
-        }
-        candles.append(candle)
-        if first_ts is None:
-            first_ts = candle["timestamp"]
-        last_ts = candle["timestamp"]
-
-    if timeframe in SUB_MINUTE_TIMEFRAMES:
-        candles = expand_minute_candles_to_subminute(candles, timeframe)
-        if candles:
-            first_ts = int(candles[0]["timestamp"])
-            last_ts = int(candles[-1]["timestamp"])
-
-    # ============================
-    # INDICATORS
-    # ============================
-    indicator_series = compute_indicator_series(candles, config)
+    if isinstance(indicator_series_override, dict) and not any(
+        isinstance(value, list) and value and isinstance(value[0], dict)
+        for value in indicator_series_override.values()
+    ):
+        indicator_series = dict(indicator_series_override)
+    else:
+        indicator_series = dict(symbol_indicator_series.get(single_symbol, {}))
+    if not indicator_series:
+        indicator_series = compute_indicator_series(candles, config)
 
     # ============================
     # STATE

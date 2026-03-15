@@ -136,9 +136,18 @@ def build_context(
     start = max(0, prev_index - history_window + 1)
     history_slice = tuple(candles[start : prev_index + 1])
 
-    indicators_at_index = {
-        key: series[prev_index]
-        for key, series in indicator_series.items()
-    }
+    indicators_at_index = {}
+    for key, series in indicator_series.items():
+        if isinstance(series, dict):
+            indicators_at_index[key] = series.get(prev_index)
+            continue
+
+        if isinstance(series, list):
+            indicators_at_index[key] = (
+                series[prev_index] if 0 <= prev_index < len(series) else None
+            )
+            continue
+
+        indicators_at_index[key] = None
 
     return _base_context(indicators_at_index, history_slice)

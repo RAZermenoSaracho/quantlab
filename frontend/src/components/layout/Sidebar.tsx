@@ -64,20 +64,6 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
         </NavLink>
 
         <NavLink
-          to="/ranking"
-          onClick={onClose}
-          className={({ isActive }) =>
-            `${linkClasses} ${
-              isActive
-                ? "bg-slate-800 text-blue-400"
-                : "text-slate-400 hover:bg-slate-800 hover:text-white"
-            }`
-          }
-        >
-          Ranking
-        </NavLink>
-
-        <NavLink
           to="/backtests"
           onClick={onClose}
           className={({ isActive }) =>
@@ -103,6 +89,20 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
           }
         >
           Paper Trading
+        </NavLink>
+
+        <NavLink
+          to="/ranking"
+          onClick={onClose}
+          className={({ isActive }) =>
+            `${linkClasses} ${
+              isActive
+                ? "bg-slate-800 text-blue-400"
+                : "text-slate-400 hover:bg-slate-800 hover:text-white"
+            }`
+          }
+        >
+          Ranking
         </NavLink>
 
         <NavLink
