@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import type { AuthProfile } from "@quantlab/contracts";
 import Button from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { SectionTitle } from "../components/ui/SectionTitle";
@@ -6,7 +7,6 @@ import { useAuth } from "../context/AuthProvider";
 import {
   changePassword,
   getAuthProfile,
-  type AuthProfile,
 } from "../services/auth.service";
 import ErrorAlert from "../components/ui/ErrorAlert";
 import UsernameManager from "../components/profile/UsernameManager";

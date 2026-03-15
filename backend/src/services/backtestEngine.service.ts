@@ -7,13 +7,7 @@ import {
   type BacktestEngineRequest,
   type BacktestEngineResult,
 } from "@quantlab/contracts";
-
-type EngineErrorPayload = {
-  detail?: string;
-  error?: {
-    message?: string;
-  };
-};
+import type { EngineErrorPayload } from "../types/engine";
 
 function handleEngineError(error: unknown): never {
   if (axios.isAxiosError(error)) {
@@ -21,7 +15,10 @@ function handleEngineError(error: unknown): never {
 
     throw new Error(
       payload?.detail ||
-      payload?.error?.message ||
+      (typeof payload?.error === "string"
+        ? payload.error
+        : payload?.error?.message) ||
+      payload?.message ||
       "Engine error"
     );
   }

@@ -7,15 +7,23 @@ import { env } from "../config/env";
 
 import {
   type ApiResponse,
+  type AuthProfile,
   type AuthResponse,
+  type ChangePasswordRequest,
   type MeResponse,
   type MessageResponse,
   type PublicProfileResponse,
+  type UpdateAuthProfileRequest,
+  type UpdateAuthProfileResponse,
+  AuthProfileSchema,
   RegisterRequestSchema,
   LoginRequestSchema,
   AuthUserSchema,
   AuthResponseSchema,
+  ChangePasswordRequestSchema,
   MeResponseSchema,
+  UpdateAuthProfileRequestSchema,
+  UpdateAuthProfileResponseSchema,
 } from "@quantlab/contracts";
 import { sendError, sendSuccess } from "../utils/apiResponse";
 import {
@@ -59,15 +67,6 @@ function passwordProvider(passwordHash: string | null | undefined) {
   }
   return "password" as const;
 }
-
-const ChangePasswordRequestSchema = z.object({
-  current_password: z.string().min(1),
-  new_password: z.string().min(8),
-});
-
-const UpdateProfileSchema = z.object({
-  username: z.string().trim().min(3).max(20),
-});
 
 const UsernameQuerySchema = z.object({
   username: z.string().trim().default(""),
@@ -190,15 +189,7 @@ export async function me(req: Request, res: Response<ApiResponse<MeResponse>>) {
 
 export async function profile(
   req: Request,
-  res: Response<
-    ApiResponse<{
-      id: string;
-      email: string;
-      username: string | null;
-      provider: "google" | "github" | "password";
-      created_at: string | null;
-    }>
-  >
+  res: Response<ApiResponse<AuthProfile>>
 ) {
   const authUser = req.user;
   if (!authUser) {
@@ -220,7 +211,9 @@ export async function profile(
 
   const row = result.rows[0];
 
-  return sendSuccess(res, {
+  return sendSuccess(
+    res,
+    AuthProfileSchema.parse({
     id: row.id,
     email: row.email,
     username: row.username ?? null,
@@ -229,12 +222,13 @@ export async function profile(
       row.created_at instanceof Date
         ? row.created_at.toISOString()
         : row.created_at ?? null,
-  });
+    })
+  );
 }
 
 export async function updateProfile(
   req: Request,
-  res: Response<ApiResponse<{ id: string; email: string; username: string }>>,
+  res: Response<ApiResponse<UpdateAuthProfileResponse>>,
   next: NextFunction
 ) {
   try {
@@ -243,7 +237,8 @@ export async function updateProfile(
       return sendError(res, "Unauthorized", 401);
     }
 
-    const parsed = UpdateProfileSchema.parse(req.body);
+    const parsed: UpdateAuthProfileRequest =
+      UpdateAuthProfileRequestSchema.parse(req.body);
     const username = normalizeUsername(parsed.username);
 
     if (!isValidUsername(username)) {
@@ -279,11 +274,14 @@ export async function updateProfile(
       [username, authUser.id]
     );
 
-    return sendSuccess(res, {
-      id: updated.rows[0].id,
-      email: updated.rows[0].email,
-      username: updated.rows[0].username ?? username,
-    });
+    return sendSuccess(
+      res,
+      UpdateAuthProfileResponseSchema.parse({
+        id: updated.rows[0].id,
+        email: updated.rows[0].email,
+        username: updated.rows[0].username ?? username,
+      })
+    );
   } catch (error) {
     next(error);
   }
@@ -403,7 +401,7 @@ export async function changePassword(
       return sendError(res, "Unauthorized", 401);
     }
 
-    const { current_password, new_password } =
+    const { current_password, new_password }: ChangePasswordRequest =
       ChangePasswordRequestSchema.parse(req.body);
 
     const result = await pool.query<UserRow>(

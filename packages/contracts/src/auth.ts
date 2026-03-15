@@ -30,6 +30,46 @@ export const AuthUserSchema = z.object({
 
 export type AuthUser = z.infer<typeof AuthUserSchema>;
 
+export const AuthProviderSchema = z.enum(["google", "github", "password"]);
+export type AuthProvider = z.infer<typeof AuthProviderSchema>;
+
+export const AuthProfileSchema = z.object({
+  id: z.string().uuid(),
+  email: z.string().email(),
+  username: z.string().nullable(),
+  provider: AuthProviderSchema,
+  created_at: z.string().nullable().optional(),
+});
+
+export type AuthProfile = z.infer<typeof AuthProfileSchema>;
+
+export const UpdateAuthProfileRequestSchema = z.object({
+  username: z.string(),
+});
+
+export type UpdateAuthProfileRequest = z.infer<
+  typeof UpdateAuthProfileRequestSchema
+>;
+
+export const UpdateAuthProfileResponseSchema = z.object({
+  id: z.string().uuid(),
+  email: z.string().email(),
+  username: z.string(),
+});
+
+export type UpdateAuthProfileResponse = z.infer<
+  typeof UpdateAuthProfileResponseSchema
+>;
+
+export const ChangePasswordRequestSchema = z.object({
+  current_password: z.string().min(1),
+  new_password: z.string().min(8),
+});
+
+export type ChangePasswordRequest = z.infer<
+  typeof ChangePasswordRequestSchema
+>;
+
 /* =========================
    RESPONSES
 ========================= */

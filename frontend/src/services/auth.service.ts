@@ -1,10 +1,14 @@
 import api from "./api.service";
 import type {
+  AuthProfile,
   AuthResponse,
+  ChangePasswordRequest,
   LoginRequest,
   MeResponse,
   PublicProfileResponse,
   RegisterRequest,
+  UpdateAuthProfileRequest,
+  UpdateAuthProfileResponse,
   UsernameAvailabilityResponse,
 } from "@quantlab/contracts";
 
@@ -20,22 +24,14 @@ export function getMe(): Promise<MeResponse> {
   return api.get<MeResponse>("/auth/me");
 }
 
-export type AuthProfile = {
-  id: string;
-  email: string;
-  username: string | null;
-  provider: "google" | "github" | "password";
-  created_at?: string | null;
-};
-
 export function getAuthProfile(): Promise<AuthProfile> {
   return api.get<AuthProfile>("/auth/profile");
 }
 
-export function updateAuthProfile(payload: {
-  username: string;
-}): Promise<{ id: string; email: string; username: string }> {
-  return api.put<{ id: string; email: string; username: string }>(
+export function updateAuthProfile(
+  payload: UpdateAuthProfileRequest
+): Promise<UpdateAuthProfileResponse> {
+  return api.put<UpdateAuthProfileResponse>(
     "/auth/profile",
     payload
   );
@@ -55,9 +51,8 @@ export function getPublicProfile(
   return api.get<PublicProfileResponse>(`/auth/profile/${username}`);
 }
 
-export function changePassword(payload: {
-  current_password: string;
-  new_password: string;
-}): Promise<{ message: string }> {
+export function changePassword(
+  payload: ChangePasswordRequest
+): Promise<{ message: string }> {
   return api.post<{ message: string }>("/auth/change-password", payload);
 }

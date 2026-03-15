@@ -14,11 +14,7 @@ import type {
   NameType,
   ValueType,
 } from "recharts/types/component/DefaultTooltipContent";
-
-type EquityPoint = {
-  timestamp: number;
-  equity: number;
-};
+import type { EquityPoint } from "@quantlab/contracts";
 
 type Props = {
   equity: EquityPoint[];

@@ -16,17 +16,12 @@ import {
   type PaperEngineActionResult,
   type StartPaperEngineRequest,
 } from "@quantlab/contracts";
+import type { EngineErrorPayload } from "../types/engine";
 
 const engineClient = axios.create({
   baseURL: env.ENGINE_URL,
   timeout: 30000,
 });
-
-type EngineErrorPayload = {
-  detail?: string;
-  error?: string | { message?: string };
-  message?: string;
-};
 
 function unwrapEngineResult<T>(value: T | { success: true; data: T }): T {
   return typeof value === "object" && value !== null && "success" in value
