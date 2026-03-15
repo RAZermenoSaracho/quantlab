@@ -75,6 +75,25 @@ function createAdvancedParameterRow(
   };
 }
 
+function getParameterInputStep(
+  name: StrategyParameterKey | "",
+  value: string
+): number | "any" {
+  if (!name) {
+    return "any";
+  }
+
+  const definition = STRATEGY_PARAMETERS[name];
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return definition.step;
+  }
+
+  const offset = (numericValue - definition.min) / definition.step;
+  const isStepAligned = Number.isFinite(offset) && Math.abs(offset - Math.round(offset)) < 1e-9;
+  return isStepAligned ? definition.step : "any";
+}
+
 function makeCondition(signalVar: string, rule: RuleConfig): string {
   return `${signalVar} ${rule.operator} ${Number(rule.value)}`;
 }
@@ -986,7 +1005,7 @@ ${templateLogicBlock}
                             event.target.value
                           )
                         }
-                        step={row.name ? STRATEGY_PARAMETERS[row.name].step : "any"}
+                        step={getParameterInputStep(row.name, row.value)}
                         min={row.name ? STRATEGY_PARAMETERS[row.name].min : undefined}
                         max={row.name ? STRATEGY_PARAMETERS[row.name].max : undefined}
                         className="form-input"
