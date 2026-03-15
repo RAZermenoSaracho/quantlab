@@ -26,6 +26,81 @@ SUB_MINUTE_TIMEFRAMES = {"1s", "5s", "15s", "30s"}
 logger = logging.getLogger("quantlab.backtest")
 
 
+def _indicator_series_override_is_symbol_map(
+    indicator_series_override: Any,
+) -> bool:
+    if not isinstance(indicator_series_override, dict) or not indicator_series_override:
+        return False
+    return all(isinstance(series, dict) for series in indicator_series_override.values())
+
+
+def _log_backtest_input_summary(
+    *,
+    exchange: str,
+    symbol: str,
+    timeframe: str,
+    start_date: str,
+    end_date: str,
+    initial_balance: float,
+    fee_rate: Optional[float],
+    override_params: Optional[Dict[str, Any]],
+    config: Any,
+) -> None:
+    logger.info(
+        "Backtest inputs exchange=%s symbol=%s timeframe=%s start=%s end=%s "
+        "initial_balance=%s fee_rate=%s direction=%s execution_model=%s "
+        "stop_fill_model=%s slippage_bps=%s min_bars=%s lookback_window=%s "
+        "volume_window=%s volatility_window=%s fast_ma_window=%s slow_ma_window=%s "
+        "rsi_window=%s override_params=%s",
+        exchange,
+        symbol,
+        timeframe,
+        start_date,
+        end_date,
+        initial_balance,
+        fee_rate,
+        getattr(config, "direction", "long_only"),
+        getattr(config, "execution_model", "next_open"),
+        getattr(config, "stop_fill_model", "stop_price"),
+        getattr(config, "slippage_bps", 0.0),
+        getattr(config, "min_bars", 0),
+        getattr(config, "lookback_window", 0),
+        getattr(config, "volume_window", 0),
+        getattr(config, "volatility_window", 0),
+        getattr(config, "fast_ma_window", 0),
+        getattr(config, "slow_ma_window", 0),
+        getattr(config, "rsi_window", 0),
+        dict(override_params or {}),
+    )
+    logger.info(
+        "Backtest config params: %s",
+        dict(getattr(config, "params", {}) or {}),
+    )
+
+
+def _log_backtest_candle_summary(
+    *,
+    symbol: str,
+    timeframe: str,
+    symbol_candles: Dict[str, list[dict[str, float]]],
+    first_ts: Optional[int],
+    last_ts: Optional[int],
+    used_overrides: bool,
+) -> None:
+    total_candles = sum(len(candles) for candles in symbol_candles.values())
+    logger.info(
+        "Backtest candle summary symbol=%s timeframe=%s symbols=%s candle_count=%s "
+        "first_ts=%s last_ts=%s source=%s",
+        symbol,
+        timeframe,
+        list(symbol_candles.keys()),
+        total_candles,
+        first_ts,
+        last_ts,
+        "override" if used_overrides else "fetched",
+    )
+
+
 # ============================================================
 # Signal normalization (backward compatible)
 # ============================================================
@@ -797,6 +872,17 @@ def run_backtest(
             **dict(config_used or {}),
             "params": dict(merged_params),
         }
+    _log_backtest_input_summary(
+        exchange=exchange,
+        symbol=symbol,
+        timeframe=timeframe,
+        start_date=start_date,
+        end_date=end_date,
+        initial_balance=initial_balance,
+        fee_rate=fee_rate,
+        override_params=override_params,
+        config=config,
+    )
 
     direction = str(getattr(config, "direction", "long_only"))
     execution_model = str(getattr(config, "execution_model", "next_open"))  # "same_close" | "next_open"
@@ -884,6 +970,14 @@ def run_backtest(
             end_date=end_date,
             config=config,
         )
+    _log_backtest_candle_summary(
+        symbol=symbol,
+        timeframe=timeframe,
+        symbol_candles=symbol_candles,
+        first_ts=first_ts,
+        last_ts=last_ts,
+        used_overrides=isinstance(candles_override, dict),
+    )
 
     if len(symbols) > 1:
 
@@ -1490,10 +1584,9 @@ def run_backtest(
     if not candles:
         raise Exception("No candles returned for the selected period.")
 
-    if isinstance(indicator_series_override, dict) and not any(
-        isinstance(value, list) and value and isinstance(value[0], dict)
-        for value in indicator_series_override.values()
-    ):
+    if _indicator_series_override_is_symbol_map(indicator_series_override):
+        indicator_series = dict(symbol_indicator_series.get(single_symbol, {}))
+    elif isinstance(indicator_series_override, dict):
         indicator_series = dict(indicator_series_override)
     else:
         indicator_series = dict(symbol_indicator_series.get(single_symbol, {}))

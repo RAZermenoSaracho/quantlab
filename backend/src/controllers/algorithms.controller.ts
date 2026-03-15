@@ -446,6 +446,8 @@ export async function getAlgorithmRuns(
         | "created_at"
         | "start_date"
         | "end_date"
+        | "initial_balance"
+        | "fee_rate"
         | "total_return_percent"
         | "total_return_usdt"
         | "sharpe_ratio"
@@ -454,6 +456,7 @@ export async function getAlgorithmRuns(
       `
       SELECT r.id, r.exchange, r.symbol, r.timeframe, r.status,
              r.created_at, r.start_date, r.end_date,
+             r.initial_balance, r.fee_rate,
              m.total_return_percent,
              m.total_return_usdt,
              m.sharpe_ratio
@@ -527,6 +530,9 @@ export async function getAlgorithmRuns(
         created_at: toIsoString(row.created_at),
         start_date: row.start_date ? toIsoString(row.start_date) : null,
         end_date: row.end_date ? toIsoString(row.end_date) : null,
+        initial_balance:
+          row.initial_balance != null ? Number(row.initial_balance) : null,
+        fee_rate: row.fee_rate != null ? Number(row.fee_rate) : null,
         total_return_percent:
           row.total_return_percent != null
             ? Number(row.total_return_percent)

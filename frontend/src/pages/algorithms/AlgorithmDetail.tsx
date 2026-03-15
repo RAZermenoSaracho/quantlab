@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import {
+  STRATEGY_PARAMETERS,
+  type StrategyParameterKey,
+} from "@quantlab/contracts";
 import type {
   AlgorithmBacktestRun,
   AlgorithmPaperRun,
@@ -7,13 +11,18 @@ import type {
   OptimizerRunResult,
 } from "@quantlab/contracts";
 import DetailNavigator from "../../components/navigation/DetailNavigator";
+import ConfigSpecification from "../../components/algorithms/ConfigSpecification";
+import EngineRequirements from "../../components/algorithms/EngineRequirements";
 import { useAuth } from "../../context/AuthProvider";
+import SandboxRules from "../../components/algorithms/SandboxRules";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import ListView, { type ListColumn } from "../../components/ui/ListView";
 import AlgorithmWorkspace from "../../components/algorithms/AlgorithmWorkspace";
 import PerformanceScore from "../../components/algorithms/PerformanceScore";
 import Button from "../../components/ui/Button";
 import KpiCard from "../../components/ui/KpiCard";
+import OptimizerDocumentation from "../../components/docs/OptimizerDocumentation";
+import StrategyParametersDocs from "../../components/docs/StrategyParametersDocs";
 import { formatDateTime } from "../../utils/date";
 import {
   useAlgorithm,
@@ -25,37 +34,34 @@ import {
   useUpdateAlgorithmMutation,
 } from "../../data/algorithms";
 import { useExchanges, useSymbols } from "../../data/market";
+import {
+  extractRegisteredParamsFromCode,
+  formatStrategyParameterNumber,
+  replaceExistingParamsInCode,
+} from "../../utils/strategyParams";
 
-type Tab = "overview" | "backtests" | "paper" | "optimizer";
-type MobileTab = "overview" | "code" | "backtests" | "paper" | "optimizer";
+type Tab = "overview" | "backtests" | "paper" | "optimizer" | "docs";
+type MobileTab = "overview" | "code" | "backtests" | "paper" | "optimizer" | "docs";
 type OptimizerParamRow = {
   id: string;
-  name: string;
+  name: StrategyParameterKey | "";
   min: string;
   max: string;
   step: string;
 };
-type DetectedOptimizerParam = {
-  name: string;
-  value: number | string | boolean | null;
-};
+const STRATEGY_PARAMETER_NAMES = Object.keys(
+  STRATEGY_PARAMETERS
+) as StrategyParameterKey[];
 
-function createOptimizerParamRow(): OptimizerParamRow {
+function createOptimizerParamRow(name: StrategyParameterKey | "" = ""): OptimizerParamRow {
+  const definition = name ? STRATEGY_PARAMETERS[name] : null;
   return {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    name: "",
-    min: "",
-    max: "",
-    step: "",
+    name,
+    min: definition ? formatStrategyParameterNumber(definition.min) : "",
+    max: definition ? formatStrategyParameterNumber(definition.max) : "",
+    step: definition ? formatStrategyParameterNumber(definition.step) : "",
   };
-}
-
-function formatOptimizerNumber(value: number): string {
-  if (!Number.isFinite(value)) {
-    return "";
-  }
-
-  return Number(value.toFixed(6)).toString();
 }
 
 function getErrorMessage(error: unknown, fallback: string) {
@@ -111,133 +117,12 @@ function buildRangeValues(minRaw: string, maxRaw: string, stepRaw: string): numb
   return values;
 }
 
-function parseParamLiteral(raw: string): number | string | boolean | null {
-  const trimmed = raw.trim().replace(/,+$/, "");
-
-  if (/^[-+]?\d*\.?\d+(e[-+]?\d+)?$/i.test(trimmed)) {
-    return Number(trimmed);
-  }
-
-  if (trimmed === "True") return true;
-  if (trimmed === "False") return false;
-  if (trimmed === "None" || trimmed === "null") return null;
-
-  const quoted = trimmed.match(/^["']([\s\S]*)["']$/);
-  if (quoted) {
-    return quoted[1];
-  }
-
-  return trimmed;
-}
-
-function extractOptimizerParamsFromCode(code: string): DetectedOptimizerParam[] {
-  if (!code.trim()) {
-    return [];
-  }
-
-  const paramsMatch = code.match(/["']params["']\s*:\s*\{([\s\S]*?)\n?\s*\}/m);
-  if (!paramsMatch) {
-    return [];
-  }
-
-  const body = paramsMatch[1];
-  const matches = body.matchAll(/["']([^"']+)["']\s*:\s*([^,\n}]+)/g);
-  const detected: DetectedOptimizerParam[] = [];
-
-  for (const match of matches) {
-    const name = match[1]?.trim();
-    const rawValue = match[2]?.trim();
-
-    if (!name || !rawValue) {
-      continue;
-    }
-
-    detected.push({
-      name,
-      value: parseParamLiteral(rawValue),
-    });
-  }
-
-  return detected;
-}
-
-function roundToStep(value: number, step: number, direction: "up" | "down"): number {
-  const ratio = value / step;
-  const rounded =
-    direction === "up" ? Math.ceil(ratio + 1e-9) : Math.floor(ratio - 1e-9);
-  return rounded * step;
-}
-
-function suggestOptimizerRange(
-  name: string,
-  value: number | string | boolean | null
-): Pick<OptimizerParamRow, "min" | "max" | "step"> {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return { min: "", max: "", step: "" };
-  }
-
-  const normalizedName = name.toLowerCase();
-  const absValue = Math.abs(value);
-
-  if (normalizedName.includes("pct") || normalizedName.includes("percent")) {
-    const step = absValue >= 50 ? 5 : absValue >= 10 ? 2 : 1;
-    const min = Math.max(0, roundToStep(value - 25, step, "down"));
-    const max = Math.min(100, roundToStep(value + 5, step, "up"));
-    return {
-      min: formatOptimizerNumber(min),
-      max: formatOptimizerNumber(max),
-      step: formatOptimizerNumber(step),
-    };
-  }
-
-  if (normalizedName.includes("bps")) {
-    const step = Math.max(1, roundToStep(Math.max(absValue * 0.25, 1), 1, "up"));
-    const min = roundToStep(Math.max(0, value - step * 3), step, "down");
-    const max = roundToStep(value + step * 6, step, "up");
-    return {
-      min: formatOptimizerNumber(min),
-      max: formatOptimizerNumber(max),
-      step: formatOptimizerNumber(step),
-    };
-  }
-
-  if (absValue < 1) {
-    const span = Math.max(absValue * 0.5, 0.01);
-    const step = span <= 0.01 ? 0.002 : 0.005;
-    return {
-      min: formatOptimizerNumber(value - span),
-      max: formatOptimizerNumber(value + span),
-      step: formatOptimizerNumber(step),
-    };
-  }
-
-  if (absValue <= 10) {
-    const step = absValue >= 2 ? 0.25 : 0.2;
-    const span = Math.max(1, roundToStep(absValue * 0.4, step, "up"));
-    return {
-      min: formatOptimizerNumber(roundToStep(value - span, step, "down")),
-      max: formatOptimizerNumber(roundToStep(value + span, step, "up")),
-      step: formatOptimizerNumber(step),
-    };
-  }
-
-  const step = Math.max(1, roundToStep(absValue * 0.1, 1, "up"));
-  const span = Math.max(step * 3, roundToStep(absValue * 0.5, step, "up"));
-  return {
-    min: formatOptimizerNumber(roundToStep(value - span, step, "down")),
-    max: formatOptimizerNumber(roundToStep(value + span, step, "up")),
-    step: formatOptimizerNumber(step),
-  };
-}
-
 function createOptimizerRowsFromDetectedParams(
-  detectedParams: DetectedOptimizerParam[]
+  detectedParams: Partial<Record<StrategyParameterKey, number>>
 ): OptimizerParamRow[] {
-  return detectedParams.map((param) => ({
-    id: `${param.name}-${Math.random().toString(36).slice(2, 8)}`,
-    name: param.name,
-    ...suggestOptimizerRange(param.name, param.value),
-  }));
+  return Object.keys(detectedParams).map((name) =>
+    createOptimizerParamRow(name as StrategyParameterKey)
+  );
 }
 
 function areOptimizerRowsEmpty(rows: OptimizerParamRow[]): boolean {
@@ -250,45 +135,6 @@ function areOptimizerRowsEmpty(rows: OptimizerParamRow[]): boolean {
   );
 }
 
-function formatPythonLiteral(value: string | number | boolean | null): string {
-  if (typeof value === "string") {
-    return JSON.stringify(value);
-  }
-  if (typeof value === "boolean") {
-    return value ? "True" : "False";
-  }
-  if (value === null) {
-    return "None";
-  }
-  return String(value);
-}
-
-function applyOptimizedParamsToCode(
-  sourceCode: string,
-  params: Record<string, string | number | boolean | null>
-): string {
-  const paramsBlockMatch = sourceCode.match(/(["']params["']\s*:\s*\{)([\s\S]*?)(\n?\s*\})/m);
-  if (!paramsBlockMatch) {
-    return sourceCode;
-  }
-
-  let updatedParamsBlock = paramsBlockMatch[2];
-  for (const [name, value] of Object.entries(params)) {
-    const keyPattern = new RegExp(
-      `((["'])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\2\\s*:\\s*)([^,\\n}]+)`,
-      "g"
-    );
-    updatedParamsBlock = updatedParamsBlock.replace(
-      keyPattern,
-      `$1${formatPythonLiteral(value)}`
-    );
-  }
-
-  return sourceCode.replace(
-    paramsBlockMatch[0],
-    `${paramsBlockMatch[1]}${updatedParamsBlock}${paramsBlockMatch[3]}`
-  );
-}
 
 function classifyMetric(
   name: string,
@@ -389,9 +235,51 @@ export default function AlgorithmDetail() {
   const isOwner = Boolean(algorithm && user && algorithm.user_id === user.id);
   const canOpenRunDetails = isAuthenticated && isOwner;
   const detectedOptimizerParams = useMemo(
-    () => extractOptimizerParamsFromCode(algorithm?.code ?? ""),
+    () => extractRegisteredParamsFromCode(algorithm?.code ?? ""),
     [algorithm?.code]
   );
+  const detectedOptimizerParamCount = useMemo(
+    () => Object.keys(detectedOptimizerParams).length,
+    [detectedOptimizerParams]
+  );
+  const optimizerBaselineContext = useMemo(() => {
+    const normalizedExchange = optimizerExchange.trim().toLowerCase();
+    const normalizedSymbol = optimizerSymbol.trim().toUpperCase();
+
+    if (!normalizedExchange || !normalizedSymbol) {
+      return null;
+    }
+
+    const matchingRun = backtests.find((run) => {
+      if (run.status !== "COMPLETED") {
+        return false;
+      }
+
+      return (
+        String(run.exchange ?? "").trim().toLowerCase() === normalizedExchange &&
+        String(run.symbol ?? "").trim().toUpperCase() === normalizedSymbol &&
+        Boolean(run.timeframe) &&
+        run.initial_balance != null &&
+        Boolean(run.start_date) &&
+        Boolean(run.end_date)
+      );
+    });
+
+    if (!matchingRun) {
+      return null;
+    }
+
+    return {
+      timeframe: matchingRun.timeframe,
+      initial_balance: Number(matchingRun.initial_balance),
+      start_date: String(matchingRun.start_date),
+      end_date: String(matchingRun.end_date),
+      fee_rate:
+        matchingRun.fee_rate != null
+          ? Number(matchingRun.fee_rate)
+          : null,
+    };
+  }, [backtests, optimizerExchange, optimizerSymbol]);
 
   const averageBacktestMetrics = useMemo(() => {
     const annualizedFromBacktest = (item: AlgorithmBacktestRun): number => {
@@ -465,7 +353,7 @@ export default function AlgorithmDetail() {
   }, [algorithm]);
 
   useEffect(() => {
-    if (!detectedOptimizerParams.length) {
+    if (detectedOptimizerParamCount === 0) {
       return;
     }
 
@@ -571,9 +459,25 @@ export default function AlgorithmDetail() {
     value: string
   ) {
     setOptimizerRows((current) =>
-      current.map((row) =>
-        row.id === rowId ? { ...row, [field]: value } : row
-      )
+      current.map((row) => {
+        if (row.id !== rowId) {
+          return row;
+        }
+
+        if (field === "name") {
+          const nextName = value as StrategyParameterKey | "";
+          const definition = nextName ? STRATEGY_PARAMETERS[nextName] : null;
+          return {
+            ...row,
+            name: nextName,
+            min: definition ? formatStrategyParameterNumber(definition.min) : "",
+            max: definition ? formatStrategyParameterNumber(definition.max) : "",
+            step: definition ? formatStrategyParameterNumber(definition.step) : "",
+          };
+        }
+
+        return { ...row, [field]: value };
+      })
     );
   }
 
@@ -623,6 +527,7 @@ export default function AlgorithmDetail() {
         exchange: optimizerExchange,
         symbol: optimizerSymbol,
         paramSpace,
+        baseline: optimizerBaselineContext ?? undefined,
       });
       setOptimizerResult(ranking);
     } catch (err: unknown) {
@@ -639,7 +544,7 @@ export default function AlgorithmDetail() {
     setApplyingRank(result.rank);
 
     try {
-      const updatedCode = applyOptimizedParamsToCode(code, result.params);
+      const updatedCode = replaceExistingParamsInCode(code, result.params);
       const updatedAlgorithm = await updateMutation.mutate({
         code: updatedCode,
       });
@@ -755,7 +660,14 @@ export default function AlgorithmDetail() {
       key: "rank",
       header: "Rank",
       render: (result) => (
-        <span className="font-semibold text-white">#{result.rank}</span>
+        <div className="space-y-1">
+          <span className="font-semibold text-white">#{result.rank}</span>
+          {result.is_baseline && (
+            <div className="text-xs font-medium text-amber-300">
+              Current Strategy
+            </div>
+          )}
+        </div>
       ),
     },
     {
@@ -806,11 +718,12 @@ export default function AlgorithmDetail() {
         <Button
           variant="OUTLINE"
           size="sm"
+          disabled={result.is_baseline}
           loading={applyingRank === result.rank}
           loadingText="Applying..."
           onClick={() => handleApplyOptimizedParams(result)}
         >
-          Apply
+          {result.is_baseline ? "Current" : "Apply"}
         </Button>
       ),
     },
@@ -827,7 +740,7 @@ export default function AlgorithmDetail() {
           <div>
             <h3 className="text-white font-semibold">Auto-Optimizer</h3>
             <p className="text-sm text-slate-400">
-              Runs a grid search over `CONFIG["params"]` on the selected market using a fixed 1h timeframe and the last 1 year of data.
+              Runs a grid search over `CONFIG["params"]` on the selected market. When a matching completed backtest exists, the baseline reuses that exact timeframe, date range, initial balance, and fee rate; otherwise it falls back to 1h over the last year.
             </p>
           </div>
           <Button
@@ -904,58 +817,73 @@ export default function AlgorithmDetail() {
             </label>
           </div>
 
-          {detectedOptimizerParams.length > 0 && (
+          {detectedOptimizerParamCount > 0 && (
             <p className="text-xs text-slate-500">
-              Detected parameters from `CONFIG["params"]`. Suggested ranges are editable before you run the optimizer.
+              Existing strategy parameters were matched against the shared registry. Registry ranges are editable before you run the optimizer.
             </p>
           )}
 
           {optimizerRows.map((row) => (
-            <div key={row.id} className="grid grid-cols-1 gap-3 md:grid-cols-[1.6fr_repeat(3,minmax(0,1fr))_auto]">
-              <input
-                value={row.name}
-                onChange={(event) => updateOptimizerRow(row.id, "name", event.target.value)}
-                placeholder="parameter name"
-                readOnly={Boolean(detectedOptimizerParams.length)}
-                className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-sky-500 focus:outline-none read-only:cursor-default read-only:opacity-80"
-              />
-              <input
-                value={row.min}
-                onChange={(event) => updateOptimizerRow(row.id, "min", event.target.value)}
-                placeholder="min"
-                inputMode="decimal"
-                className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
-              />
-              <input
-                value={row.max}
-                onChange={(event) => updateOptimizerRow(row.id, "max", event.target.value)}
-                placeholder="max"
-                inputMode="decimal"
-                className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
-              />
-              <input
-                value={row.step}
-                onChange={(event) => updateOptimizerRow(row.id, "step", event.target.value)}
-                placeholder="step"
-                inputMode="decimal"
-                className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
-              />
-              <Button
-                variant="GHOST"
-                size="sm"
-                className="justify-center"
-                onClick={() => removeOptimizerRow(row.id)}
-              >
-                Remove
-              </Button>
-            </div>
+            (() => {
+              const selectedNames = new Set(
+                optimizerRows
+                  .filter((item) => item.id !== row.id && item.name)
+                  .map((item) => item.name)
+              );
+
+              return (
+                <div key={row.id} className="grid grid-cols-1 gap-3 md:grid-cols-[1.6fr_repeat(3,minmax(0,1fr))_auto]">
+                  <select
+                    value={row.name}
+                    onChange={(event) => updateOptimizerRow(row.id, "name", event.target.value)}
+                    className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white focus:border-sky-500 focus:outline-none"
+                  >
+                    <option value="">Select parameter</option>
+                    {STRATEGY_PARAMETER_NAMES.filter(
+                      (name) => !selectedNames.has(name) || name === row.name
+                    ).map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    value={row.min}
+                    onChange={(event) => updateOptimizerRow(row.id, "min", event.target.value)}
+                    placeholder="min"
+                    inputMode="decimal"
+                    className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
+                  />
+                  <input
+                    value={row.max}
+                    onChange={(event) => updateOptimizerRow(row.id, "max", event.target.value)}
+                    placeholder="max"
+                    inputMode="decimal"
+                    className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
+                  />
+                  <input
+                    value={row.step}
+                    onChange={(event) => updateOptimizerRow(row.id, "step", event.target.value)}
+                    placeholder="step"
+                    inputMode="decimal"
+                    className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
+                  />
+                  <Button
+                    variant="GHOST"
+                    size="sm"
+                    className="justify-center"
+                    onClick={() => removeOptimizerRow(row.id)}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              );
+            })()
           ))}
 
-          {!detectedOptimizerParams.length && (
-            <Button variant="OUTLINE" size="sm" onClick={addOptimizerRow}>
-              Add Parameter
-            </Button>
-          )}
+          <Button variant="OUTLINE" size="sm" onClick={addOptimizerRow}>
+            Add Parameter
+          </Button>
         </div>
 
         {optimizerError && (
@@ -971,6 +899,11 @@ export default function AlgorithmDetail() {
                 <div>
                   Baseline: {optimizerResult.baseline.symbol} {optimizerResult.baseline.timeframe} on {optimizerResult.baseline.exchange} from{" "}
                   {formatDateTime(optimizerResult.baseline.start_date)} to {formatDateTime(optimizerResult.baseline.end_date)}
+                </div>
+              )}
+              {optimizerResult.results[0]?.is_baseline && (
+                <div className="mt-2 font-medium text-amber-300">
+                  Current parameters outperform tested combinations.
                 </div>
               )}
               <div>
@@ -1080,7 +1013,7 @@ export default function AlgorithmDetail() {
       </div>
 
       <div className="lg:hidden flex gap-2 overflow-x-auto whitespace-nowrap border-b border-slate-800 p-2 text-sm">
-        {(["overview", "code", "backtests", "optimizer", "paper"] as MobileTab[]).map((tab) => (
+        {(["overview", "code", "backtests", "optimizer", "paper", "docs"] as MobileTab[]).map((tab) => (
           <Button
             key={tab}
             className="flex-shrink-0"
@@ -1088,27 +1021,29 @@ export default function AlgorithmDetail() {
             size="sm"
             onClick={() => setMobileTab(tab)}
           >
-            {tab === "overview" && "Overview"}
+            {tab === "overview" && "Overview (Code)"}
             {tab === "code" && codeLabel}
             {tab === "backtests" && `Backtests (${backtests.length})`}
             {tab === "optimizer" && "Optimizer"}
             {tab === "paper" && `Paper Runs (${paperRuns.length})`}
+            {tab === "docs" && "Docs"}
           </Button>
         ))}
       </div>
 
       <div className="hidden lg:flex flex-wrap gap-2 sm:gap-4 border-b border-slate-800 text-sm">
-        {(["overview", "backtests", "optimizer", "paper"] as Tab[]).map((tab) => (
+        {(["overview", "backtests", "paper", "optimizer", "docs"] as Tab[]).map((tab) => (
           <Button
             key={tab}
             variant={activeTab === tab ? "PRIMARY" : "GHOST"}
             size="sm"
             onClick={() => setActiveTab(tab)}
           >
-            {tab === "overview" && "Overview"}
+            {tab === "overview" && "Overview (Code)"}
             {tab === "backtests" && `Backtests (${backtests.length})`}
-            {tab === "optimizer" && "Optimizer"}
             {tab === "paper" && `Paper Runs (${paperRuns.length})`}
+            {tab === "optimizer" && "Optimizer"}
+            {tab === "docs" && "Docs"}
           </Button>
         ))}
       </div>
@@ -1130,6 +1065,7 @@ export default function AlgorithmDetail() {
             onChange={setCode}
             disabled={true}
             isGithub={isGithub}
+            showDocumentation={false}
           />
         </div>
       )}
@@ -1194,6 +1130,31 @@ export default function AlgorithmDetail() {
         </div>
       )}
 
+      {activeTab === "docs" && (
+        <div className="hidden lg:block space-y-6">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6 space-y-3">
+            <h3 className="text-white font-semibold">Config Specification</h3>
+            <ConfigSpecification />
+          </div>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6 space-y-3">
+            <h3 className="text-white font-semibold">Engine Requirements</h3>
+            <EngineRequirements />
+          </div>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6 space-y-3">
+            <h3 className="text-white font-semibold">Sandbox Rules</h3>
+            <SandboxRules />
+          </div>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6 space-y-3">
+            <h3 className="text-white font-semibold">Strategy Parameters</h3>
+            <StrategyParametersDocs />
+          </div>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6 space-y-3">
+            <h3 className="text-white font-semibold">Optimizer Guide</h3>
+            <OptimizerDocumentation />
+          </div>
+        </div>
+      )}
+
       {mobileTab === "overview" && (
         <div className="lg:hidden">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
@@ -1216,6 +1177,7 @@ export default function AlgorithmDetail() {
             disabled={true}
             isGithub={isGithub}
             initialDocsOpen={false}
+            showDocumentation={false}
           />
         </div>
       )}
@@ -1277,6 +1239,31 @@ export default function AlgorithmDetail() {
               canOpenRunDetails ? (run) => navigate(`/paper/${run.id}`) : undefined
             }
           />
+        </div>
+      )}
+
+      {mobileTab === "docs" && (
+        <div className="lg:hidden space-y-4">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+            <h3 className="mb-3 text-white font-semibold">Config Specification</h3>
+            <ConfigSpecification />
+          </div>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+            <h3 className="mb-3 text-white font-semibold">Engine Requirements</h3>
+            <EngineRequirements />
+          </div>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+            <h3 className="mb-3 text-white font-semibold">Sandbox Rules</h3>
+            <SandboxRules />
+          </div>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+            <h3 className="mb-3 text-white font-semibold">Strategy Parameters</h3>
+            <StrategyParametersDocs />
+          </div>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
+            <h3 className="mb-3 text-white font-semibold">Optimizer Guide</h3>
+            <OptimizerDocumentation />
+          </div>
         </div>
       )}
     </div>

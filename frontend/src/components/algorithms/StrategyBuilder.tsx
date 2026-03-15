@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
+import {
+  STRATEGY_PARAMETERS,
+  type StrategyParameterKey,
+} from "@quantlab/contracts";
 import { Card } from "../ui/Card";
 import Field from "../ui/Field";
 import Button from "../ui/Button";
+import { formatStrategyParameterNumber } from "../../utils/strategyParams";
 
 type StrategyType = "mean_reversion" | "momentum" | "trend_following" | "dca";
 type IndicatorType = "RSI" | "EMA" | "SMA";
@@ -24,6 +29,12 @@ type RuleConfig = {
 
 type Props = {
   onGenerate: (code: string) => void;
+};
+
+type AdvancedParameterRow = {
+  id: string;
+  name: StrategyParameterKey | "";
+  value: string;
 };
 
 const STRATEGY_OPTIONS: StrategyType[] = [
@@ -49,6 +60,20 @@ const PRESET_OPTIONS: ParameterPreset[] = [
 ];
 const INDICATOR_OPTIONS: IndicatorType[] = ["RSI", "EMA", "SMA"];
 const OPERATOR_OPTIONS: RuleOperator[] = [">", "<", ">=", "<="];
+const STRATEGY_PARAMETER_NAMES = Object.keys(
+  STRATEGY_PARAMETERS
+) as StrategyParameterKey[];
+
+function createAdvancedParameterRow(
+  name: StrategyParameterKey | "" = "",
+  value = ""
+): AdvancedParameterRow {
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name,
+    value,
+  };
+}
 
 function makeCondition(signalVar: string, rule: RuleConfig): string {
   return `${signalVar} ${rule.operator} ${Number(rule.value)}`;
@@ -113,6 +138,9 @@ export default function StrategyBuilder({ onGenerate }: Props) {
   const [dcaEnabled, setDcaEnabled] = useState(false);
   const [dcaSteps, setDcaSteps] = useState(3);
   const [dcaStepPct, setDcaStepPct] = useState(2.0);
+  const [advancedParameterRows, setAdvancedParameterRows] = useState<
+    AdvancedParameterRow[]
+  >([]);
   const isPresetLocked = parameterPreset !== "custom";
 
   useEffect(() => {
@@ -212,6 +240,30 @@ export default function StrategyBuilder({ onGenerate }: Props) {
     const safeMaxDD = Math.max(0, Number(strategyParameters.maxDrawdownPct));
     const safeDcaSteps = Math.max(1, Math.floor(Number(strategyParameters.dcaSteps)));
     const safeDcaStep = Math.max(0.1, Number(strategyParameters.dcaStepPct));
+    const advancedParams = advancedParameterRows.reduce<
+      Partial<Record<StrategyParameterKey, number>>
+    >((acc, row) => {
+      if (!row.name || row.value.trim() === "") {
+        return acc;
+      }
+
+      const parsed = Number(row.value);
+      if (Number.isFinite(parsed)) {
+        acc[row.name] = parsed;
+      }
+      return acc;
+    }, {});
+    const advancedParamsBlock = Object.keys(advancedParams).length
+      ? `,
+    "params": {
+${Object.entries(advancedParams)
+  .map(
+    ([name, value], index, entries) =>
+      `        "${name}": ${value}${index === entries.length - 1 ? "" : ","}`
+  )
+  .join("\n")}
+    }`
+      : "";
 
     const entryExpr = makeCondition(
       `entry_signal_${entryRule.indicator.toLowerCase()}`,
@@ -287,7 +339,7 @@ export default function StrategyBuilder({ onGenerate }: Props) {
     "max_drawdown_pct": ${safeMaxDD},
     "stop_loss_pct": ${safeStopLoss},
     "take_profit_pct": ${safeTakeProfit},
-    "trailing_stop_pct": ${safeTrailing}
+    "trailing_stop_pct": ${safeTrailing}${advancedParamsBlock}
 }
 
 LONG = "LONG"
@@ -484,6 +536,44 @@ ${templateLogicBlock}
       exitText,
     };
   }, [strategyTemplate, entryRule, exitRule]);
+
+  function addAdvancedParameterRow() {
+    setAdvancedParameterRows((current) => [...current, createAdvancedParameterRow()]);
+  }
+
+  function updateAdvancedParameterRow(
+    rowId: string,
+    field: keyof Omit<AdvancedParameterRow, "id">,
+    value: string
+  ) {
+    setAdvancedParameterRows((current) =>
+      current.map((row) => {
+        if (row.id !== rowId) {
+          return row;
+        }
+
+        if (field === "name") {
+          const nextName = value as StrategyParameterKey | "";
+          const definition = nextName ? STRATEGY_PARAMETERS[nextName] : null;
+          return {
+            ...row,
+            name: nextName,
+            value: definition
+              ? formatStrategyParameterNumber(definition.default)
+              : "",
+          };
+        }
+
+        return { ...row, [field]: value };
+      })
+    );
+  }
+
+  function removeAdvancedParameterRow(rowId: string) {
+    setAdvancedParameterRows((current) =>
+      current.filter((row) => row.id !== rowId)
+    );
+  }
 
   return (
     <Card className="space-y-5">
@@ -832,6 +922,89 @@ ${templateLogicBlock}
                 </p>
               </Field>
             </div>
+          </div>
+
+          <div className="space-y-3">
+            <h4 className="text-sm font-semibold text-slate-200">
+              Advanced Strategy Parameters
+            </h4>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-slate-400">
+                Optional registry-backed parameters are written into
+                <code> CONFIG["params"]</code> in the generated strategy.
+              </p>
+              <Button type="button" variant="OUTLINE" size="sm" onClick={addAdvancedParameterRow}>
+                Add Parameter
+              </Button>
+            </div>
+
+            {advancedParameterRows.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-500">
+                No advanced strategy parameters selected.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {advancedParameterRows.map((row) => {
+                  const selectedNames = new Set(
+                    advancedParameterRows
+                      .filter((item) => item.id !== row.id && item.name)
+                      .map((item) => item.name)
+                  );
+
+                  return (
+                    <div
+                      key={row.id}
+                      className="grid grid-cols-1 gap-3 md:grid-cols-[1.5fr_minmax(0,1fr)_auto]"
+                    >
+                      <select
+                        value={row.name}
+                        onChange={(event) =>
+                          updateAdvancedParameterRow(
+                            row.id,
+                            "name",
+                            event.target.value
+                          )
+                        }
+                        className="form-input"
+                      >
+                        <option value="">Select parameter</option>
+                        {STRATEGY_PARAMETER_NAMES.filter(
+                          (name) => !selectedNames.has(name) || name === row.name
+                        ).map((name) => (
+                          <option key={name} value={name}>
+                            {name}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="number"
+                        value={row.value}
+                        onChange={(event) =>
+                          updateAdvancedParameterRow(
+                            row.id,
+                            "value",
+                            event.target.value
+                          )
+                        }
+                        step={row.name ? STRATEGY_PARAMETERS[row.name].step : "any"}
+                        min={row.name ? STRATEGY_PARAMETERS[row.name].min : undefined}
+                        max={row.name ? STRATEGY_PARAMETERS[row.name].max : undefined}
+                        className="form-input"
+                        placeholder="Value"
+                      />
+                      <Button
+                        type="button"
+                        variant="GHOST"
+                        size="sm"
+                        onClick={() => removeAdvancedParameterRow(row.id)}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <div className="space-y-3">

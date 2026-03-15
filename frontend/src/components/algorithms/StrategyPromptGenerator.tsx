@@ -1,7 +1,12 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Card } from "../ui/Card";
 import Field from "../ui/Field";
 import Button from "../ui/Button";
+import {
+  STRATEGY_PARAMETERS,
+  type StrategyParameterKey,
+} from "@quantlab/contracts";
+import { formatStrategyParameterNumber } from "../../utils/strategyParams";
 
 type StrategyType =
   | "mean_reversion"
@@ -21,7 +26,32 @@ const STRATEGY_TYPES: StrategyType[] = [
 
 const INDICATORS: IndicatorType[] = ["RSI", "EMA", "SMA"];
 
-export default function StrategyPromptGenerator() {
+type Props = {
+  selectedParams?: Partial<Record<StrategyParameterKey, number>>;
+};
+
+type ParameterRow = {
+  id: string;
+  name: StrategyParameterKey | "";
+  value: string;
+};
+
+const PARAMETER_NAMES = Object.keys(
+  STRATEGY_PARAMETERS
+) as StrategyParameterKey[];
+
+function createParameterRow(
+  name: StrategyParameterKey | "" = "",
+  value = ""
+): ParameterRow {
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name,
+    value,
+  };
+}
+
+export default function StrategyPromptGenerator({ selectedParams = {} }: Props) {
   const [isOpen, setIsOpen] = useState(true);
   const [strategyType, setStrategyType] = useState<StrategyType>("mean_reversion");
   const [primaryIndicator, setPrimaryIndicator] = useState<IndicatorType>("RSI");
@@ -33,8 +63,93 @@ export default function StrategyPromptGenerator() {
   const [useDca, setUseDca] = useState(false);
   const [dcaSteps, setDcaSteps] = useState(3);
   const [dcaStepPct, setDcaStepPct] = useState(2);
+  const [parameterRows, setParameterRows] = useState<ParameterRow[]>(
+    Object.entries(selectedParams).map(([name, value]) =>
+      createParameterRow(
+        name as StrategyParameterKey,
+        formatStrategyParameterNumber(Number(value))
+      )
+    )
+  );
   const [prompt, setPrompt] = useState("");
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
+  const activeParams = useMemo(
+    () =>
+      parameterRows.reduce<Partial<Record<StrategyParameterKey, number>>>(
+        (acc, row) => {
+          if (!row.name || row.value.trim() === "") {
+            return acc;
+          }
+          const parsed = Number(row.value);
+          if (Number.isFinite(parsed)) {
+            acc[row.name] = parsed;
+          }
+          return acc;
+        },
+        {}
+      ),
+    [parameterRows]
+  );
+  const paramsBlock = useMemo(() => {
+    const entries = Object.entries(activeParams);
+    if (entries.length === 0) {
+      return "";
+    }
+
+    const lines = entries.map(
+      ([name, value]) => `        "${name}": ${Number(value)}`
+    );
+
+    return `,\n      "params": {\n${lines
+      .map((line, index) => `${line}${index === lines.length - 1 ? "" : ","}`)
+      .join("\n")}\n      }`;
+  }, [activeParams]);
+  const paramsDescription = useMemo(() => {
+    const entries = Object.entries(activeParams);
+    if (entries.length === 0) {
+      return "  strategy_params = {}";
+    }
+
+    return `  strategy_params = { ${entries
+      .map(([name, value]) => `${name}: ${value}`)
+      .join(", ")} }`;
+  }, [activeParams]);
+
+  function addParameterRow() {
+    setParameterRows((current) => [...current, createParameterRow()]);
+  }
+
+  function updateParameterRow(
+    rowId: string,
+    field: keyof Omit<ParameterRow, "id">,
+    value: string
+  ) {
+    setParameterRows((current) =>
+      current.map((row) => {
+        if (row.id !== rowId) {
+          return row;
+        }
+
+        if (field === "name") {
+          const nextName = value as StrategyParameterKey | "";
+          const definition = nextName ? STRATEGY_PARAMETERS[nextName] : null;
+          return {
+            ...row,
+            name: nextName,
+            value: definition
+              ? formatStrategyParameterNumber(definition.default)
+              : "",
+          };
+        }
+
+        return { ...row, [field]: value };
+      })
+    );
+  }
+
+  function removeParameterRow(rowId: string) {
+    setParameterRows((current) => current.filter((row) => row.id !== rowId));
+  }
 
   function buildPromptText() {
     const safeStopLoss = Math.max(0, Number(stopLossPct));
@@ -64,6 +179,7 @@ export default function StrategyPromptGenerator() {
   dca_enabled = ${useDca}
   dca_steps = ${safeDcaSteps}
   dca_step_pct = ${safeDcaStepPct}
+${paramsDescription}
 
   The engine calls:
 
@@ -105,7 +221,7 @@ export default function StrategyPromptGenerator() {
       "max_drawdown_pct": 20,
       "stop_loss_pct": ${safeStopLoss},
       "take_profit_pct": ${safeTakeProfit},
-      "trailing_stop_pct": 0.1
+      "trailing_stop_pct": 0.1${paramsBlock}
   }
 
   LONG = "LONG"
@@ -261,6 +377,83 @@ export default function StrategyPromptGenerator() {
             onChange={(e) => setPositionSizePct(Number(e.target.value))}
           />
         </Field>
+      </div>
+
+      <div className="space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h4 className="text-sm font-semibold text-slate-200">
+              Strategy Parameters
+            </h4>
+            <p className="mt-1 text-xs text-slate-400">
+              Added parameters are injected into <code>CONFIG["params"]</code>
+              and the generated prompt.
+            </p>
+          </div>
+          <Button type="button" variant="OUTLINE" size="sm" onClick={addParameterRow}>
+            Add Parameter
+          </Button>
+        </div>
+
+        {parameterRows.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-500">
+            No strategy parameters selected.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {parameterRows.map((row) => {
+              const selectedNames = new Set(
+                parameterRows
+                  .filter((item) => item.id !== row.id && item.name)
+                  .map((item) => item.name)
+              );
+
+              return (
+                <div
+                  key={row.id}
+                  className="grid grid-cols-1 gap-3 md:grid-cols-[1.5fr_minmax(0,1fr)_auto]"
+                >
+                  <select
+                    value={row.name}
+                    onChange={(event) =>
+                      updateParameterRow(row.id, "name", event.target.value)
+                    }
+                    className="form-input"
+                  >
+                    <option value="">Select parameter</option>
+                    {PARAMETER_NAMES.filter(
+                      (name) => !selectedNames.has(name) || name === row.name
+                    ).map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    value={row.value}
+                    onChange={(event) =>
+                      updateParameterRow(row.id, "value", event.target.value)
+                    }
+                    step={row.name ? STRATEGY_PARAMETERS[row.name].step : "any"}
+                    min={row.name ? STRATEGY_PARAMETERS[row.name].min : undefined}
+                    max={row.name ? STRATEGY_PARAMETERS[row.name].max : undefined}
+                    className="form-input"
+                    placeholder="Value"
+                  />
+                  <Button
+                    type="button"
+                    variant="GHOST"
+                    size="sm"
+                    onClick={() => removeParameterRow(row.id)}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div className="space-y-4">

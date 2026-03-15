@@ -106,6 +106,8 @@ export const AlgorithmBacktestRunSchema = BacktestRunSchema.pick({
   created_at: true,
   start_date: true,
   end_date: true,
+  initial_balance: true,
+  fee_rate: true,
   total_return_percent: true,
   total_return_usdt: true,
   sharpe_ratio: true,

@@ -20,11 +20,21 @@ export const OptimizerParamSpaceSchema = z.record(
 );
 export type OptimizerParamSpace = z.infer<typeof OptimizerParamSpaceSchema>;
 
+export const OptimizerBaselineInputSchema = z.object({
+  timeframe: MarketTimeframeSchema,
+  initial_balance: z.number().positive(),
+  start_date: z.string(),
+  end_date: z.string(),
+  fee_rate: z.number().nullable().optional(),
+});
+export type OptimizerBaselineInput = z.infer<typeof OptimizerBaselineInputSchema>;
+
 export const OptimizerRequestSchema = z.object({
   algorithmId: z.string().uuid(),
   exchange: z.string().min(1),
   symbol: z.string().min(1),
   paramSpace: OptimizerParamSpaceSchema,
+  baseline: OptimizerBaselineInputSchema.optional(),
 });
 export type OptimizerRequest = z.infer<typeof OptimizerRequestSchema>;
 
@@ -46,6 +56,7 @@ export type OptimizerEngineRequest = z.infer<typeof OptimizerEngineRequestSchema
 
 export const OptimizerRunResultSchema = z.object({
   rank: z.number().int().positive(),
+  is_baseline: z.boolean().optional(),
   params: z.record(z.string(), OptimizerParamValueSchema),
   metrics: BacktestMetricsSchema,
   analysis: BacktestAnalysisSchema.nullable().optional(),

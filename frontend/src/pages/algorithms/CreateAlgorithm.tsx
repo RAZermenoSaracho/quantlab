@@ -1,9 +1,13 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import AlgorithmWorkspace from "../../components/algorithms/AlgorithmWorkspace";
-import DocumentationPanel from "../../components/algorithms/DocumentationPanel";
+import ConfigSpecification from "../../components/algorithms/ConfigSpecification";
+import EngineRequirements from "../../components/algorithms/EngineRequirements";
+import SandboxRules from "../../components/algorithms/SandboxRules";
+import StrategyAnalyzer from "../../components/algorithms/StrategyAnalyzer";
 import StrategyBuilder from "../../components/algorithms/StrategyBuilder";
 import StrategyPromptGenerator from "../../components/algorithms/StrategyPromptGenerator";
+import StrategyParametersDocs from "../../components/docs/StrategyParametersDocs";
 import Button from "../../components/ui/Button";
 import {
   useAlgorithm,
@@ -16,7 +20,7 @@ export default function CreateAlgorithm() {
   const isEditMode = Boolean(id);
   const navigate = useNavigate();
   const [mobileTab, setMobileTab] = useState<"details" | "code" | "docs">("details");
-  const [generatorMode, setGeneratorMode] = useState<"builder" | "prompt">("builder");
+  const [generatorMode, setGeneratorMode] = useState<"builder" | "prompt" | "docs">("builder");
 
   const [name, setName] = useState("");
   const [notesHtml, setNotesHtml] = useState("");
@@ -27,7 +31,6 @@ export default function CreateAlgorithm() {
   const [loading, setLoading] = useState(false);
   const [fetchingGithubCode, setFetchingGithubCode] = useState(false);
   const [attemptedSubmit, setAttemptedSubmit] = useState(false);
-
   const { data: algorithm, loading: loadingAlgorithm, error: algorithmError } = useAlgorithm(
     isEditMode ? id ?? "" : ""
   );
@@ -227,6 +230,7 @@ export default function CreateAlgorithm() {
               Public algorithm. Private algorithms still appear in ranking and profiles, but their code and GitHub link stay hidden.
             </span>
           </label>
+
         </div>
 
         <div className={mobileTab === "code" ? "space-y-6" : "hidden lg:block lg:space-y-6"}>
@@ -247,12 +251,53 @@ export default function CreateAlgorithm() {
             >
               Prompt Generator
             </Button>
+            <Button
+              type="button"
+              variant={generatorMode === "docs" ? "PRIMARY" : "GHOST"}
+              size="sm"
+              onClick={() => setGeneratorMode("docs")}
+            >
+              Docs
+            </Button>
           </div>
 
           {generatorMode === "builder" ? (
             <StrategyBuilder onGenerate={setCode} />
-          ) : (
+          ) : generatorMode === "prompt" ? (
             <StrategyPromptGenerator />
+          ) : (
+            <div className="space-y-6 rounded-2xl border border-slate-800 bg-slate-900 p-6">
+              <div>
+                <h3 className="text-lg font-semibold text-white">Documentation</h3>
+                <p className="mt-1 text-sm text-slate-400">
+                  Reference the engine rules and supported strategy parameters while you write.
+                </p>
+              </div>
+              <section className="space-y-3">
+                <h4 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-300">
+                  Config Specification
+                </h4>
+                <ConfigSpecification />
+              </section>
+              <section className="space-y-3">
+                <h4 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-300">
+                  Engine Requirements
+                </h4>
+                <EngineRequirements />
+              </section>
+              <section className="space-y-3">
+                <h4 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-300">
+                  Sandbox Rules
+                </h4>
+                <SandboxRules />
+              </section>
+              <section className="space-y-3">
+                <h4 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-300">
+                  Strategy Parameters
+                </h4>
+                <StrategyParametersDocs />
+              </section>
+            </div>
           )}
 
           <AlgorithmWorkspace
@@ -263,12 +308,29 @@ export default function CreateAlgorithm() {
             isGithub={false}
             initialDocsOpen={false}
             showEmptyCodeError={attemptedSubmit}
+            showDocumentation={false}
           />
+
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
+            <h3 className="mb-4 text-lg font-semibold text-white">
+              Strategy Analyzer
+            </h3>
+            <StrategyAnalyzer code={code} />
+          </div>
         </div>
 
         <div className={mobileTab === "docs" ? "lg:hidden" : "hidden"}>
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-lg overflow-hidden">
-            <DocumentationPanel code={code} />
+          <div className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-lg">
+            <div>
+              <h3 className="text-lg font-semibold text-white">Documentation</h3>
+              <p className="mt-1 text-sm text-slate-400">
+                Reference the engine rules and supported strategy parameters while you write.
+              </p>
+            </div>
+            <ConfigSpecification />
+            <EngineRequirements />
+            <SandboxRules />
+            <StrategyParametersDocs />
           </div>
         </div>
 

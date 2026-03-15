@@ -11,6 +11,7 @@ export type AlgorithmWorkspaceProps = {
   isGithub?: boolean;
   initialDocsOpen?: boolean;
   showEmptyCodeError?: boolean;
+  showDocumentation?: boolean;
 };
 
 export default function AlgorithmWorkspace({
@@ -20,6 +21,7 @@ export default function AlgorithmWorkspace({
   isGithub = false,
   initialDocsOpen = true,
   showEmptyCodeError = false,
+  showDocumentation = true,
 }: AlgorithmWorkspaceProps) {
   const [docOpen, setDocOpen] = useState(initialDocsOpen);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -68,14 +70,16 @@ export default function AlgorithmWorkspace({
             </span>
           )}
 
-          <Button
-            type="button"
-            variant="GHOST"
-            size="sm"
-            onClick={() => setDocOpen((v) => !v)}
-          >
-            {docOpen ? "Hide Docs" : "Show Docs"}
-          </Button>
+          {showDocumentation && (
+            <Button
+              type="button"
+              variant="GHOST"
+              size="sm"
+              onClick={() => setDocOpen((v) => !v)}
+            >
+              {docOpen ? "Hide Docs" : "Show Docs"}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -85,7 +89,7 @@ export default function AlgorithmWorkspace({
         <div
           className={[
             "min-w-0 overflow-hidden transition-all duration-300",
-            docOpen ? "flex-[2]" : "flex-1",
+            showDocumentation && docOpen ? "flex-[2]" : "flex-1",
           ].join(" ")}
         >
           <div className="h-full min-w-0 overflow-hidden">
@@ -99,7 +103,7 @@ export default function AlgorithmWorkspace({
         </div>
 
         {/* Docs column */}
-        {docOpen && (
+        {showDocumentation && docOpen && (
           <div className="min-w-0 flex-1 bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
             <div className="h-full overflow-y-auto p-4 min-w-0 break-words">
               <DocumentationPanel code={code} />

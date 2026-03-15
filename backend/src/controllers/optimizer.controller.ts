@@ -41,17 +41,18 @@ export async function runOptimizerController(
     const endDate = new Date();
     const startDate = new Date(endDate);
     startDate.setFullYear(endDate.getFullYear() - 1);
+    const baseline = payload.baseline;
 
     const ranking = await runOptimizer(
       algorithmResult.rows[0].code,
       {
         exchange: payload.exchange,
         symbol: payload.symbol,
-        timeframe: "1h",
-        initial_balance: 1000,
-        start_date: startDate.toISOString(),
-        end_date: endDate.toISOString(),
-        fee_rate: null,
+        timeframe: baseline?.timeframe ?? "1h",
+        initial_balance: baseline?.initial_balance ?? 1000,
+        start_date: baseline?.start_date ?? startDate.toISOString(),
+        end_date: baseline?.end_date ?? endDate.toISOString(),
+        fee_rate: baseline?.fee_rate ?? null,
       },
       payload.paramSpace
     );

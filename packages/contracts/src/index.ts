@@ -8,3 +8,4 @@ export * from "./portfolio";
 export * from "./events";
 export * from "./engine";
 export * from "./optimizer";
+export * from "./strategyParameters";
