@@ -1,0 +1,14 @@
+Created a polished [ROADMAP.md](/Users/razs/projects/quantlab/ROADMAP.md) tailored to the current codebase after inspecting the backend, frontend, Python engine, database schema, contracts package, Docker setup, CI, and docs.
+
+Most important architectural recommendations:
+
+- Introduce a control plane database for global auth, tenants, subscriptions, audit logs, and public/community data.
+- Move private research data toward one isolated PostgreSQL database per tenant.
+- Stop public pages from querying private tenant tables directly; publish selected data into dedicated public tables.
+- Replace direct backend `pool` usage with tenant-aware repositories/data access.
+- Move long-running backtests, optimizations, scoring, and paper supervision to durable jobs.
+- Run user strategy code in isolated worker processes or containers before production SaaS use.
+- Add internal auth for engine-to-backend events and stronger public/private visibility tests.
+- Adopt versioned database migrations before any serious tenant migration work.
+
+I only modified `ROADMAP.md`. Existing untracked `.ai-server/` was left untouched. No tests were run because this was a documentation-only change.
