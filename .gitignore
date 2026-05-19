@@ -42,3 +42,64 @@ logs/
 *.sln
 *.sw?
 *.local
+
+# --- AI Server / agentic coding artifacts ---
+.ai-server/
+.ai-server/jobs/
+.ai-server/**/*.jsonl
+.ai-server/**/*.log
+.ai-server/**/codex-last-message.txt
+.codex/
+.codex-last-message.txt
+codex-last-message.txt
+
+# runtime logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pm2/
+
+# env files
+.env
+.env.*
+!.env.example
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# temp/cache
+tmp/
+temp/
+.tmp/
+*.tmp
+.cache/
+coverage/
+dist/
+build/
+
+# local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# archives/backups
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.bak
+*.backup
+
+# secrets
+secrets/
+keys/
+*.pem
+*.key
+
